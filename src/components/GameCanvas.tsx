@@ -44,6 +44,32 @@ import {
   parseRelayedGameplayEvent,
   type WorldRelayedGameplayEventName,
 } from '../shared/gameplayAnalyticsRelay';
+import {
+  ENEMY_COLOR_HEX,
+  MEMORY_ARENA_CONFIG,
+  MEMORY_MAP_CORE_INDICES,
+  PLAYER_COLOR_HEX,
+  advanceTriangleAi,
+  applyPlayerDamage,
+  createInitialChainState,
+  createMemoryCoreSpawners,
+  createShuffledShapeBag,
+  createTriangleAiState,
+  getSquareVolleyDirections,
+  getTriangleTelegraphVisual,
+  isEnemyFactionColor,
+  isEnemyShape,
+  isValidChainState,
+  markTrianglePlayerHit,
+  regeneratePlayerHealth,
+  registerPlayerEnemyKill,
+  takeShapeFromBag,
+  turnAngleTowards,
+  type ChainState,
+  type EnemyFactionColor,
+  type EnemyShape,
+  type TriangleAiState,
+} from '../game/memoryArena';
 
 interface ActiveMatchSettingsRequest {
   seq: number;
@@ -168,10 +194,10 @@ const DASH_COOLDOWN = 25000;
 const BUILD_COOLDOWN = 25000;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
-const SAVE_FORMAT = "ricochet-arena-save";
+const SAVE_FORMAT = "memory-arena-save";
 const SAVE_VERSION = 1;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
-const QUICK_SAVE_STORAGE_KEY = "ricochet-arena-quicksave-v1";
+const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
 const WALLS = [
   // Outer boundaries
@@ -212,7 +238,7 @@ const BASE_WALLS = [
   { x: 0, y: MAP_HEIGHT - 50, w: MAP_WIDTH, h: 50 },
 ];
 
-type MapDefinition = { name: string; difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'EXPERT'; description: string; walls: {x: number, y: number, w: number, h: number}[]; spawners: {x: number, y: number, radius: number, hp: number, maxHp: number, specialType?: string}[]; spawnPoint?: { x: number; y: number } };
+type MapDefinition = { name: string; difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'EXPERT'; description: string; walls: {x: number, y: number, w: number, h: number}[]; spawners: {x: number, y: number, radius: number, hp: number, maxHp: number, specialType?: string, factionColor?: EnemyFactionColor, isCore?: boolean}[]; spawnPoint?: { x: number; y: number } };
 
 const MAPS: Record<string, MapDefinition> = {
   medium: {
@@ -936,7 +962,76 @@ const MAPS: Record<string, MapDefinition> = {
   }
 };
 
+MAPS.memory_test = {
+  name: 'Memory Test',
+  difficulty: 'MEDIUM',
+  description: 'A focused four-faction arena for testing Memory Arena\'s core chain combat.',
+  walls: MAPS.classic_arena.walls,
+  spawners: [
+    { x: 900, y: 900, radius: 40, hp: 100, maxHp: 100, factionColor: 'red', isCore: true },
+    { x: 2100, y: 900, radius: 40, hp: 100, maxHp: 100, factionColor: 'blue', isCore: true },
+    { x: 900, y: 2100, radius: 40, hp: 100, maxHp: 100, factionColor: 'green', isCore: true },
+    { x: 2100, y: 2100, radius: 40, hp: 100, maxHp: 100, factionColor: 'yellow', isCore: true },
+  ],
+  spawnPoint: { x: 1500, y: 1200 },
+};
+
+const MEMORY_MAPS: Record<string, MapDefinition> = Object.fromEntries(
+  Object.entries(MAPS).map(([mapId, mapDefinition]) => {
+    const coreIndices = MEMORY_MAP_CORE_INDICES[mapId];
+    if (!coreIndices) throw new Error(`Missing Memory Arena core layout for ${mapId}`);
+    const coreSpawners = createMemoryCoreSpawners(mapDefinition.spawners, coreIndices);
+    const restoredExcludedRelics = MEMORY_ARENA_CONFIG.relics.enabled
+      ? mapDefinition.spawners.filter((spawner, index) => (
+          Boolean(spawner.specialType) && !coreIndices.includes(index)
+        ))
+      : [];
+    return [mapId, {
+      ...mapDefinition,
+      spawners: [...coreSpawners, ...restoredExcludedRelics],
+    }];
+  }),
+);
+
+const MEMORY_DEFAULT_MAP_ID = 'medium';
+
 let activeWalls = MAPS.medium.walls;
+
+interface MemoryEnemy {
+  id?: string;
+  x: number;
+  y: number;
+  radius: number;
+  lastShoot: number;
+  speed: number;
+  targetX?: number;
+  targetY?: number;
+  kbvx?: number;
+  kbvy?: number;
+  processedZoneKbs?: number[];
+  shape?: EnemyShape;
+  factionColor?: EnemyFactionColor;
+  angle?: number;
+  moveDx?: number;
+  moveDy?: number;
+  nextTurnAt?: number;
+  triangleAi?: TriangleAiState;
+  dashDx?: number;
+  dashDy?: number;
+}
+
+interface MemorySpawner {
+  x: number;
+  y: number;
+  radius: number;
+  hp: number;
+  maxHp: number;
+  specialType?: string;
+  factionColor?: EnemyFactionColor;
+  isCore?: boolean;
+  nextSpawnAt?: number;
+  spawnBag?: EnemyShape[];
+}
 
 function clamp(val: number, min: number, max: number) {
   return Math.max(min, Math.min(val, max));
@@ -2617,7 +2712,7 @@ export default function GameCanvas() {
     return true;
   }, []);
 
-  const [uiState, setUiState] = useState<{ status: 'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER' | 'VICTORY' | 'LOBBY'; score: number; deviceType: 'desktop' | 'mobile'; activeTool: 'weapon' | 'special' | 'build'; blocks: number; spawnersLeft: number; mapId: string; hardMode: boolean; gameMode: GameMode; buttonCounters: { special: number; build: number } }>({ status: 'MENU', score: 0, deviceType: 'desktop', activeTool: 'special', blocks: 50, spawnersLeft: 5, mapId: 'medium', hardMode: false, gameMode: 'normal', buttonCounters: { special: 0, build: 0 } });
+  const [uiState, setUiState] = useState<{ status: 'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER' | 'VICTORY' | 'LOBBY'; score: number; deviceType: 'desktop' | 'mobile'; activeTool: 'weapon' | 'special' | 'build'; blocks: number; spawnersLeft: number; mapId: string; hardMode: boolean; gameMode: GameMode; hp: number; maxHp: number; level: number; chainProgress: number; buttonCounters: { special: number; build: number } }>({ status: 'MENU', score: 0, deviceType: 'desktop', activeTool: 'special', blocks: 50, spawnersLeft: 4, mapId: MEMORY_DEFAULT_MAP_ID, hardMode: false, gameMode: 'normal', hp: MEMORY_ARENA_CONFIG.player.maxHp, maxHp: MEMORY_ARENA_CONFIG.player.maxHp, level: 1, chainProgress: 0, buttonCounters: { special: 0, build: 0 } });
   const uiRef = useRef(uiState);
   uiRef.current = uiState;
 
@@ -3091,6 +3186,21 @@ export default function GameCanvas() {
     };
   }, []);
   const [flashScore, setFlashScore] = useState(false);
+  const [chainFeedback, setChainFeedback] = useState<'reset' | 'level' | null>(null);
+  const chainFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showChainFeedback = useCallback((feedback: 'reset' | 'level') => {
+    if (chainFeedbackTimerRef.current) clearTimeout(chainFeedbackTimerRef.current);
+    setChainFeedback(feedback);
+    chainFeedbackTimerRef.current = setTimeout(() => {
+      setChainFeedback(null);
+      chainFeedbackTimerRef.current = null;
+    }, feedback === 'level' ? 1200 : 700);
+  }, []);
+
+  useEffect(() => () => {
+    if (chainFeedbackTimerRef.current) clearTimeout(chainFeedbackTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (uiState.status === 'PLAYING') {
@@ -3414,7 +3524,7 @@ export default function GameCanvas() {
   // We use a ref for the entire game state to avoid stale closures
   const initialSpawn = useRef({ x: 500, y: 500 }).current;
   const stateRef = useRef({
-    player: { x: initialSpawn.x, y: initialSpawn.y, vx: 0, vy: 0, kbvx: 0, kbvy: 0, processedZoneKbs: [] as number[], radius: PLAYER_RADIUS, lastShoot: 0, dash: { active: false, endTime: 0, targetX: 0, targetY: 0, shieldRadius: 60, lastTime: performance.now() - DASH_COOLDOWN, wasReady: true }, build: { active: false, endTime: 0, lastBlockX: 0, lastBlockY: 0, lastTime: performance.now() - BUILD_COOLDOWN }, recentBlocks: [] as { key: string, x: number, y: number, timestamp: number }[] },
+    player: { x: initialSpawn.x, y: initialSpawn.y, vx: 0, vy: 0, kbvx: 0, kbvy: 0, processedZoneKbs: [] as number[], radius: PLAYER_RADIUS, lastShoot: 0, hp: MEMORY_ARENA_CONFIG.player.maxHp, maxHp: MEMORY_ARENA_CONFIG.player.maxHp, dash: { active: false, endTime: 0, targetX: 0, targetY: 0, shieldRadius: 60, lastTime: performance.now() - DASH_COOLDOWN, wasReady: true }, build: { active: false, endTime: 0, lastBlockX: 0, lastBlockY: 0, lastTime: performance.now() - BUILD_COOLDOWN }, recentBlocks: [] as { key: string, x: number, y: number, timestamp: number }[] },
     multiplayerPlayers: {} as Record<string, { x: number, y: number, radius: number, isDash: boolean, name?: string, colorIdx?: number, isDead?: boolean, kbvx?: number, kbvy?: number, recentBlocks?: { key: string, x: number, y: number, timestamp: number }[] }>,
     matchPhase: 'PLAYING' as 'PLAYING' | 'FINAL_RUN' | 'FINISHED',
     finalRunnerId: null as string | null,
@@ -3432,8 +3542,8 @@ export default function GameCanvas() {
     forceBroadcast: false,
     blocks: [] as { x: number; y: number; size: number; createdAt: number, colorIdx?: number, ownerId?: string }[],
     nextBlockScore: 100,
-    bullets: [] as { id?: string; clientShotId?: string; x: number; y: number; dx: number; dy: number; radius: number, isPlayer: boolean, bounceCount: number, spawnTime: number, isNeutral: boolean, ownerId?: string, colorIdx?: number, targetX?: number, targetY?: number, repelMultiplied?: boolean, allowedBlockKeys?: string[], leftBlockKeys?: string[] }[],
-    enemies: [] as { id?: string; x: number; y: number; radius: number; lastShoot: number, speed: number, targetX?: number, targetY?: number, kbvx?: number, kbvy?: number, processedZoneKbs?: number[] }[],
+    bullets: [] as { id?: string; clientShotId?: string; x: number; y: number; dx: number; dy: number; radius: number, isPlayer: boolean, bounceCount: number, spawnTime: number, isNeutral: boolean, ownerId?: string, colorIdx?: number, factionColor?: EnemyFactionColor, damage?: number, targetX?: number, targetY?: number, repelMultiplied?: boolean, allowedBlockKeys?: string[], leftBlockKeys?: string[] }[],
+    enemies: [] as MemoryEnemy[],
     bouncers: [] as { id?: string; x: number; y: number; dx: number; dy: number; size: number; radius: number; speed: number; lastDirChange: number; lastMultiply: number, targetX?: number, targetY?: number, kbvx?: number, kbvy?: number, processedZoneKbs?: number[] }[],
     zones: [] as { x: number; y: number; innerRadius: number; outerRadius: number; duration: number; spawnTime: number; ownerId: string; colorIdx?: number, type?: 'repel' }[],
     nextEntityId: 1,
@@ -3444,7 +3554,7 @@ export default function GameCanvas() {
       { x: 800, y: 2200, radius: 40, hp: 100, maxHp: 100, specialType: undefined as string | undefined },
       { x: 2400, y: 2400, radius: 40, hp: 100, maxHp: 100, specialType: undefined as string | undefined },
       { x: 1500, y: 600, radius: 40, hp: 100, maxHp: 100, specialType: undefined as string | undefined }
-    ],
+    ] as MemorySpawner[],
     keys: { w: false, a: false, s: false, d: false },
     mouse: { x: 0, y: 0, worldX: 0, worldY: 0, down: false, justDown: false, rightDown: false, rightJustDown: false },
     touches: {
@@ -3464,8 +3574,48 @@ export default function GameCanvas() {
     enemySpawnRate: 3000,
     gameMode: 'normal' as GameMode,
     hardMode: false,
+    memoryMode: false,
+    chain: createInitialChainState() as ChainState,
     tutorial: { active: false, spawnerIndex: null as number | null, enemySpawned: false, timer: 0 },
   });
+
+  const damageMemoryPlayer = useCallback((damage: number, impactX: number, impactY: number, label: string) => {
+    const state = stateRef.current;
+    if (!state.memoryMode || uiRef.current.status !== 'PLAYING' || state.player.hp <= 0) return;
+    const nextHp = applyPlayerDamage(state.player.hp, damage);
+    state.player.hp = nextHp;
+    state.shake = Math.max(state.shake, 8);
+    for (let i = 0; i < 16; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 70 + Math.random() * 130;
+      state.particles.push({
+        x: impactX,
+        y: impactY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 0,
+        maxLife: 0.25 + Math.random() * 0.35,
+        color: '#ff3344',
+        radius: 1.5 + Math.random() * 2.5,
+      });
+    }
+    const nextUi = { ...uiRef.current, hp: nextHp };
+    uiRef.current = nextUi;
+    setUiState(nextUi);
+    if (nextHp <= 0) {
+      triggerEndPresentation({
+        outcome: 'defeat',
+        causeCode: 'health_depleted',
+        label,
+        impactPos: { x: impactX, y: impactY },
+        markerColor: '#ff3344',
+        startTimestamp: performance.now(),
+      });
+      const defeatedUi = { ...uiRef.current, status: 'GAME_OVER' as const, hp: 0 };
+      uiRef.current = defeatedUi;
+      setUiState(defeatedUi);
+    }
+  }, [triggerEndPresentation]);
 
   const analyticsOutcomeRecordedRef = useRef(false);
   const analyticsRelaySequenceRef = useRef(0);
@@ -4024,9 +4174,23 @@ export default function GameCanvas() {
 
     state.lastEnemySpawn += pauseDuration;
 
+    if (state.spawners) {
+      for (const spawner of state.spawners) {
+        if (spawner.nextSpawnAt !== undefined) {
+          spawner.nextSpawnAt += pauseDuration;
+        }
+      }
+    }
+
     if (state.enemies) {
       for (const enemy of state.enemies) {
         enemy.lastShoot += pauseDuration;
+        if (enemy.nextTurnAt !== undefined) {
+          enemy.nextTurnAt += pauseDuration;
+        }
+        if (enemy.triangleAi) {
+          enemy.triangleAi.phaseStartedAt += pauseDuration;
+        }
         if (enemy.processedZoneKbs) {
           for (let i = 0; i < enemy.processedZoneKbs.length; i++) {
             enemy.processedZoneKbs[i] += pauseDuration;
@@ -4133,6 +4297,8 @@ export default function GameCanvas() {
         kbvy: state.player.kbvy,
         processedZoneKbs: [...(state.player.processedZoneKbs || [])],
         radius: state.player.radius,
+        hp: state.player.hp,
+        maxHp: state.player.maxHp,
         lastShoot: state.player.lastShoot,
         dash: { ...state.player.dash },
         build: { ...state.player.build },
@@ -4205,6 +4371,11 @@ export default function GameCanvas() {
       enemySpawnRate: state.enemySpawnRate,
       gameMode: state.gameMode,
       hardMode: state.hardMode,
+      memoryMode: state.memoryMode,
+      chain: {
+        ...state.chain,
+        target: state.chain.target ? { ...state.chain.target } : null,
+      },
       tutorial: { active: false, spawnerIndex: null, enemySpawned: false, timer: 0 },
     };
 
@@ -4358,11 +4529,12 @@ export default function GameCanvas() {
     const rawUi = data.ui;
     const rawState = data.state;
 
-    if (typeof rawUi.mapId !== 'string' || !MAPS[rawUi.mapId]) {
+    const isMemorySave = rawState.memoryMode === true;
+    if (typeof rawUi.mapId !== 'string' || !(isMemorySave ? MEMORY_MAPS[rawUi.mapId] : MAPS[rawUi.mapId])) {
       throw new Error("UNKNOWN MAP");
     }
     const mapId = rawUi.mapId;
-    const mapDef = MAPS[mapId];
+    const mapDef = isMemorySave ? MEMORY_MAPS[mapId] : MAPS[mapId];
 
     if (rawUi.gameMode !== undefined && !isValidGameMode(rawUi.gameMode)) {
       throw new Error("INVALID SAVE FILE");
@@ -4401,6 +4573,19 @@ export default function GameCanvas() {
         !isBoundedNum(rawPlayer.kbvx, -10000, 10000) ||
         !isBoundedNum(rawPlayer.kbvy, -10000, 10000)) {
       throw new Error("INVALID SAVE FILE");
+    }
+
+    if (isMemorySave) {
+      if (rawState.memoryMode !== true || !isValidChainState(rawState.chain)) {
+        throw new Error("INVALID SAVE FILE");
+      }
+      if (!isBoundedNum(rawPlayer.maxHp, 1, 1_000_000) ||
+          !isBoundedNum(rawPlayer.hp, 0, rawPlayer.maxHp)) {
+        throw new Error("INVALID SAVE FILE");
+      }
+      if (rawState.chain.level > 1_000_000_000 || rawState.chain.completedChains > 1_000_000_000) {
+        throw new Error("INVALID SAVE FILE");
+      }
     }
 
     const rawEnemies = rawState.enemies;
@@ -4583,6 +4768,8 @@ export default function GameCanvas() {
       kbvy: rawPlayer.kbvy,
       processedZoneKbs,
       radius: PLAYER_RADIUS,
+      hp: isMemorySave ? rawPlayer.hp : MEMORY_ARENA_CONFIG.player.maxHp,
+      maxHp: isMemorySave ? rawPlayer.maxHp : MEMORY_ARENA_CONFIG.player.maxHp,
       lastShoot: lastShootTime,
       dash: reconstructedDash,
       build: reconstructedBuild,
@@ -4640,10 +4827,26 @@ export default function GameCanvas() {
 
         const hp = Math.floor(savedSpawner.hp);
         if (hp > 0) {
+          let nextSpawnAt: number | undefined;
+          let spawnBag: EnemyShape[] | undefined;
+          if (isMemorySave) {
+            if (!isFiniteNum(savedSpawner.nextSpawnAt)) {
+              throw new Error("INVALID SAVE FILE");
+            }
+            if (!Array.isArray(savedSpawner.spawnBag) || savedSpawner.spawnBag.length > 3 ||
+                savedSpawner.spawnBag.some((shape: unknown) => !isEnemyShape(shape)) ||
+                new Set(savedSpawner.spawnBag).size !== savedSpawner.spawnBag.length) {
+              throw new Error("INVALID SAVE FILE");
+            }
+            nextSpawnAt = adjustTime(savedSpawner.nextSpawnAt);
+            spawnBag = [...savedSpawner.spawnBag];
+          }
           tempSpawners.push({
             ...canonical,
             hp,
             maxHp,
+            nextSpawnAt,
+            spawnBag,
           });
         }
       }
@@ -4706,6 +4909,15 @@ export default function GameCanvas() {
       if (b.repelMultiplied !== undefined && typeof b.repelMultiplied !== 'boolean') {
         throw new Error("INVALID SAVE FILE");
       }
+      if (b.factionColor !== undefined && !isEnemyFactionColor(b.factionColor)) {
+        throw new Error("INVALID SAVE FILE");
+      }
+      if (b.damage !== undefined && !isBoundedNum(b.damage, 0, 1_000_000)) {
+        throw new Error("INVALID SAVE FILE");
+      }
+      if (isMemorySave && !b.isPlayer && (!isEnemyFactionColor(b.factionColor) || !isBoundedNum(b.damage, 0, 1_000_000))) {
+        throw new Error("INVALID SAVE FILE");
+      }
 
       let allowedBlockKeys: string[] | undefined = undefined;
       if (b.allowedBlockKeys !== undefined) {
@@ -4744,6 +4956,8 @@ export default function GameCanvas() {
         isNeutral: b.isNeutral,
         ownerId: b.isPlayer ? 'local' : (b.ownerId !== undefined && typeof b.ownerId === 'string' && b.ownerId.length <= 128 ? 'local' : undefined),
         colorIdx: b.colorIdx,
+        factionColor: b.factionColor,
+        damage: b.damage,
         targetX: b.targetX,
         targetY: b.targetY,
         repelMultiplied: Boolean(b.repelMultiplied),
@@ -4762,6 +4976,47 @@ export default function GameCanvas() {
       if (!isBoundedNum(e.speed, 0, 2000)) throw new Error("INVALID SAVE FILE");
       if (e.targetX !== undefined && !isFiniteNum(e.targetX)) throw new Error("INVALID SAVE FILE");
       if (e.targetY !== undefined && !isFiniteNum(e.targetY)) throw new Error("INVALID SAVE FILE");
+
+      let memoryFields: Partial<MemoryEnemy> = {};
+      if (isMemorySave) {
+        if (!isEnemyShape(e.shape) || !isEnemyFactionColor(e.factionColor) ||
+            !isBoundedNum(e.angle, -1_000_000, 1_000_000) ||
+            !isBoundedNum(e.moveDx, -1, 1) || !isBoundedNum(e.moveDy, -1, 1) ||
+            !isFiniteNum(e.nextTurnAt) || !isBoundedNum(e.dashDx, -1, 1) || !isBoundedNum(e.dashDy, -1, 1)) {
+          throw new Error("INVALID SAVE FILE");
+        }
+
+        let triangleAi: TriangleAiState | undefined;
+        if (e.shape === 'triangle') {
+          if (!isObject(e.triangleAi) ||
+              !['wander', 'telegraph', 'dash', 'recover'].includes(e.triangleAi.phase) ||
+              !isFiniteNum(e.triangleAi.phaseStartedAt) ||
+              !isBoundedNum(e.triangleAi.dashDistance, 0, 10_000) ||
+              typeof e.triangleAi.hitPlayer !== 'boolean') {
+            throw new Error("INVALID SAVE FILE");
+          }
+          triangleAi = {
+            phase: e.triangleAi.phase,
+            phaseStartedAt: adjustTime(e.triangleAi.phaseStartedAt),
+            dashDistance: e.triangleAi.dashDistance,
+            hitPlayer: e.triangleAi.hitPlayer,
+          };
+        } else if (e.triangleAi !== undefined) {
+          throw new Error("INVALID SAVE FILE");
+        }
+
+        memoryFields = {
+          shape: e.shape,
+          factionColor: e.factionColor,
+          angle: e.angle,
+          moveDx: e.moveDx,
+          moveDy: e.moveDy,
+          nextTurnAt: adjustTime(e.nextTurnAt),
+          triangleAi,
+          dashDx: e.dashDx,
+          dashDy: e.dashDy,
+        };
+      }
 
       let ekbvx = 0;
       if (e.kbvx !== undefined) {
@@ -4801,6 +5056,7 @@ export default function GameCanvas() {
         kbvx: ekbvx,
         kbvy: ekbvy,
         processedZoneKbs: enemyProcessedZoneKbs,
+        ...memoryFields,
       };
     });
 
@@ -4893,6 +5149,14 @@ export default function GameCanvas() {
     });
 
     const spawnersLeftCount = reconstructedSpawners.filter(s => (s.hp ?? 0) > 0).length;
+    const reconstructedChain: ChainState = isMemorySave
+      ? {
+          target: rawState.chain.target ? { ...rawState.chain.target } : null,
+          progress: rawState.chain.progress,
+          level: rawState.chain.level,
+          completedChains: rawState.chain.completedChains,
+        }
+      : createInitialChainState();
 
     let specialCooldown = 0;
     if (reconstructedDash.active) {
@@ -4922,6 +5186,10 @@ export default function GameCanvas() {
       mapId: mapId,
       hardMode: cleanGameMode !== 'normal',
       gameMode: cleanGameMode,
+      hp: reconstructedPlayer.hp,
+      maxHp: reconstructedPlayer.maxHp,
+      level: reconstructedChain.level,
+      chainProgress: reconstructedChain.progress,
       buttonCounters: {
         special: specialCooldown,
         build: buildCooldown,
@@ -4978,6 +5246,8 @@ export default function GameCanvas() {
       enemySpawnRate: rawState.enemySpawnRate !== undefined ? rawState.enemySpawnRate : 3000,
       gameMode: cleanGameMode,
       hardMode: cleanGameMode !== 'normal',
+      memoryMode: isMemorySave,
+      chain: reconstructedChain,
       tutorial: { active: false, spawnerIndex: null, enemySpawned: false, timer: 0 },
     };
 
@@ -5659,7 +5929,9 @@ export default function GameCanvas() {
     }
 
     const isHardMode = selectedGameMode !== 'normal';
-    const mapDef = MAPS[selectedMapId] || MAPS.classic_arena;
+    const mapDef = isMultiplayer
+      ? (MAPS[selectedMapId] || MAPS.classic_arena)
+      : (MEMORY_MAPS[selectedMapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID]);
 
     const myId = socketRef.current?.id || 'host';
     let startPos = { x: 500, y: 500 };
@@ -5690,10 +5962,11 @@ export default function GameCanvas() {
     const state = stateRef.current;
     state.gameMode = selectedGameMode;
     state.hardMode = isHardMode;
+    state.memoryMode = !isMultiplayer;
     state.nextEntityId = 1;
 
     state.tutorial = {
-      active: !isMultiplayer,
+      active: !isMultiplayer && !state.memoryMode,
       spawnerIndex: tutIdx,
       enemySpawned: false,
       timer: 0
@@ -5707,6 +5980,8 @@ export default function GameCanvas() {
     state.player.kbvy = 0;
     state.player.processedZoneKbs = [];
     state.player.lastShoot = performance.now();
+    state.player.hp = MEMORY_ARENA_CONFIG.player.maxHp;
+    state.player.maxHp = MEMORY_ARENA_CONFIG.player.maxHp;
     state.player.dash = { active: false, endTime: 0, targetX: 0, targetY: 0, shieldRadius: 60, lastTime: performance.now() - DASH_COOLDOWN, wasReady: true };
     state.player.build = { active: false, endTime: 0, lastBlockX: 0, lastBlockY: 0, lastTime: performance.now() - BUILD_COOLDOWN };
     state.blocks = [];
@@ -5720,18 +5995,30 @@ export default function GameCanvas() {
       ? Object.values(spawnAssignments)
       : [startPos];
 
-    for (let i = 0; i < 2; i++) {
-      const spawn = getSafeSpawn(mapDef.walls, 60, playerSpawnsToAvoid, 200);
-      if (spawn) {
-        const angle = Math.random() * Math.PI * 2;
-        state.bouncers.push({ id: 'b_' + state.nextEntityId++, x: spawn.x, y: spawn.y, dx: Math.cos(angle), dy: Math.sin(angle), size: 1, radius: 24, speed: ENEMY_SPEED + Math.random() * 20, lastDirChange: performance.now(), lastMultiply: performance.now() });
+    if (!state.memoryMode) {
+      for (let i = 0; i < 2; i++) {
+        const spawn = getSafeSpawn(mapDef.walls, 60, playerSpawnsToAvoid, 200);
+        if (spawn) {
+          const angle = Math.random() * Math.PI * 2;
+          state.bouncers.push({ id: 'b_' + state.nextEntityId++, x: spawn.x, y: spawn.y, dx: Math.cos(angle), dy: Math.sin(angle), size: 1, radius: 24, speed: ENEMY_SPEED + Math.random() * 20, lastDirChange: performance.now(), lastMultiply: performance.now() });
+        }
       }
     }
     state.bouncerCapacity = 2;
-    state.spawners = mapDef.spawners.map((s: any) => ({
+    const resetTime = performance.now();
+    state.spawners = mapDef.spawners.map((s: any, index: number) => ({
       ...s,
-      hp: selectedGameMode === 'impossible' ? (s.maxHp ?? s.hp ?? 100) : s.hp
+      hp: selectedGameMode === 'impossible' ? (s.maxHp ?? s.hp ?? 100) : s.hp,
+      nextSpawnAt: state.memoryMode
+        ? resetTime + MEMORY_ARENA_CONFIG.spawner.spawnStaggerMs * (index + 1)
+        : undefined,
+      spawnBag: state.memoryMode ? createShuffledShapeBag() : undefined,
     }));
+    state.chain = createInitialChainState();
+    if (state.memoryMode) {
+      playerProfileRef.current = { ...playerProfileRef.current, colorIdx: 0 };
+      setPlayerProfile(prev => ({ ...prev, colorIdx: 0 }));
+    }
     state.particles = [];
     state.trails = [];
     state.shockwaves = [];
@@ -5745,7 +6032,7 @@ export default function GameCanvas() {
     releaseAllInputs();
 
     const uiHardMode = isMultiplayer ? (selectedGameMode !== 'normal') : isHardMode;
-    const newUi = { status: 'PLAYING' as const, score: 0, deviceType: dType, activeTool: 'special' as const, blocks: 50, spawnersLeft: state.spawners.length, mapId: selectedMapId, hardMode: uiHardMode, gameMode: selectedGameMode, buttonCounters: { special: 0, build: 0 } };
+    const newUi = { status: 'PLAYING' as const, score: 0, deviceType: dType, activeTool: 'special' as const, blocks: 50, spawnersLeft: state.spawners.length, mapId: selectedMapId, hardMode: uiHardMode, gameMode: selectedGameMode, hp: state.player.hp, maxHp: state.player.maxHp, level: state.chain.level, chainProgress: state.chain.progress, buttonCounters: { special: 0, build: 0 } };
     uiRef.current = newUi;
     setUiState(newUi);
 
@@ -5864,9 +6151,9 @@ export default function GameCanvas() {
   ): boolean => {
     if (mpRef.current.roomId) return false;
 
-    // Validate/fallback the requested map and game mode using existing definitions
-    const selectedMapId = mapId && MAPS[mapId] ? mapId : (uiRef.current.mapId && MAPS[uiRef.current.mapId] ? uiRef.current.mapId : 'classic_arena');
-    const selectedGameMode: GameMode = gameMode && isValidGameMode(gameMode) ? gameMode : (uiRef.current.gameMode && isValidGameMode(uiRef.current.gameMode) ? uiRef.current.gameMode : (uiRef.current.hardMode ? 'hard' : 'normal'));
+    // Every solo map uses its four-core Memory Arena derivative.
+    const selectedMapId = mapId && MEMORY_MAPS[mapId] ? mapId : MEMORY_DEFAULT_MAP_ID;
+    const selectedGameMode: GameMode = 'normal';
 
     // Clear any active pause-feedback timeout before clearing its state
     if (feedbackTimerRef.current) {
@@ -5900,6 +6187,8 @@ export default function GameCanvas() {
       state.player.processedZoneKbs = [];
       state.player.recentBlocks = [];
       state.player.lastShoot = performance.now();
+      state.player.hp = MEMORY_ARENA_CONFIG.player.maxHp;
+      state.player.maxHp = MEMORY_ARENA_CONFIG.player.maxHp;
       state.player.dash = {
         active: false,
         endTime: 0,
@@ -5924,32 +6213,39 @@ export default function GameCanvas() {
       state.bouncers = [];
       state.zones = [];
       
-      const mapDef = MAPS[selectedMapId] || MAPS.classic_arena;
-      state.spawners = mapDef.spawners.map((s: any) => ({
+      const mapDef = MEMORY_MAPS[selectedMapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID];
+      const resetTime = performance.now();
+      state.memoryMode = true;
+      state.chain = createInitialChainState();
+      state.spawners = mapDef.spawners.map((s: any, index: number) => ({
         ...s,
-        hp: selectedGameMode === 'impossible' ? (s.maxHp ?? s.hp ?? 100) : s.hp
+        hp: s.hp,
+        nextSpawnAt: resetTime + MEMORY_ARENA_CONFIG.spawner.spawnStaggerMs * (index + 1),
+        spawnBag: createShuffledShapeBag(),
       }));
       state.nextEntityId = 1;
       state.bouncerCapacity = 2;
 
       // Re-create bouncers starting from 0 to ensure clean run
       const startPos = { x: state.player.x, y: state.player.y };
-      for (let i = 0; i < 2; i++) {
-        const spawn = getSafeSpawn(mapDef.walls, 60, [startPos], 200);
-        if (spawn) {
-          const angle = Math.random() * Math.PI * 2;
-          state.bouncers.push({
-            id: 'b_' + state.nextEntityId++,
-            x: spawn.x,
-            y: spawn.y,
-            dx: Math.cos(angle),
-            dy: Math.sin(angle),
-            size: 1,
-            radius: 24,
-            speed: ENEMY_SPEED + Math.random() * 20,
-            lastDirChange: performance.now(),
-            lastMultiply: performance.now()
-          });
+      if (!state.memoryMode) {
+        for (let i = 0; i < 2; i++) {
+          const spawn = getSafeSpawn(mapDef.walls, 60, [startPos], 200);
+          if (spawn) {
+            const angle = Math.random() * Math.PI * 2;
+            state.bouncers.push({
+              id: 'b_' + state.nextEntityId++,
+              x: spawn.x,
+              y: spawn.y,
+              dx: Math.cos(angle),
+              dy: Math.sin(angle),
+              size: 1,
+              radius: 24,
+              speed: ENEMY_SPEED + Math.random() * 20,
+              lastDirChange: performance.now(),
+              lastMultiply: performance.now()
+            });
+          }
         }
       }
 
@@ -5993,6 +6289,10 @@ export default function GameCanvas() {
         mapId: selectedMapId,
         hardMode: isHardMode,
         gameMode: selectedGameMode,
+        hp: state.player.hp,
+        maxHp: state.player.maxHp,
+        level: state.chain.level,
+        chainProgress: state.chain.progress,
         buttonCounters: { special: 0, build: 0 }
       };
       uiRef.current = finalUi;
@@ -9237,7 +9537,7 @@ export default function GameCanvas() {
           const localColor = PLAYER_COLORS[localColorIdx]?.n || '#00f0ff';
 
           // 1. Collide with Enemies (state.enemies)
-          if (!state.player.dash.active && !isOpeningProtectionActiveLocal(currentTime)) {
+          if (!state.memoryMode && !state.player.dash.active && !isOpeningProtectionActiveLocal(currentTime)) {
             for (const enemy of state.enemies) {
               const dx = state.player.x - enemy.x;
               const dy = state.player.y - enemy.y;
@@ -9357,6 +9657,16 @@ export default function GameCanvas() {
         // Host ONLY logic from here down
         if (!mpRef.current.roomId || mpRef.current.isHost) {
 
+          if (state.memoryMode && STATUS === 'PLAYING' && state.player.hp > 0) {
+            const previousHp = state.player.hp;
+            state.player.hp = regeneratePlayerHealth(state.player.hp, state.player.maxHp, dt);
+            if (Math.floor(previousHp) !== Math.floor(state.player.hp)) {
+              const nextUi = { ...uiRef.current, hp: state.player.hp };
+              uiRef.current = nextUi;
+              setUiState(nextUi);
+            }
+          }
+
           // Block Physics (Player / Enemies vs Blocks)
           for (let b = state.blocks.length - 1; b >= 0; b--) {
             const block = state.blocks[b];
@@ -9469,6 +9779,62 @@ export default function GameCanvas() {
           }
 
 
+          if (state.memoryMode) {
+            if (state.enemies.length < MEMORY_ARENA_CONFIG.spawner.livingEnemyCap) {
+              for (const spawner of state.spawners) {
+                if (!spawner.factionColor || currentTime < (spawner.nextSpawnAt ?? Infinity)) continue;
+                const taken = takeShapeFromBag(spawner.spawnBag ?? []);
+                spawner.spawnBag = taken.remaining;
+                spawner.nextSpawnAt = currentTime + MEMORY_ARENA_CONFIG.spawner.spawnIntervalMs;
+
+                let spawnX = spawner.x;
+                let spawnY = spawner.y;
+                let foundSpawn = false;
+                for (let attempt = 0; attempt < 24; attempt++) {
+                  const angle = Math.random() * Math.PI * 2;
+                  const distance = spawner.radius + ENEMY_RADIUS + 16 + Math.random() * 50;
+                  const candidateX = spawner.x + Math.cos(angle) * distance;
+                  const candidateY = spawner.y + Math.sin(angle) * distance;
+                  const blockedByWall = activeWalls.some(wall => circleOverlapsWall(candidateX, candidateY, ENEMY_RADIUS, wall));
+                  const blockedBySpawner = state.spawners.some(other => (
+                    Math.hypot(candidateX - other.x, candidateY - other.y) < other.radius + ENEMY_RADIUS + 6
+                  ));
+                  if (!blockedByWall && !blockedBySpawner) {
+                    spawnX = candidateX;
+                    spawnY = candidateY;
+                    foundSpawn = true;
+                    break;
+                  }
+                }
+
+                if (!foundSpawn) continue;
+                const moveAngle = Math.random() * Math.PI * 2;
+                const spawnedEnemy: MemoryEnemy = {
+                  id: 'me_' + state.nextEntityId++,
+                  x: spawnX,
+                  y: spawnY,
+                  radius: ENEMY_RADIUS,
+                  lastShoot: currentTime + Math.random() * 600,
+                  speed: ENEMY_SPEED + Math.random() * 20,
+                  shape: taken.shape,
+                  factionColor: spawner.factionColor,
+                  angle: moveAngle,
+                  moveDx: Math.cos(moveAngle),
+                  moveDy: Math.sin(moveAngle),
+                  nextTurnAt: currentTime + MEMORY_ARENA_CONFIG.square.minTurnIntervalMs + Math.random() * (MEMORY_ARENA_CONFIG.square.maxTurnIntervalMs - MEMORY_ARENA_CONFIG.square.minTurnIntervalMs),
+                  triangleAi: taken.shape === 'triangle' ? createTriangleAiState(currentTime) : undefined,
+                  dashDx: 0,
+                  dashDy: 0,
+                  kbvx: 0,
+                  kbvy: 0,
+                  processedZoneKbs: [],
+                };
+                state.enemies.push(spawnedEnemy);
+                spawnParticles(spawner.x, spawner.y, ENEMY_COLOR_HEX[spawner.factionColor], 10);
+                if (state.enemies.length >= MEMORY_ARENA_CONFIG.spawner.livingEnemyCap) break;
+              }
+            }
+          } else {
           const mapDef = MAPS[uiRef.current.mapId] || MAPS.medium;
           const initialSpawners = mapDef.spawners.length;
 
@@ -9612,6 +9978,7 @@ export default function GameCanvas() {
               enemies_alive: state.enemies.length,
             });
           }
+          }
         }
 
         const isAuthoritativeMultiplayerSimulation =
@@ -9620,6 +9987,193 @@ export default function GameCanvas() {
         // 3. Update Enemies
         for (let i = state.enemies.length - 1; i >= 0; i--) {
           const enemy = state.enemies[i];
+
+          if (state.memoryMode && enemy.shape && enemy.factionColor) {
+            const dxToPlayer = state.player.x - enemy.x;
+            const dyToPlayer = state.player.y - enemy.y;
+            const distanceToPlayer = Math.hypot(dxToPlayer, dyToPlayer);
+            const unitToPlayerX = distanceToPlayer > 0 ? dxToPlayer / distanceToPlayer : 0;
+            const unitToPlayerY = distanceToPlayer > 0 ? dyToPlayer / distanceToPlayer : 0;
+
+            if (enemy.shape === 'circle') {
+              const previousX = enemy.x;
+              const previousY = enemy.y;
+              const desiredX = enemy.x + unitToPlayerX * enemy.speed * dt;
+              const desiredY = enemy.y + unitToPlayerY * enemy.speed * dt;
+              const resolved = resolveWallCollisions(desiredX, desiredY, enemy.radius, activeWalls, previousX, previousY);
+              enemy.x = resolved.x;
+              enemy.y = resolved.y;
+              enemy.angle = Math.atan2(unitToPlayerY, unitToPlayerX);
+
+              if (
+                distanceToPlayer < MEMORY_ARENA_CONFIG.circle.aggroRange &&
+                currentTime - enemy.lastShoot >= MEMORY_ARENA_CONFIG.circle.fireIntervalMs
+              ) {
+                enemy.lastShoot = currentTime;
+                const shotAngle = Math.atan2(dyToPlayer, dxToPlayer) + (Math.random() - 0.5) * 0.2;
+                state.bullets.push({
+                  id: 'mec_' + state.nextEntityId++,
+                  x: enemy.x + Math.cos(shotAngle) * enemy.radius,
+                  y: enemy.y + Math.sin(shotAngle) * enemy.radius,
+                  dx: Math.cos(shotAngle) * BULLET_SPEED,
+                  dy: Math.sin(shotAngle) * BULLET_SPEED,
+                  radius: BULLET_RADIUS,
+                  isPlayer: false,
+                  bounceCount: 0,
+                  spawnTime: currentTime,
+                  isNeutral: false,
+                  ownerId: enemy.id,
+                  factionColor: enemy.factionColor,
+                  damage: MEMORY_ARENA_CONFIG.circle.bulletDamage,
+                });
+              }
+            } else if (enemy.shape === 'square') {
+              enemy.angle = (enemy.angle ?? 0) + MEMORY_ARENA_CONFIG.square.rotationRadiansPerSecond * dt;
+              if (currentTime >= (enemy.nextTurnAt ?? 0)) {
+                const moveAngle = Math.random() * Math.PI * 2;
+                enemy.moveDx = Math.cos(moveAngle);
+                enemy.moveDy = Math.sin(moveAngle);
+                enemy.nextTurnAt = currentTime + MEMORY_ARENA_CONFIG.square.minTurnIntervalMs + Math.random() * (MEMORY_ARENA_CONFIG.square.maxTurnIntervalMs - MEMORY_ARENA_CONFIG.square.minTurnIntervalMs);
+              }
+              const previousX = enemy.x;
+              const previousY = enemy.y;
+              const desiredX = enemy.x + (enemy.moveDx ?? 1) * enemy.speed * dt;
+              const desiredY = enemy.y + (enemy.moveDy ?? 0) * enemy.speed * dt;
+              const resolved = resolveWallCollisions(desiredX, desiredY, enemy.radius, activeWalls, previousX, previousY);
+              enemy.x = resolved.x;
+              enemy.y = resolved.y;
+              if (Math.abs(resolved.x - desiredX) > 0.1 || Math.abs(resolved.y - desiredY) > 0.1) {
+                const moveAngle = Math.random() * Math.PI * 2;
+                enemy.moveDx = Math.cos(moveAngle);
+                enemy.moveDy = Math.sin(moveAngle);
+                enemy.nextTurnAt = currentTime + MEMORY_ARENA_CONFIG.square.minTurnIntervalMs;
+              }
+
+              if (currentTime - enemy.lastShoot >= MEMORY_ARENA_CONFIG.square.fireIntervalMs) {
+                enemy.lastShoot = currentTime;
+                for (const direction of getSquareVolleyDirections(enemy.angle)) {
+                  state.bullets.push({
+                    id: 'mes_' + state.nextEntityId++,
+                    x: enemy.x + direction.x * enemy.radius,
+                    y: enemy.y + direction.y * enemy.radius,
+                    dx: direction.x * BULLET_SPEED,
+                    dy: direction.y * BULLET_SPEED,
+                    radius: BULLET_RADIUS,
+                    isPlayer: false,
+                    bounceCount: 0,
+                    spawnTime: currentTime,
+                    isNeutral: false,
+                    ownerId: enemy.id,
+                    factionColor: enemy.factionColor,
+                    damage: MEMORY_ARENA_CONFIG.square.bulletDamage,
+                  });
+                }
+              }
+            } else {
+              const blockedByWall = activeWalls.some(wall => lineIntersectsRect(
+                enemy.x,
+                enemy.y,
+                state.player.x,
+                state.player.y,
+                wall.x,
+                wall.y,
+                wall.w,
+                wall.h,
+              ));
+              const seesPlayer = STATUS === 'PLAYING' && distanceToPlayer <= MEMORY_ARENA_CONFIG.triangle.detectionRange && !blockedByWall;
+              const beforeAi = enemy.triangleAi ?? createTriangleAiState(currentTime);
+              let triangleAi = advanceTriangleAi(beforeAi, {
+                now: currentTime,
+                seesTarget: seesPlayer,
+                travelled: 0,
+                collidedWithWall: false,
+              });
+
+              if (beforeAi.phase === 'wander' && triangleAi.phase === 'telegraph') {
+                const targetAngle = Math.atan2(unitToPlayerY, unitToPlayerX);
+                enemy.angle = turnAngleTowards(
+                  enemy.angle ?? targetAngle,
+                  targetAngle,
+                  MEMORY_ARENA_CONFIG.triangle.telegraphTurnSpeedRadiansPerSecond * dt,
+                );
+                enemy.dashDx = Math.cos(enemy.angle);
+                enemy.dashDy = Math.sin(enemy.angle);
+              } else if (beforeAi.phase === 'telegraph' && triangleAi.phase === 'telegraph') {
+                const telegraphProgress = Math.max(0, Math.min(
+                  1,
+                  (currentTime - triangleAi.phaseStartedAt) / MEMORY_ARENA_CONFIG.triangle.telegraphMs,
+                ));
+                if (telegraphProgress < 0.84) {
+                  const targetAngle = Math.atan2(unitToPlayerY, unitToPlayerX);
+                  enemy.angle = turnAngleTowards(
+                    enemy.angle ?? targetAngle,
+                    targetAngle,
+                    MEMORY_ARENA_CONFIG.triangle.telegraphTurnSpeedRadiansPerSecond * dt,
+                  );
+                  enemy.dashDx = Math.cos(enemy.angle);
+                  enemy.dashDy = Math.sin(enemy.angle);
+                }
+              }
+
+              if (beforeAi.phase === 'telegraph' && triangleAi.phase === 'dash') {
+                if ((enemy.dashDx ?? 0) === 0 && (enemy.dashDy ?? 0) === 0) {
+                  enemy.dashDx = unitToPlayerX;
+                  enemy.dashDy = unitToPlayerY;
+                }
+                enemy.angle = Math.atan2(enemy.dashDy ?? 0, enemy.dashDx ?? 0);
+              }
+
+              if (triangleAi.phase === 'wander') {
+                if (currentTime >= (enemy.nextTurnAt ?? 0)) {
+                  const moveAngle = Math.random() * Math.PI * 2;
+                  enemy.moveDx = Math.cos(moveAngle);
+                  enemy.moveDy = Math.sin(moveAngle);
+                  enemy.nextTurnAt = currentTime + MEMORY_ARENA_CONFIG.square.minTurnIntervalMs + Math.random() * 2000;
+                }
+                const previousX = enemy.x;
+                const previousY = enemy.y;
+                const desiredX = enemy.x + (enemy.moveDx ?? 1) * enemy.speed * dt;
+                const desiredY = enemy.y + (enemy.moveDy ?? 0) * enemy.speed * dt;
+                const resolved = resolveWallCollisions(desiredX, desiredY, enemy.radius, activeWalls, previousX, previousY);
+                enemy.x = resolved.x;
+                enemy.y = resolved.y;
+                enemy.angle = Math.atan2(enemy.moveDy ?? 0, enemy.moveDx ?? 1);
+              } else if (triangleAi.phase === 'dash') {
+                const previousX = enemy.x;
+                const previousY = enemy.y;
+                const desiredX = enemy.x + (enemy.dashDx ?? 0) * MEMORY_ARENA_CONFIG.triangle.dashSpeed * dt;
+                const desiredY = enemy.y + (enemy.dashDy ?? 0) * MEMORY_ARENA_CONFIG.triangle.dashSpeed * dt;
+                const resolved = resolveWallCollisions(desiredX, desiredY, enemy.radius, activeWalls, previousX, previousY);
+                enemy.x = resolved.x;
+                enemy.y = resolved.y;
+                const travelled = Math.hypot(enemy.x - previousX, enemy.y - previousY);
+                const collidedWithWall = Math.abs(resolved.x - desiredX) > 0.1 || Math.abs(resolved.y - desiredY) > 0.1;
+
+                if (!triangleAi.hitPlayer && segmentVersusCircle(
+                  previousX,
+                  previousY,
+                  enemy.x,
+                  enemy.y,
+                  state.player.x,
+                  state.player.y,
+                  enemy.radius + state.player.radius,
+                )) {
+                  damageMemoryPlayer(MEMORY_ARENA_CONFIG.triangle.dashDamage, state.player.x, state.player.y, 'TRIANGLE DASH');
+                  triangleAi = markTrianglePlayerHit(triangleAi);
+                }
+
+                triangleAi = advanceTriangleAi(triangleAi, {
+                  now: currentTime,
+                  seesTarget: seesPlayer,
+                  travelled,
+                  collidedWithWall,
+                });
+              }
+
+              enemy.triangleAi = triangleAi;
+            }
+            continue;
+          }
 
           // Move towards closest alive player
           let targetX = state.player.x;
@@ -10450,7 +11004,7 @@ export default function GameCanvas() {
                 spawnTime: currentTime,
                 isNeutral: false,
                 ownerId: socketRef.current?.id || 'local',
-                colorIdx: playerProfileRef.current.colorIdx,
+                colorIdx: state.memoryMode ? 0 : playerProfileRef.current.colorIdx,
                 allowedBlockKeys: localAllowedKeys,
                 leftBlockKeys: []
               });
@@ -10744,6 +11298,8 @@ export default function GameCanvas() {
           const targetX = bulletBeforeX + bullet.dx * bulletTravelSeconds;
           const targetY = bulletBeforeY + bullet.dy * bulletTravelSeconds;
 
+          const bulletRicochetEnabled = !state.memoryMode || MEMORY_ARENA_CONFIG.combat.bulletRicochetEnabled;
+          let bulletDestroyed = false;
           let normalsToProcess: { nx: number; ny: number }[] = [];
           let trailX = bullet.x;
           let trailY = bullet.y;
@@ -10998,6 +11554,8 @@ export default function GameCanvas() {
             } else if (bullet.isPlayer) {
               const pDef = PLAYER_COLORS[bullet.colorIdx !== undefined ? bullet.colorIdx : 0] || PLAYER_COLORS[0];
               trailColor = pDef.n;
+            } else if (bullet.factionColor) {
+              trailColor = ENEMY_COLOR_HEX[bullet.factionColor];
             }
             state.trails.push({
               x: trailX, y: trailY, age: 0,
@@ -11007,21 +11565,35 @@ export default function GameCanvas() {
           }
 
           let collidedWithWall = false;
-          for (const n of normalsToProcess) {
-            const dot = bullet.dx * n.nx + bullet.dy * n.ny;
-            if (dot < 0) {
-              bullet.dx = bullet.dx - 2 * dot * n.nx;
-              bullet.dy = bullet.dy - 2 * dot * n.ny;
-              bullet.bounceCount++;
-              bullet.isNeutral = true;
-              collidedWithWall = true;
-              const pColor = bullet.isNeutral ? '#aaaaaa' : (!bullet.isPlayer ? '#ff0066' : '#00ccff');
-              spawnParticles(bullet.x, bullet.y, pColor, 5);
+          if (!bulletRicochetEnabled && normalsToProcess.length > 0) {
+            bulletDestroyed = true;
+            collidedWithWall = true;
+            const impactColor = bullet.isPlayer
+              ? PLAYER_COLOR_HEX
+              : (bullet.factionColor ? ENEMY_COLOR_HEX[bullet.factionColor] : '#ff0066');
+            spawnParticles(bullet.x, bullet.y, impactColor, 5);
+          } else {
+            for (const n of normalsToProcess) {
+              const dot = bullet.dx * n.nx + bullet.dy * n.ny;
+              if (dot < 0) {
+                bullet.dx = bullet.dx - 2 * dot * n.nx;
+                bullet.dy = bullet.dy - 2 * dot * n.ny;
+                bullet.bounceCount++;
+                bullet.isNeutral = true;
+                collidedWithWall = true;
+                const pColor = bullet.isNeutral ? '#aaaaaa' : (!bullet.isPlayer ? '#ff0066' : '#00ccff');
+                spawnParticles(bullet.x, bullet.y, pColor, 5);
+              }
             }
           }
 
           if (collidedWithWall && isAuthoritativeMultiplayerBullet) {
             state.forceBroadcast = true;
+          }
+
+          if (bulletDestroyed) {
+            state.bullets.splice(i, 1);
+            continue;
           }
 
           // Special Relic Collisions
@@ -11054,13 +11626,6 @@ export default function GameCanvas() {
             }
           }
 
-          let bulletDestroyed = false;
-
-          if (bulletDestroyed) {
-             state.bullets.splice(i, 1);
-             continue;
-          }
-
           // Block Collisions
           if (!bulletDestroyed && !isAuthoritativeMultiplayerBullet) {
              for (let b = state.blocks.length - 1; b >= 0; b--) {
@@ -11078,12 +11643,18 @@ export default function GameCanvas() {
                const bdx = bullet.x - closestX;
                const bdy = bullet.y - closestY;
 
-               if (bdx * bdx + bdy * bdy < bullet.radius * bullet.radius) {
-                 // Block is unbreakable, bounce bullets
-                 bullet.bounceCount++;
-                 bullet.isNeutral = true;
-                 const pDef = PLAYER_COLORS[block.colorIdx !== undefined ? block.colorIdx : 0] || PLAYER_COLORS[0];
-                 spawnParticles(closestX, closestY, pDef.n, 5);
+                if (bdx * bdx + bdy * bdy < bullet.radius * bullet.radius) {
+                  const pDef = PLAYER_COLORS[block.colorIdx !== undefined ? block.colorIdx : 0] || PLAYER_COLORS[0];
+                  spawnParticles(closestX, closestY, pDef.n, 5);
+
+                  if (!bulletRicochetEnabled) {
+                    bulletDestroyed = true;
+                    break;
+                  }
+
+                  // Block is unbreakable, bounce bullets
+                  bullet.bounceCount++;
+                  bullet.isNeutral = true;
 
                  const currentDist = Math.sqrt(bdx * bdx + bdy * bdy);
                  const pushDist = (bullet.radius - currentDist) + 1;
@@ -11195,11 +11766,35 @@ export default function GameCanvas() {
                 : dx * dx + dy * dy < (enemy.radius + bullet.radius) ** 2;
               if (hitThisEnemy) {
                 // Kill enemy
-                spawnParticles(enemy.x, enemy.y, '#ff3333', 30);
-                state.shockwaves.push({ x: enemy.x, y: enemy.y, color: '#ff3333', maxRadius: 80, age: 0, maxAge: 0.25, thickness: 8 });
+                const defeatedColor = enemy.factionColor ? ENEMY_COLOR_HEX[enemy.factionColor] : '#ff3333';
+                spawnParticles(enemy.x, enemy.y, defeatedColor, 30);
+                state.shockwaves.push({ x: enemy.x, y: enemy.y, color: defeatedColor, maxRadius: 80, age: 0, maxAge: 0.25, thickness: 8 });
                 state.shake = 10;
                 state.enemies.splice(e, 1);
                 bulletDestroyed = true;
+
+                if (state.memoryMode && bullet.isPlayer && enemy.shape && enemy.factionColor) {
+                  const chainTransition = registerPlayerEnemyKill(state.chain, {
+                    shape: enemy.shape,
+                    color: enemy.factionColor,
+                  });
+                  state.chain = chainTransition.state;
+                  const nextUi = {
+                    ...uiRef.current,
+                    level: state.chain.level,
+                    chainProgress: state.chain.progress,
+                  };
+                  uiRef.current = nextUi;
+                  setUiState(nextUi);
+                  if (chainTransition.result === 'retargeted') {
+                    showChainFeedback('reset');
+                  } else if (chainTransition.result === 'completed') {
+                    showChainFeedback('level');
+                    state.shockwaves.push({ x: state.player.x, y: state.player.y, color: PLAYER_COLOR_HEX, maxRadius: 180, age: 0, maxAge: 0.5, thickness: 12 });
+                    state.floatingTexts.push({ x: state.player.x, y: state.player.y - 35, text: `LEVEL ${state.chain.level}`, age: 0, maxAge: 1.2, color: PLAYER_COLOR_HEX, vy: -35 });
+                  }
+                }
+
                 let pts = 0;
                 if (bullet.isPlayer && !bullet.isNeutral) {
                   pts = 100;
@@ -11259,14 +11854,16 @@ export default function GameCanvas() {
                   });
                 }
                 if (state.gameMode !== 'impossible') {
-                  spawner.hp -= 20; // 5 hits to destroy (100 HP)
+                  spawner.hp -= state.memoryMode ? MEMORY_ARENA_CONFIG.spawner.playerBulletDamage : 20;
                 }
                 spawnParticles(bullet.x, bullet.y, '#ffffff', 10);
                 bulletDestroyed = true;
 
                 if (state.gameMode !== 'impossible' && spawner.hp <= 0) {
                   const destroyedSpawner = { x: spawner.x, y: spawner.y, radius: spawner.radius };
-                  const spawnerColor = state.hardMode ? '#ff3300' : '#ff00ff';
+                  const spawnerColor = spawner.factionColor
+                    ? ENEMY_COLOR_HEX[spawner.factionColor]
+                    : (state.memoryMode ? PLAYER_COLOR_HEX : (state.hardMode ? '#ff3300' : '#ff00ff'));
                   spawnParticles(spawner.x, spawner.y, spawnerColor, 100);
                   state.shockwaves.push({ x: spawner.x, y: spawner.y, color: spawnerColor, maxRadius: 200, age: 0, maxAge: 0.5, thickness: 20 });
                   state.shake = 30;
@@ -11375,6 +11972,17 @@ export default function GameCanvas() {
               }
             } else {
               // Single-player behavior: Keep the existing single-player host-local endpoint collision code exactly as it was.
+              if (state.memoryMode) {
+                const dx = state.player.x - bullet.x;
+                const dy = state.player.y - bullet.y;
+                if (
+                  !bullet.isPlayer &&
+                  dx * dx + dy * dy < (state.player.radius + bullet.radius * 0.5) ** 2
+                ) {
+                  damageMemoryPlayer(bullet.damage ?? MEMORY_ARENA_CONFIG.circle.bulletDamage, bullet.x, bullet.y, 'HOSTILE FIRE');
+                  bulletDestroyed = true;
+                }
+              } else {
               const hostColorIdx = playerProfileRef.current.colorIdx;
               const hostColor = PLAYER_COLORS[hostColorIdx]?.n || '#00f0ff';
 
@@ -11409,6 +12017,7 @@ export default function GameCanvas() {
                   });
                   bulletDestroyed = true;
                 }
+              }
               }
             }
           }
@@ -11744,15 +12353,22 @@ export default function GameCanvas() {
           ctx.restore();
         }
 
-        const initialSpawners = (MAPS[uiRef.current.mapId] || MAPS.medium).spawners.length;
+        const renderMapDefinition = state.memoryMode
+          ? (MEMORY_MAPS[uiRef.current.mapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID])
+          : (MAPS[uiRef.current.mapId] || MAPS.medium);
+        const initialSpawners = renderMapDefinition.spawners.length;
         const spawnerSpeedScale = state.hardMode ? (initialSpawners / state.spawners.length) : 1;
 
         ctx.save();
 
         // Outer glow/pulse gets faster in Hard Mode as remaining spawners decrease
         const pulse = Math.sin(worldPhaseTime / (200 / spawnerSpeedScale)) * 5;
-        const glowColor = state.hardMode ? '#ff3300' : '#ff00ff';
-        const fillGlow = state.hardMode ? 'rgba(255, 51, 0, 0.15)' : 'rgba(255, 0, 255, 0.15)';
+        const glowColor = spawner.factionColor
+          ? ENEMY_COLOR_HEX[spawner.factionColor]
+          : (state.memoryMode ? PLAYER_COLOR_HEX : (state.hardMode ? '#ff3300' : '#ff00ff'));
+        const fillGlow = spawner.factionColor || state.memoryMode
+          ? `${glowColor}2a`
+          : (state.hardMode ? 'rgba(255, 51, 0, 0.15)' : 'rgba(255, 0, 255, 0.15)');
         ctx.fillStyle = fillGlow;
         ctx.shadowColor = glowColor;
         ctx.shadowBlur = 20;
@@ -11763,7 +12379,7 @@ export default function GameCanvas() {
         // Hexagon shape
         const isImpossibleMode = state.gameMode === 'impossible';
         ctx.shadowBlur = 10;
-        ctx.fillStyle = isImpossibleMode ? '#AEB4BE' : (state.hardMode ? '#2a0500' : '#1a001a');
+        ctx.fillStyle = isImpossibleMode ? '#AEB4BE' : (spawner.factionColor ? '#090d16' : (state.hardMode ? '#2a0500' : '#1a001a'));
         ctx.strokeStyle = isImpossibleMode ? '#AEB4BE' : glowColor;
         ctx.lineWidth = 3;
         ctx.beginPath();
@@ -11791,25 +12407,28 @@ export default function GameCanvas() {
         if (state.gameMode !== 'impossible') {
           // Draw HP bar
           const hpPercent = Math.max(0, spawner.hp / spawner.maxHp);
+          const hpColor = spawner.factionColor
+            ? ENEMY_COLOR_HEX[spawner.factionColor]
+            : (state.memoryMode ? PLAYER_COLOR_HEX : (state.hardMode ? '#ff3300' : '#ff0050'));
           const barW = 60;
           const barH = 6;
           const barX = spawner.x - barW / 2;
           const barY = spawner.y - spawner.radius - 20;
 
           // Background
-          ctx.fillStyle = 'rgba(255, 0, 80, 0.2)';
+          ctx.fillStyle = `${hpColor}33`;
           ctx.fillRect(barX, barY, barW, barH);
 
           // Fill
-          ctx.fillStyle = '#ff0050';
+          ctx.fillStyle = hpColor;
           ctx.save();
-          ctx.shadowColor = '#ff0050';
+          ctx.shadowColor = hpColor;
           ctx.shadowBlur = 5;
           ctx.fillRect(barX, barY, barW * hpPercent, barH);
           ctx.restore();
 
           // Border
-          ctx.strokeStyle = state.hardMode ? '#ff3300' : '#ff00ff';
+          ctx.strokeStyle = hpColor;
           ctx.lineWidth = 1;
           ctx.strokeRect(barX, barY, barW, barH);
         }
@@ -11880,6 +12499,65 @@ export default function GameCanvas() {
           enemy.y + enemy.radius < state.camera.y ||
           enemy.y - enemy.radius > state.camera.y + state.camera.height
         ) continue;
+
+        if (state.memoryMode && enemy.shape && enemy.factionColor) {
+          const enemyColor = ENEMY_COLOR_HEX[enemy.factionColor];
+          if (uiRef.current.status === 'PLAYING' && Math.random() > 0.72) {
+            state.trails.push({
+              x: enemy.x,
+              y: enemy.y,
+              age: 0,
+              color: enemyColor,
+              radius: enemy.shape === 'triangle' && enemy.triangleAi?.phase === 'dash' ? enemy.radius * 0.9 : enemy.radius * 0.35,
+              isSuperStrong: enemy.shape === 'triangle' && enemy.triangleAi?.phase === 'dash',
+            });
+          }
+
+          const telegraphVisual = enemy.shape === 'triangle' && enemy.triangleAi?.phase === 'telegraph'
+            ? getTriangleTelegraphVisual(currentTime - enemy.triangleAi.phaseStartedAt)
+            : null;
+
+          if (telegraphVisual) {
+            ctx.save();
+            ctx.globalAlpha = telegraphVisual.auraAlpha;
+            ctx.fillStyle = enemyColor;
+            ctx.shadowColor = enemyColor;
+            ctx.shadowBlur = telegraphVisual.glowBlur;
+            ctx.beginPath();
+            ctx.arc(enemy.x, enemy.y, enemy.radius * telegraphVisual.auraScale, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
+
+          ctx.save();
+          ctx.translate(enemy.x, enemy.y);
+          ctx.rotate(enemy.angle ?? 0);
+          if (telegraphVisual) {
+            ctx.translate(-telegraphVisual.pullBack, 0);
+            ctx.scale(telegraphVisual.scaleX, telegraphVisual.scaleY);
+          }
+          ctx.shadowColor = enemyColor;
+          ctx.shadowBlur = telegraphVisual?.glowBlur ?? (enemy.shape === 'triangle' && enemy.triangleAi?.phase === 'dash' ? 24 : 12);
+          ctx.fillStyle = enemyColor;
+          ctx.strokeStyle = '#080a12';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          if (enemy.shape === 'circle') {
+            ctx.arc(0, 0, enemy.radius, 0, Math.PI * 2);
+          } else if (enemy.shape === 'square') {
+            ctx.rect(-enemy.radius, -enemy.radius, enemy.radius * 2, enemy.radius * 2);
+          } else {
+            ctx.moveTo(enemy.radius * 1.25, 0);
+            ctx.lineTo(-enemy.radius, enemy.radius);
+            ctx.lineTo(-enemy.radius, -enemy.radius);
+            ctx.closePath();
+          }
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.restore();
+          continue;
+        }
 
         // Draw trail for enemy
         if (uiRef.current.status === 'PLAYING') {
@@ -12176,6 +12854,9 @@ export default function GameCanvas() {
           const pDef = PLAYER_COLORS[bullet.colorIdx !== undefined ? bullet.colorIdx : 0] || PLAYER_COLORS[0];
           color = pDef.n;
           glow = pDef.g || 'rgba(0, 204, 255, 0.3)';
+        } else if (bullet.factionColor) {
+          color = ENEMY_COLOR_HEX[bullet.factionColor];
+          glow = `${color}55`;
         }
 
         ctx.fillStyle = glow;
@@ -12309,7 +12990,7 @@ export default function GameCanvas() {
       // Draw Player
       if (uiRef.current.status !== 'GAME_OVER') {
         const localId = socketRef.current?.id || 'local';
-        const pDef = PLAYER_COLORS[playerProfileRef.current.colorIdx] || PLAYER_COLORS[0];
+        const pDef = PLAYER_COLORS[state.memoryMode ? 0 : playerProfileRef.current.colorIdx] || PLAYER_COLORS[0];
         const pColor = pDef.n;
         const pGlow = pDef.g;
         const pName = playerProfileRef.current.name || 'PLAYER';
@@ -12383,6 +13064,45 @@ export default function GameCanvas() {
         ctx.strokeStyle = '#000';
         ctx.lineWidth = 2;
         ctx.stroke();
+
+        if (state.memoryMode) {
+          const hpPercent = Math.max(0, Math.min(1, state.player.hp / Math.max(1, state.player.maxHp)));
+          const barW = 42;
+          const barH = 6;
+          const barX = state.player.x - barW / 2;
+          const barY = state.player.y - state.player.radius * 2 - 10;
+
+          ctx.save();
+          ctx.fillStyle = 'rgba(3, 10, 18, 0.92)';
+          ctx.beginPath();
+          ctx.roundRect(barX, barY, barW, barH, barH / 2);
+          ctx.fill();
+
+          if (hpPercent > 0) {
+            const fillInset = 1.5;
+            const fillW = (barW - fillInset * 2) * hpPercent;
+            ctx.fillStyle = PLAYER_COLOR_HEX;
+            ctx.shadowColor = PLAYER_COLOR_HEX;
+            ctx.shadowBlur = 2;
+            ctx.beginPath();
+            ctx.roundRect(
+              barX + fillInset,
+              barY + fillInset,
+              fillW,
+              barH - fillInset * 2,
+              Math.min((barH - fillInset * 2) / 2, fillW / 2),
+            );
+            ctx.fill();
+          }
+
+          ctx.shadowBlur = 0;
+          ctx.strokeStyle = `${PLAYER_COLOR_HEX}99`;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.roundRect(barX, barY, barW, barH, barH / 2);
+          ctx.stroke();
+          ctx.restore();
+        }
 
         if (mpRef.current.roomId) {
           ctx.fillStyle = '#ffffff';
@@ -12614,13 +13334,13 @@ export default function GameCanvas() {
             if (isAnyVisible) {
               spawnerPointerAnimRef.current = null;
             } else {
-              const spawnerColor = state.hardMode ? '#ff3300' : '#ff00ff';
               const anim = spawnerPointerAnimRef.current;
               const now = currentTime;
 
               let drawX: number | null = null;
               let drawY: number | null = null;
               let drawAngle: number | null = null;
+              let pointerSpawner: { factionColor?: EnemyFactionColor } | null = null;
 
               if (anim) {
                 const elapsed = now - anim.startTime;
@@ -12633,6 +13353,7 @@ export default function GameCanvas() {
                   ) || getClosestSpawner(livingSpawners, state.player);
 
                   if (targetSpawner) {
+                    pointerSpawner = targetSpawner as MemorySpawner;
                     const startScreenX = anim.startWorldX - state.camera.x;
                     const startScreenY = anim.startWorldY - state.camera.y;
 
@@ -12664,6 +13385,7 @@ export default function GameCanvas() {
               if (drawX === null || drawY === null || drawAngle === null) {
                 const closest = getClosestSpawner(livingSpawners, state.player);
                 if (closest) {
+                  pointerSpawner = closest as MemorySpawner;
                   const targetScreenX = closest.x - state.camera.x;
                   const targetScreenY = closest.y - state.camera.y;
                   const edgePos = calculateEdgePointerPosition(
@@ -12680,6 +13402,9 @@ export default function GameCanvas() {
               }
 
               if (drawX !== null && drawY !== null && drawAngle !== null) {
+                const spawnerColor = pointerSpawner?.factionColor
+                  ? ENEMY_COLOR_HEX[pointerSpawner.factionColor]
+                  : (state.memoryMode ? PLAYER_COLOR_HEX : (state.hardMode ? '#ff3300' : '#ff00ff'));
                 ctx.save();
                 ctx.translate(drawX, drawY);
                 ctx.rotate(drawAngle);
@@ -12874,10 +13599,10 @@ export default function GameCanvas() {
                   className="max-w-md w-full max-h-[90vh] bg-[#0d0f1b]/95 border-2 border-[#00f0ff] p-4 sm:p-6 shadow-[10px_10px_0_#00f0ff] flex flex-col justify-center text-center overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
                 >
                   <h1 className="text-4xl sm:text-5xl md:text-6xl font-black text-white mb-2 sm:mb-3 tracking-tighter shrink-0 leading-none" style={{ fontFamily: 'var(--font-display, Anton, sans-serif)' }}>
-                    RICOCHET <br/> <span className="text-[#00f0ff]">ARENA</span>
+                    MEMORY <br/> <span className="text-[#00f0ff]">ARENA</span>
                   </h1>
                   <p className="text-[#00f0ff]/80 font-mono mb-3 sm:mb-6 whitespace-pre-wrap leading-snug sm:leading-relaxed text-[9px] sm:text-xs uppercase tracking-widest border-t border-b border-[#00f0ff]/30 py-2 sm:py-3 shrink-0">
-                    Bullets bounce endlessly.{"\n"}Dodge the chaos you and the enemies create.
+                    Remember the enemy.{"\n"}Build a four-kill chain to level up.
                     {"\n\n"}
                     Desktop: WASD + Mouse.{"\n"}Mobile: Dual Joysticks.
                   </p>
@@ -12985,7 +13710,7 @@ export default function GameCanvas() {
                         ref={mapListRef}
                         className="flex-1 overflow-y-auto p-2 grid grid-cols-2 gap-2 content-start [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
                       >
-                        {Object.entries(MAPS)
+                        {Object.entries(MEMORY_MAPS)
                           .sort((a, b) => {
                             const difficultyRank: Record<string, number> = {
                               'EASY': 1,
@@ -13030,7 +13755,7 @@ export default function GameCanvas() {
                     {/* Map Preview Area */}
                     <div className="w-full md:w-80 lg:w-[22rem] shrink-0 flex flex-col min-h-[240px] md:min-h-0 border border-[#00f0ff]/30 bg-black/40 p-3 overflow-hidden">
                       {(() => {
-                          const selMap = MAPS[uiState.mapId] || MAPS.medium;
+                          const selMap = MEMORY_MAPS[uiState.mapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID];
                           return (
                             <div className="flex flex-col h-full overflow-hidden">
                                <h3 className="text-base md:text-lg lg:text-xl font-black text-white uppercase tracking-wider mb-1 mt-1 shrink-0 px-1">{selMap.name}</h3>
@@ -13083,7 +13808,7 @@ export default function GameCanvas() {
                                        cx={s.x}
                                        cy={s.y}
                                        r={s.radius}
-                                       fill="#ff00ff"
+                                       fill={s.factionColor ? ENEMY_COLOR_HEX[s.factionColor] : '#ff00ff'}
                                        stroke="rgba(255, 255, 255, 0.5)"
                                        strokeWidth="8"
                                      />
@@ -13306,7 +14031,7 @@ export default function GameCanvas() {
                                        cx={s.x}
                                        cy={s.y}
                                        r={s.radius}
-                                       fill="#ff00ff"
+                                       fill={s.factionColor ? ENEMY_COLOR_HEX[s.factionColor] : '#ff00ff'}
                                        stroke="rgba(255, 255, 255, 0.5)"
                                        strokeWidth="8"
                                      />
@@ -13668,7 +14393,7 @@ export default function GameCanvas() {
                                         cx={s.x}
                                         cy={s.y}
                                         r={s.radius}
-                                        fill="#ff00ff"
+                                        fill={s.factionColor ? ENEMY_COLOR_HEX[s.factionColor] : '#ff00ff'}
                                         stroke="rgba(255, 255, 255, 0.5)"
                                         strokeWidth="8"
                                       />
@@ -13938,6 +14663,42 @@ export default function GameCanvas() {
                   </div>
                 )}
 
+                {!mpState.roomId && (
+                  <div className="absolute top-[82px] sm:top-4 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 w-[min(360px,70vw)]">
+                    <div className="flex items-center gap-3 bg-[#060912]/90 border border-[#00f0ff]/45 px-3 py-2 shadow-[0_0_18px_rgba(0,240,255,0.18)] backdrop-blur-sm w-full">
+                      <div className="text-[#00f0ff] font-black tracking-widest text-xs whitespace-nowrap">LV {uiState.level}</div>
+                      <div className="flex-1">
+                        <div className="h-2 bg-white/10 border border-white/15 overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-[#ff3344] via-[#facc15] to-[#22c55e] transition-[width] duration-150"
+                            style={{ width: `${Math.max(0, Math.min(100, (uiState.hp / Math.max(1, uiState.maxHp)) * 100))}%` }}
+                          />
+                        </div>
+                        <div className="text-[9px] text-white/70 tracking-widest mt-1 text-center">HP {Math.ceil(uiState.hp)} / {uiState.maxHp}</div>
+                      </div>
+                      <div className="flex gap-1.5" aria-label={`Chain progress ${uiState.chainProgress} of 4`}>
+                        {[0, 1, 2, 3].map(index => (
+                          <span
+                            key={index}
+                            className={`w-3 h-3 border transition-all duration-150 ${index < uiState.chainProgress ? 'bg-white border-white shadow-[0_0_8px_white]' : 'bg-transparent border-white/35'}`}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    {chainFeedback && (
+                      <motion.div
+                        key={chainFeedback}
+                        initial={{ opacity: 0, y: -6, scale: 0.9 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        className={`font-black tracking-[0.25em] text-xs px-3 py-1 bg-black/80 border ${chainFeedback === 'level' ? 'text-[#00f0ff] border-[#00f0ff]' : 'text-[#ff3344] border-[#ff3344]'}`}
+                      >
+                        {chainFeedback === 'level' ? `LEVEL ${uiState.level}` : 'CHAIN RESET'}
+                      </motion.div>
+                    )}
+                  </div>
+                )}
+
                 <div
                   className="absolute top-0 left-0 right-0 p-3 sm:p-6 flex flex-row justify-between items-start pointer-events-none z-10 w-full"
                   style={{
@@ -13975,7 +14736,7 @@ export default function GameCanvas() {
                         scale: [1, 1.12, 1],
                         filter: [
                           "brightness(1) drop-shadow(0 0 0px rgba(0,0,0,0))",
-                          `brightness(1.5) drop-shadow(0 0 20px ${uiState.hardMode ? 'rgba(255,51,0,1)' : 'rgba(255,0,255,1)'})`,
+                          `brightness(1.5) drop-shadow(0 0 20px ${!mpState.roomId ? 'rgba(0,240,255,1)' : (uiState.hardMode ? 'rgba(255,51,0,1)' : 'rgba(255,0,255,1)')})`,
                           "brightness(1) drop-shadow(0 0 0px rgba(0,0,0,0))"
                         ]
                       } : {
@@ -13986,18 +14747,18 @@ export default function GameCanvas() {
                         duration: 0.8,
                         ease: "easeInOut"
                       } : {}}
-                      className={`flex flex-col items-start justify-center gap-0 sm:gap-1 pl-4 sm:pl-6 border-l-2 h-full sm:w-[160px] ${uiState.hardMode ? 'border-[#ff3300]/30' : 'border-[#ff00ff]/30'}`}
+                      className={`flex flex-col items-start justify-center gap-0 sm:gap-1 pl-4 sm:pl-6 border-l-2 h-full sm:w-[160px] ${!mpState.roomId ? 'border-[#00f0ff]/30' : (uiState.hardMode ? 'border-[#ff3300]/30' : 'border-[#ff00ff]/30')}`}
                     >
-                       <div className={`hidden sm:block text-[11px] tracking-[0.3em] font-bold whitespace-nowrap ${uiState.hardMode ? 'text-[#ff3300]' : 'text-[#ff00ff]'}`}>
+                       <div className={`hidden sm:block text-[11px] tracking-[0.3em] font-bold whitespace-nowrap ${!mpState.roomId ? 'text-[#00f0ff]' : (uiState.hardMode ? 'text-[#ff3300]' : 'text-[#ff00ff]')}`}>
                          {mpState.roomId ? 'LEADERBOARD // RANK' : (uiState.hardMode ? 'TARGET // SPAWNERS (HARD)' : 'TARGET // SPAWNERS')}
                        </div>
-                       <div className={`sm:hidden text-[9px] tracking-widest font-bold whitespace-nowrap ${uiState.hardMode ? 'text-[#ff3300]' : 'text-[#ff00ff]'}`}>
+                       <div className={`sm:hidden text-[9px] tracking-widest font-bold whitespace-nowrap ${!mpState.roomId ? 'text-[#00f0ff]' : (uiState.hardMode ? 'text-[#ff3300]' : 'text-[#ff00ff]')}`}>
                          {mpState.roomId ? 'RANK' : (uiState.hardMode ? 'TARGET (HARD)' : 'TARGET')}
                        </div>
                        <div className="text-white font-black text-2xl sm:text-[43px] tracking-tighter leading-none mt-1"
                             style={{
                               fontFamily: 'var(--font-display, Anton, sans-serif)',
-                              textShadow: `0 0 15px ${uiState.hardMode ? '#ff3300' : '#ff00ff'}`
+                              textShadow: `0 0 15px ${!mpState.roomId ? '#00f0ff' : (uiState.hardMode ? '#ff3300' : '#ff00ff')}`
                             }}>
                          {mpState.roomId ? `#${getPlayerRank()}` : uiState.spawnersLeft}
                        </div>
@@ -14365,7 +15126,7 @@ export default function GameCanvas() {
             >
               <div>FINAL SCORE: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.score}</span></div>
               <div className="hidden sm:block w-px h-6 bg-[#00f0ff]/30"></div>
-              <div>SPAWNERS LEFT: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.spawnersLeft}/{(MAPS[uiState.mapId] || MAPS.medium).spawners.length}</span></div>
+              <div>SPAWNERS LEFT: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.spawnersLeft}/{(mpState.roomId ? (MAPS[uiState.mapId] || MAPS.medium) : (MEMORY_MAPS[uiState.mapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID])).spawners.length}</span></div>
             </motion.div>
 
             <motion.div
@@ -14433,7 +15194,7 @@ export default function GameCanvas() {
               className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-8 text-xs sm:text-sm font-mono text-red-200/80 mb-4 sm:mb-6 md:mb-10 uppercase tracking-widest border-t border-b border-red-500/30 py-3 sm:py-6"
             >
               <div>FINAL SCORE: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.score}</span></div>
-              <div>SPAWNERS LEFT: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.spawnersLeft}/{(MAPS[uiState.mapId] || MAPS.medium).spawners.length}</span></div>
+              <div>SPAWNERS LEFT: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.spawnersLeft}/{(mpState.roomId ? (MAPS[uiState.mapId] || MAPS.medium) : (MEMORY_MAPS[uiState.mapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID])).spawners.length}</span></div>
             </motion.div>
 
             <motion.div

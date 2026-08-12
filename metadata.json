@@ -1,6 +1,6 @@
 {
-  "name": "the Ricochet Arena",
-  "description": "A 2D top-down shooter game with indefinitely bouncing bullets and large, varied maps.",
+  "name": "Memory Arena",
+  "description": "A memory-driven ricochet shooter where matching four enemy identities earns levels.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }
