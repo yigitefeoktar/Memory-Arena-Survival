@@ -46,6 +46,7 @@ import {
 } from '../shared/gameplayAnalyticsRelay';
 import {
   ENEMY_COLOR_HEX,
+  ENEMY_FACTIONS,
   MEMORY_ARENA_CONFIG,
   MEMORY_MAP_CORE_INDICES,
   PLAYER_COLOR_HEX,
@@ -14626,6 +14627,12 @@ export default function GameCanvas() {
           }
         } as const;
         const activeT = toolsData[uiState.activeTool];
+        const activeCoreFactions = new Set<EnemyFactionColor>();
+        stateRef.current.spawners.forEach(spawner => {
+          if (spawner.isCore && spawner.hp > 0 && isEnemyFactionColor(spawner.factionColor)) {
+            activeCoreFactions.add(spawner.factionColor);
+          }
+        });
 
         return (
           <AnimatePresence>
@@ -14664,26 +14671,68 @@ export default function GameCanvas() {
                 )}
 
                 {!mpState.roomId && (
-                  <div className="absolute top-[82px] sm:top-4 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 w-[min(360px,70vw)]">
-                    <div className="flex items-center gap-3 bg-[#060912]/90 border border-[#00f0ff]/45 px-3 py-2 shadow-[0_0_18px_rgba(0,240,255,0.18)] backdrop-blur-sm w-full">
-                      <div className="text-[#00f0ff] font-black tracking-widest text-xs whitespace-nowrap">LV {uiState.level}</div>
-                      <div className="flex-1">
-                        <div className="h-2 bg-white/10 border border-white/15 overflow-hidden">
-                          <div
-                            className="h-full bg-gradient-to-r from-[#ff3344] via-[#facc15] to-[#22c55e] transition-[width] duration-150"
-                            style={{ width: `${Math.max(0, Math.min(100, (uiState.hp / Math.max(1, uiState.maxHp)) * 100))}%` }}
-                          />
+                  <div ref={hudTopCenterRef} className="absolute top-[82px] sm:top-4 left-1/2 -translate-x-1/2 z-30 flex w-[calc(100vw-24px)] max-w-[520px] flex-col items-center gap-2 sm:w-[520px]">
+                    <div className="relative grid grid-cols-[64px_minmax(132px,1fr)_112px] sm:grid-cols-[86px_1fr_166px] w-full overflow-hidden border border-[#00f0ff]/45 bg-[#050811]/92 shadow-[0_0_22px_rgba(0,240,255,0.16)] backdrop-blur-sm">
+                      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#00f0ff] to-transparent opacity-80" />
+
+                      <div className="flex flex-col items-center justify-center border-r border-[#00f0ff]/20 px-2 py-2 sm:py-2.5">
+                        <span className="text-[7px] sm:text-[9px] font-bold tracking-[0.22em] text-[#00f0ff]/65">LEVEL</span>
+                        <span className="font-black text-xl sm:text-3xl leading-none text-white drop-shadow-[0_0_9px_rgba(0,240,255,0.65)]" style={{ fontFamily: 'var(--font-display, Anton, sans-serif)' }}>
+                          {uiState.level}
+                        </span>
+                      </div>
+
+                      <div className="flex min-w-0 flex-col justify-center gap-1.5 px-3 sm:px-5 py-2 sm:py-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate text-[7px] sm:text-[9px] font-bold tracking-[0.22em] text-[#00f0ff]/65">MEMORY CHAIN</span>
+                          <span className="text-[9px] sm:text-[11px] font-black tabular-nums text-white/80">{uiState.chainProgress}/4</span>
                         </div>
-                        <div className="text-[9px] text-white/70 tracking-widest mt-1 text-center">HP {Math.ceil(uiState.hp)} / {uiState.maxHp}</div>
+                        <div className="grid grid-cols-4 gap-1.5 sm:gap-2" aria-label={`Chain progress ${uiState.chainProgress} of 4`}>
+                          {[0, 1, 2, 3].map(index => {
+                            const isComplete = index < uiState.chainProgress;
+                            return (
+                              <motion.span
+                                key={index}
+                                animate={isComplete ? { opacity: 1, scaleX: 1 } : { opacity: 0.35, scaleX: 0.96 }}
+                                transition={{ duration: 0.16 }}
+                                className={`h-2.5 sm:h-3 border ${isComplete ? 'border-[#9cffff] bg-[#00f0ff] shadow-[0_0_10px_rgba(0,240,255,0.8)]' : 'border-white/35 bg-white/[0.04]'}`}
+                              />
+                            );
+                          })}
+                        </div>
                       </div>
-                      <div className="flex gap-1.5" aria-label={`Chain progress ${uiState.chainProgress} of 4`}>
-                        {[0, 1, 2, 3].map(index => (
-                          <span
-                            key={index}
-                            className={`w-3 h-3 border transition-all duration-150 ${index < uiState.chainProgress ? 'bg-white border-white shadow-[0_0_8px_white]' : 'bg-transparent border-white/35'}`}
-                          />
-                        ))}
-                      </div>
+
+                      <motion.div
+                        key={pulseSpawnerCounter ? `memory-spawner-pulse-${pulseKey}` : 'memory-spawner-idle'}
+                        animate={pulseSpawnerCounter ? { scale: [1, 1.05, 1], filter: ['brightness(1)', 'brightness(1.6)', 'brightness(1)'] } : { scale: 1, filter: 'brightness(1)' }}
+                        transition={{ duration: 0.55, ease: 'easeOut' }}
+                        className="flex flex-col justify-center gap-1.5 border-l border-[#00f0ff]/20 px-2.5 sm:px-4 py-2 sm:py-2.5"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[7px] sm:text-[9px] font-bold tracking-[0.16em] text-[#00f0ff]/65">SPAWNERS</span>
+                          <span className="text-[9px] sm:text-[11px] font-black tabular-nums text-white/80">{uiState.spawnersLeft}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-1" aria-label={`${uiState.spawnersLeft} spawners remaining`}>
+                          {ENEMY_FACTIONS.map(faction => {
+                            const isActive = activeCoreFactions.has(faction);
+                            const color = ENEMY_COLOR_HEX[faction];
+                            return (
+                              <span
+                                key={faction}
+                                title={`${faction} spawner ${isActive ? 'active' : 'destroyed'}`}
+                                className="relative flex h-3.5 w-3.5 sm:h-4 sm:w-4 rotate-45 items-center justify-center border transition-all duration-300"
+                                style={{
+                                  borderColor: isActive ? color : 'rgba(255,255,255,0.16)',
+                                  backgroundColor: isActive ? color : 'rgba(255,255,255,0.025)',
+                                  boxShadow: isActive ? `0 0 9px ${color}` : 'none',
+                                }}
+                              >
+                                {!isActive && <span className="h-px w-2 rotate-45 bg-white/25" />}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </motion.div>
                     </div>
                     {chainFeedback && (
                       <motion.div
@@ -14708,7 +14757,7 @@ export default function GameCanvas() {
                   }}
                 >
                   {/* Left: Score & Spawners / Target Counters */}
-                  <div ref={hudTopLeftRef} className="flex items-stretch gap-2 sm:gap-6 ml-28 sm:ml-32 lg:ml-36">
+                  <div ref={hudTopLeftRef} className={`${mpState.roomId ? 'flex' : 'hidden'} items-stretch gap-2 sm:gap-6 ml-28 sm:ml-32 lg:ml-36`}>
                     <motion.div
                       animate={flashScore ? {
                         filter: [
