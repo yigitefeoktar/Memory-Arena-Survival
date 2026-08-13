@@ -47,6 +47,7 @@ import {
 import {
   ENEMY_COLOR_HEX,
   MEMORY_ARENA_CONFIG,
+  MEMORY_ARENA_PALETTE,
   MEMORY_MAP_CORE_INDICES,
   PLAYER_COLOR_HEX,
   advanceTriangleAi,
@@ -8950,7 +8951,7 @@ export default function GameCanvas() {
 
     const triggerEliminationAnimation = (x: number, y: number, colorIdx: number, label?: string) => {
       const pDef = PLAYER_COLORS[colorIdx !== undefined ? colorIdx : 0] || PLAYER_COLORS[0];
-      const pColor = pDef.n;
+      const pColor = stateRef.current.memoryMode ? MEMORY_ARENA_PALETTE.player.effect : pDef.n;
 
       // 1. Vector Ring Burst (Option 1)
       const count = 48; // A beautiful complete circle of particles
@@ -9432,6 +9433,7 @@ export default function GameCanvas() {
           }
 
           const pDef = PLAYER_COLORS[playerProfileRef.current.colorIdx] || PLAYER_COLORS[0];
+          const playerTrailColor = state.memoryMode ? MEMORY_ARENA_PALETTE.player.effect : pDef.n;
           const playerKb = Math.sqrt((state.player.kbvx || 0) ** 2 + (state.player.kbvy || 0) ** 2);
           if (playerKb > 150) {
             // Flying away / high knockback - spawn powerful super trails every frame
@@ -9439,7 +9441,7 @@ export default function GameCanvas() {
               x: state.player.x,
               y: state.player.y,
               age: 0,
-              color: pDef.n,
+              color: playerTrailColor,
               radius: state.player.radius * 0.8,
               isSuperStrong: true
             });
@@ -9449,7 +9451,7 @@ export default function GameCanvas() {
               x: state.player.x,
               y: state.player.y,
               age: 0,
-              color: pDef.n,
+              color: playerTrailColor,
               radius: state.player.radius * 0.4
             });
           }
@@ -11552,8 +11554,12 @@ export default function GameCanvas() {
             if (bullet.isNeutral) {
               trailColor = '#aaaaaa';
             } else if (bullet.isPlayer) {
-              const pDef = PLAYER_COLORS[bullet.colorIdx !== undefined ? bullet.colorIdx : 0] || PLAYER_COLORS[0];
-              trailColor = pDef.n;
+              if (state.memoryMode) {
+                trailColor = MEMORY_ARENA_PALETTE.player.effect;
+              } else {
+                const pDef = PLAYER_COLORS[bullet.colorIdx !== undefined ? bullet.colorIdx : 0] || PLAYER_COLORS[0];
+                trailColor = pDef.n;
+              }
             } else if (bullet.factionColor) {
               trailColor = ENEMY_COLOR_HEX[bullet.factionColor];
             }
@@ -11751,8 +11757,12 @@ export default function GameCanvas() {
           if (bullet.isNeutral) {
             bulletColor = '#aaaaaa';
           } else if (bullet.isPlayer) {
-            const pDef = PLAYER_COLORS[bullet.colorIdx !== undefined ? bullet.colorIdx : 0] || PLAYER_COLORS[0];
-            bulletColor = pDef.n;
+            if (state.memoryMode) {
+              bulletColor = MEMORY_ARENA_PALETTE.player.effect;
+            } else {
+              const pDef = PLAYER_COLORS[bullet.colorIdx !== undefined ? bullet.colorIdx : 0] || PLAYER_COLORS[0];
+              bulletColor = pDef.n;
+            }
           }
 
           // Check hit Enemies (NPCs - Red)
@@ -12183,8 +12193,8 @@ export default function GameCanvas() {
       ctx.stroke();
 
       // Draw Walls
-      ctx.fillStyle = '#050508';
-      ctx.strokeStyle = '#00f0ff';
+      ctx.fillStyle = state.memoryMode ? MEMORY_ARENA_PALETTE.walls.fill : '#050508';
+      ctx.strokeStyle = state.memoryMode ? MEMORY_ARENA_PALETTE.walls.stroke : '#00f0ff';
       ctx.lineWidth = 2;
       for (const wall of activeWalls) {
         if (
@@ -12197,9 +12207,15 @@ export default function GameCanvas() {
         ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
 
         ctx.save();
-        ctx.shadowColor = '#00f0ff';
-        ctx.shadowBlur = 8;
+        ctx.shadowColor = state.memoryMode ? MEMORY_ARENA_PALETTE.walls.glow : '#00f0ff';
+        ctx.shadowBlur = state.memoryMode ? 4 : 8;
         ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
+        if (state.memoryMode) {
+          ctx.globalAlpha = 0.42;
+          ctx.strokeStyle = MEMORY_ARENA_PALETTE.walls.highlight;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(wall.x + 2, wall.y + 2, Math.max(0, wall.w - 4), Math.max(0, wall.h - 4));
+        }
         ctx.restore();
       }
 
@@ -12501,7 +12517,8 @@ export default function GameCanvas() {
         ) continue;
 
         if (state.memoryMode && enemy.shape && enemy.factionColor) {
-          const enemyColor = ENEMY_COLOR_HEX[enemy.factionColor];
+          const enemyPalette = MEMORY_ARENA_PALETTE.factions[enemy.factionColor];
+          const enemyColor = enemyPalette.bright;
           if (uiRef.current.status === 'PLAYING' && Math.random() > 0.72) {
             state.trails.push({
               x: enemy.x,
@@ -12538,9 +12555,9 @@ export default function GameCanvas() {
           }
           ctx.shadowColor = enemyColor;
           ctx.shadowBlur = telegraphVisual?.glowBlur ?? (enemy.shape === 'triangle' && enemy.triangleAi?.phase === 'dash' ? 24 : 12);
-          ctx.fillStyle = enemyColor;
-          ctx.strokeStyle = '#080a12';
-          ctx.lineWidth = 2.5;
+          ctx.fillStyle = enemyPalette.body;
+          ctx.strokeStyle = enemyColor;
+          ctx.lineWidth = 2.75;
           ctx.beginPath();
           if (enemy.shape === 'circle') {
             ctx.arc(0, 0, enemy.radius, 0, Math.PI * 2);
@@ -12554,6 +12571,12 @@ export default function GameCanvas() {
           }
           ctx.fill();
           ctx.stroke();
+
+          ctx.shadowBlur = 7;
+          ctx.fillStyle = enemyColor;
+          ctx.beginPath();
+          ctx.arc(0, 0, Math.max(3, enemy.radius * 0.2), 0, Math.PI * 2);
+          ctx.fill();
 
           ctx.restore();
           continue;
@@ -12851,9 +12874,14 @@ export default function GameCanvas() {
           color = '#aaaaaa';
           glow = 'rgba(170, 170, 170, 0.3)';
         } else if (bullet.isPlayer) {
-          const pDef = PLAYER_COLORS[bullet.colorIdx !== undefined ? bullet.colorIdx : 0] || PLAYER_COLORS[0];
-          color = pDef.n;
-          glow = pDef.g || 'rgba(0, 204, 255, 0.3)';
+          if (state.memoryMode) {
+            color = MEMORY_ARENA_PALETTE.player.effect;
+            glow = MEMORY_ARENA_PALETTE.player.glow;
+          } else {
+            const pDef = PLAYER_COLORS[bullet.colorIdx !== undefined ? bullet.colorIdx : 0] || PLAYER_COLORS[0];
+            color = pDef.n;
+            glow = pDef.g || 'rgba(0, 204, 255, 0.3)';
+          }
         } else if (bullet.factionColor) {
           color = ENEMY_COLOR_HEX[bullet.factionColor];
           glow = `${color}55`;
@@ -12991,8 +13019,8 @@ export default function GameCanvas() {
       if (uiRef.current.status !== 'GAME_OVER') {
         const localId = socketRef.current?.id || 'local';
         const pDef = PLAYER_COLORS[state.memoryMode ? 0 : playerProfileRef.current.colorIdx] || PLAYER_COLORS[0];
-        const pColor = pDef.n;
-        const pGlow = pDef.g;
+        const pColor = state.memoryMode ? MEMORY_ARENA_PALETTE.player.body : pDef.n;
+        const pGlow = state.memoryMode ? MEMORY_ARENA_PALETTE.player.glow : pDef.g;
         const pName = playerProfileRef.current.name || 'PLAYER';
 
         const worldMouseX = state.mouse.x + state.camera.x;

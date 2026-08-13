@@ -4,14 +4,38 @@ export type EnemyShape = (typeof ENEMY_SHAPES)[number];
 export const ENEMY_FACTIONS = ['red', 'blue', 'green', 'yellow'] as const;
 export type EnemyFactionColor = (typeof ENEMY_FACTIONS)[number];
 
+/**
+ * The complete solo-gameplay palette lives here so visual tuning never
+ * requires hunting through canvas rendering code.
+ */
+export const MEMORY_ARENA_PALETTE = {
+  player: {
+    body: '#F4FBFF',
+    effect: '#00E5FF',
+    glow: 'rgba(0, 229, 255, 0.34)',
+  },
+  walls: {
+    fill: '#101820',
+    stroke: '#294354',
+    highlight: '#477083',
+    glow: 'rgba(71, 112, 131, 0.28)',
+  },
+  factions: {
+    red: { bright: '#FF4D6D', body: '#541D2B', glow: 'rgba(255, 77, 109, 0.34)' },
+    blue: { bright: '#637CFF', body: '#222B59', glow: 'rgba(99, 124, 255, 0.34)' },
+    green: { bright: '#2ED99A', body: '#174A3A', glow: 'rgba(46, 217, 154, 0.32)' },
+    yellow: { bright: '#FFC857', body: '#57451E', glow: 'rgba(255, 200, 87, 0.32)' },
+  },
+} as const;
+
 export const ENEMY_COLOR_HEX: Record<EnemyFactionColor, string> = {
-  red: '#ff3344',
-  blue: '#3b82f6',
-  green: '#22c55e',
-  yellow: '#facc15',
+  red: MEMORY_ARENA_PALETTE.factions.red.bright,
+  blue: MEMORY_ARENA_PALETTE.factions.blue.bright,
+  green: MEMORY_ARENA_PALETTE.factions.green.bright,
+  yellow: MEMORY_ARENA_PALETTE.factions.yellow.bright,
 };
 
-export const PLAYER_COLOR_HEX = '#00f0ff';
+export const PLAYER_COLOR_HEX = MEMORY_ARENA_PALETTE.player.effect;
 
 export const MEMORY_ARENA_CONFIG = {
   combat: {
