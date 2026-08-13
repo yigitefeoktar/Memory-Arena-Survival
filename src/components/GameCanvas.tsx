@@ -46,7 +46,6 @@ import {
 } from '../shared/gameplayAnalyticsRelay';
 import {
   ENEMY_COLOR_HEX,
-  ENEMY_FACTIONS,
   MEMORY_ARENA_CONFIG,
   MEMORY_MAP_CORE_INDICES,
   PLAYER_COLOR_HEX,
@@ -14627,12 +14626,6 @@ export default function GameCanvas() {
           }
         } as const;
         const activeT = toolsData[uiState.activeTool];
-        const activeCoreFactions = new Set<EnemyFactionColor>();
-        stateRef.current.spawners.forEach(spawner => {
-          if (spawner.isCore && spawner.hp > 0 && isEnemyFactionColor(spawner.factionColor)) {
-            activeCoreFactions.add(spawner.factionColor);
-          }
-        });
 
         return (
           <AnimatePresence>
@@ -14673,81 +14666,47 @@ export default function GameCanvas() {
                 {!mpState.roomId && (
                   <div
                     ref={hudTopLeftRef}
-                    className="absolute left-3 top-3 z-30 flex w-[calc(100vw-120px)] max-w-[360px] flex-col items-center gap-2 sm:left-6 sm:top-6 sm:w-[340px] lg:w-[360px]"
+                    className="absolute left-4 top-3 z-30 flex w-[calc(100vw-132px)] max-w-[310px] flex-col items-center gap-2 sm:left-7 sm:top-6 sm:w-[310px]"
                     style={{
                       top: 'calc(0.75rem + env(safe-area-inset-top, 0px))',
                       left: 'calc(0.75rem + env(safe-area-inset-left, 0px))',
                     }}
                   >
-                    <div
-                      className="relative w-full bg-[#00f0ff]/25 p-px shadow-[0_8px_24px_rgba(0,0,0,0.45),0_0_16px_rgba(0,240,255,0.08)]"
-                      style={{ clipPath: 'polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px)' }}
-                    >
-                      <div
-                        className="relative grid w-full grid-cols-[48px_minmax(104px,1fr)_82px] gap-1.5 bg-[#050811]/95 p-1.5 backdrop-blur-sm sm:grid-cols-[55px_minmax(124px,1fr)_96px] sm:gap-2 sm:p-2"
-                        style={{ clipPath: 'polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px)' }}
-                      >
-                        <div className="pointer-events-none absolute left-4 right-8 top-0 h-px bg-gradient-to-r from-[#00f0ff]/80 via-[#00f0ff]/20 to-transparent" />
-
-                        <div className="flex items-center justify-center bg-[#00f0ff]/[0.055] px-1 py-2">
-                          <span className="text-[7px] font-black tracking-[0.12em] text-[#00f0ff]/70 sm:text-[8px]">LV</span>
-                          <span className="ml-1 font-black text-xl leading-none tabular-nums text-white drop-shadow-[0_0_8px_rgba(0,240,255,0.55)] sm:text-2xl" style={{ fontFamily: 'var(--font-display, Anton, sans-serif)' }}>
+                    <div className="w-full -skew-x-6 border-2 border-[#00f0ff]/55 bg-[#050811]/90 shadow-[0_0_12px_rgba(0,240,255,0.14)] backdrop-blur-sm">
+                      <div className="grid h-[46px] skew-x-6 grid-cols-[52px_minmax(76px,1fr)_54px] items-center px-2 sm:grid-cols-[62px_minmax(116px,1fr)_64px]">
+                        <div className="flex items-baseline justify-center border-r border-[#00f0ff]/15 pr-2">
+                          <span className="text-[8px] font-black tracking-[0.12em] text-[#00f0ff]/70">LV</span>
+                          <span className="ml-1 font-black text-2xl leading-none tabular-nums text-white drop-shadow-[0_0_8px_rgba(0,240,255,0.55)]" style={{ fontFamily: 'var(--font-display, Anton, sans-serif)' }}>
                             {uiState.level.toString().padStart(2, '0')}
                           </span>
                         </div>
 
-                        <div className="flex min-w-0 flex-col justify-center gap-1.5 px-1 py-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="truncate text-[7px] font-bold tracking-[0.15em] text-[#00f0ff]/75 sm:text-[8px]">MEMORY CHAIN</span>
-                            <span className="text-[9px] font-black tabular-nums text-white sm:text-[10px]">{uiState.chainProgress}<span className="text-white/35">/4</span></span>
-                          </div>
-                          <div className="grid grid-cols-4 gap-1.5" aria-label={`Chain progress ${uiState.chainProgress} of 4`}>
+                        <div className="flex min-w-0 items-center gap-2 px-3" aria-label={`Chain progress ${uiState.chainProgress} of 4`}>
+                          <div className="grid min-w-0 flex-1 grid-cols-4 gap-1.5">
                             {[0, 1, 2, 3].map(index => {
                               const isComplete = index < uiState.chainProgress;
                               return (
                                 <motion.span
                                   key={index}
-                                  animate={isComplete ? { opacity: 1, scaleX: 1 } : { opacity: 0.38, scaleX: 0.94 }}
+                                  animate={isComplete ? { opacity: 1, scaleX: 1 } : { opacity: 0.34, scaleX: 0.92 }}
                                   transition={{ duration: 0.18 }}
-                                  className={`relative h-3 overflow-hidden border sm:h-3.5 ${isComplete ? 'border-[#9cffff] bg-[#00f0ff] shadow-[0_0_10px_rgba(0,240,255,0.75)]' : 'border-white/30 bg-white/[0.035]'}`}
-                                >
-                                  {isComplete && <span className="absolute inset-y-0 left-0 w-1/2 bg-gradient-to-r from-white/55 to-transparent" />}
-                                </motion.span>
+                                  className={`h-3 border ${isComplete ? 'border-[#9cffff] bg-[#00f0ff] shadow-[0_0_9px_rgba(0,240,255,0.8)]' : 'border-white/35 bg-transparent'}`}
+                                />
                               );
                             })}
                           </div>
+                          <span className="text-[9px] font-black tabular-nums text-white">{uiState.chainProgress}<span className="text-white/35">/4</span></span>
                         </div>
 
                         <motion.div
                           key={pulseSpawnerCounter ? `memory-spawner-pulse-${pulseKey}` : 'memory-spawner-idle'}
-                          animate={pulseSpawnerCounter ? { scale: [1, 1.06, 1], filter: ['brightness(1)', 'brightness(1.6)', 'brightness(1)'] } : { scale: 1, filter: 'brightness(1)' }}
+                          animate={pulseSpawnerCounter ? { scale: [1, 1.12, 1], filter: ['brightness(1)', 'brightness(1.8)', 'brightness(1)'] } : { scale: 1, filter: 'brightness(1)' }}
                           transition={{ duration: 0.55, ease: 'easeOut' }}
-                          className="flex flex-col justify-center gap-2 bg-white/[0.025] px-2 py-1.5"
+                          className="flex items-baseline justify-center border-l border-[#00f0ff]/15 pl-2"
+                          aria-label={`${uiState.spawnersLeft} cores remaining`}
                         >
-                          <div className="flex items-baseline justify-between gap-1">
-                            <span className="text-[7px] font-bold tracking-[0.12em] text-white/45 sm:text-[8px]">CORES</span>
-                            <span className="text-[10px] font-black tabular-nums text-white sm:text-xs">{uiState.spawnersLeft}</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-1" aria-label={`${uiState.spawnersLeft} cores remaining`}>
-                            {ENEMY_FACTIONS.map(faction => {
-                              const isActive = activeCoreFactions.has(faction);
-                              const color = ENEMY_COLOR_HEX[faction];
-                              return (
-                                <span
-                                  key={faction}
-                                  title={`${faction} core ${isActive ? 'active' : 'destroyed'}`}
-                                  className="relative flex h-2.5 w-2.5 rotate-45 items-center justify-center border transition-all duration-300 sm:h-3 sm:w-3"
-                                  style={{
-                                    borderColor: isActive ? color : 'rgba(255,255,255,0.16)',
-                                    backgroundColor: isActive ? color : 'rgba(255,255,255,0.025)',
-                                    boxShadow: isActive ? `0 0 8px ${color}` : 'none',
-                                  }}
-                                >
-                                  {!isActive && <span className="h-px w-2 rotate-45 bg-white/25" />}
-                                </span>
-                              );
-                            })}
-                          </div>
+                          <span className="text-[7px] font-bold tracking-[0.1em] text-[#00f0ff]/65">CORES</span>
+                          <span className="ml-1.5 text-base font-black tabular-nums text-white">{uiState.spawnersLeft}</span>
                         </motion.div>
                       </div>
                     </div>
