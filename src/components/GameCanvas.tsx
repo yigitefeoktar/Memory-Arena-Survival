@@ -14671,23 +14671,33 @@ export default function GameCanvas() {
                 )}
 
                 {!mpState.roomId && (
-                  <div ref={hudTopCenterRef} className="absolute top-[82px] sm:top-4 left-1/2 -translate-x-1/2 z-30 flex w-[calc(100vw-24px)] max-w-[520px] flex-col items-center gap-2 sm:w-[520px]">
-                    <div className="relative grid grid-cols-[64px_minmax(132px,1fr)_112px] sm:grid-cols-[86px_1fr_166px] w-full overflow-hidden border border-[#00f0ff]/45 bg-[#050811]/92 shadow-[0_0_22px_rgba(0,240,255,0.16)] backdrop-blur-sm">
+                  <div
+                    ref={hudTopLeftRef}
+                    className="absolute left-3 top-3 z-30 flex w-[calc(100vw-120px)] max-w-[420px] flex-col items-center gap-2 sm:left-6 sm:top-6 sm:w-[360px] lg:w-[420px]"
+                    style={{
+                      top: 'calc(0.75rem + env(safe-area-inset-top, 0px))',
+                      left: 'calc(0.75rem + env(safe-area-inset-left, 0px))',
+                    }}
+                  >
+                    <div className="relative grid w-full grid-cols-[48px_minmax(90px,1fr)_82px] overflow-hidden border border-[#00f0ff]/45 bg-[#050811]/92 shadow-[0_0_22px_rgba(0,240,255,0.16)] backdrop-blur-sm sm:grid-cols-[62px_minmax(120px,1fr)_112px] lg:grid-cols-[72px_1fr_138px]">
                       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#00f0ff] to-transparent opacity-80" />
 
-                      <div className="flex flex-col items-center justify-center border-r border-[#00f0ff]/20 px-2 py-2 sm:py-2.5">
-                        <span className="text-[7px] sm:text-[9px] font-bold tracking-[0.22em] text-[#00f0ff]/65">LEVEL</span>
-                        <span className="font-black text-xl sm:text-3xl leading-none text-white drop-shadow-[0_0_9px_rgba(0,240,255,0.65)]" style={{ fontFamily: 'var(--font-display, Anton, sans-serif)' }}>
+                      <div className="flex flex-col items-center justify-center border-r border-[#00f0ff]/20 px-1.5 py-2 sm:py-2.5">
+                        <span className="text-[6px] font-bold tracking-[0.16em] text-[#00f0ff]/65 sm:text-[8px]">LEVEL</span>
+                        <span className="font-black text-xl leading-none text-white drop-shadow-[0_0_9px_rgba(0,240,255,0.65)] sm:text-2xl lg:text-3xl" style={{ fontFamily: 'var(--font-display, Anton, sans-serif)' }}>
                           {uiState.level}
                         </span>
                       </div>
 
-                      <div className="flex min-w-0 flex-col justify-center gap-1.5 px-3 sm:px-5 py-2 sm:py-2.5">
+                      <div className="flex min-w-0 flex-col justify-center gap-1.5 px-2.5 py-2 sm:px-3.5 sm:py-2.5 lg:px-4">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="truncate text-[7px] sm:text-[9px] font-bold tracking-[0.22em] text-[#00f0ff]/65">MEMORY CHAIN</span>
-                          <span className="text-[9px] sm:text-[11px] font-black tabular-nums text-white/80">{uiState.chainProgress}/4</span>
+                          <span className="truncate text-[6px] font-bold tracking-[0.16em] text-[#00f0ff]/65 sm:text-[8px] lg:text-[9px]">
+                            <span className="lg:hidden">CHAIN</span>
+                            <span className="hidden lg:inline">MEMORY CHAIN</span>
+                          </span>
+                          <span className="text-[8px] font-black tabular-nums text-white/80 sm:text-[10px]">{uiState.chainProgress}/4</span>
                         </div>
-                        <div className="grid grid-cols-4 gap-1.5 sm:gap-2" aria-label={`Chain progress ${uiState.chainProgress} of 4`}>
+                        <div className="grid grid-cols-4 gap-1 sm:gap-1.5" aria-label={`Chain progress ${uiState.chainProgress} of 4`}>
                           {[0, 1, 2, 3].map(index => {
                             const isComplete = index < uiState.chainProgress;
                             return (
@@ -14695,7 +14705,7 @@ export default function GameCanvas() {
                                 key={index}
                                 animate={isComplete ? { opacity: 1, scaleX: 1 } : { opacity: 0.35, scaleX: 0.96 }}
                                 transition={{ duration: 0.16 }}
-                                className={`h-2.5 sm:h-3 border ${isComplete ? 'border-[#9cffff] bg-[#00f0ff] shadow-[0_0_10px_rgba(0,240,255,0.8)]' : 'border-white/35 bg-white/[0.04]'}`}
+                                className={`h-2 sm:h-2.5 border ${isComplete ? 'border-[#9cffff] bg-[#00f0ff] shadow-[0_0_10px_rgba(0,240,255,0.8)]' : 'border-white/35 bg-white/[0.04]'}`}
                               />
                             );
                           })}
@@ -14706,11 +14716,11 @@ export default function GameCanvas() {
                         key={pulseSpawnerCounter ? `memory-spawner-pulse-${pulseKey}` : 'memory-spawner-idle'}
                         animate={pulseSpawnerCounter ? { scale: [1, 1.05, 1], filter: ['brightness(1)', 'brightness(1.6)', 'brightness(1)'] } : { scale: 1, filter: 'brightness(1)' }}
                         transition={{ duration: 0.55, ease: 'easeOut' }}
-                        className="flex flex-col justify-center gap-1.5 border-l border-[#00f0ff]/20 px-2.5 sm:px-4 py-2 sm:py-2.5"
+                        className="flex flex-col justify-center gap-1.5 border-l border-[#00f0ff]/20 px-2 py-2 sm:px-3 sm:py-2.5"
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-[7px] sm:text-[9px] font-bold tracking-[0.16em] text-[#00f0ff]/65">SPAWNERS</span>
-                          <span className="text-[9px] sm:text-[11px] font-black tabular-nums text-white/80">{uiState.spawnersLeft}</span>
+                          <span className="text-[6px] font-bold tracking-[0.1em] text-[#00f0ff]/65 sm:text-[8px]">SPAWNERS</span>
+                          <span className="text-[8px] font-black tabular-nums text-white/80 sm:text-[10px]">{uiState.spawnersLeft}</span>
                         </div>
                         <div className="flex items-center justify-between gap-1" aria-label={`${uiState.spawnersLeft} spawners remaining`}>
                           {ENEMY_FACTIONS.map(faction => {
@@ -14720,7 +14730,7 @@ export default function GameCanvas() {
                               <span
                                 key={faction}
                                 title={`${faction} spawner ${isActive ? 'active' : 'destroyed'}`}
-                                className="relative flex h-3.5 w-3.5 sm:h-4 sm:w-4 rotate-45 items-center justify-center border transition-all duration-300"
+                                className="relative flex h-2.5 w-2.5 rotate-45 items-center justify-center border transition-all duration-300 sm:h-3.5 sm:w-3.5"
                                 style={{
                                   borderColor: isActive ? color : 'rgba(255,255,255,0.16)',
                                   backgroundColor: isActive ? color : 'rgba(255,255,255,0.025)',
@@ -14749,7 +14759,7 @@ export default function GameCanvas() {
                 )}
 
                 <div
-                  className="absolute top-0 left-0 right-0 p-3 sm:p-6 flex flex-row justify-between items-start pointer-events-none z-10 w-full"
+                  className={`absolute top-0 left-0 right-0 p-3 sm:p-6 flex flex-row ${mpState.roomId ? 'justify-between' : 'justify-end'} items-start pointer-events-none z-10 w-full`}
                   style={{
                     paddingTop: 'calc(0.75rem + env(safe-area-inset-top, 0px))',
                     paddingLeft: 'calc(0.75rem + env(safe-area-inset-left, 0px))',
@@ -14757,7 +14767,7 @@ export default function GameCanvas() {
                   }}
                 >
                   {/* Left: Score & Spawners / Target Counters */}
-                  <div ref={hudTopLeftRef} className={`${mpState.roomId ? 'flex' : 'hidden'} items-stretch gap-2 sm:gap-6 ml-28 sm:ml-32 lg:ml-36`}>
+                  <div ref={mpState.roomId ? hudTopLeftRef : undefined} className={`${mpState.roomId ? 'flex' : 'hidden'} items-stretch gap-2 sm:gap-6 ml-28 sm:ml-32 lg:ml-36`}>
                     <motion.div
                       animate={flashScore ? {
                         filter: [
@@ -14815,7 +14825,7 @@ export default function GameCanvas() {
                   </div>
 
                   {/* Right: Pause & Quit buttons */}
-                  <div ref={hudTopRightRef} className="flex flex-col sm:flex-row items-end sm:items-center justify-center gap-2 sm:gap-4 pointer-events-auto h-full pr-0 sm:pr-2">
+                  <div ref={hudTopRightRef} className="flex flex-col lg:flex-row items-end lg:items-center justify-center gap-2 lg:gap-4 pointer-events-auto h-full pr-0 sm:pr-2">
                     <button
                       onPointerDown={(e) => {
                         e.stopPropagation();
@@ -14839,7 +14849,7 @@ export default function GameCanvas() {
                           setConfirmResign(false);
                         }
                       }}
-                      className="w-[84px] sm:w-[144px] h-[34px] sm:h-[48px] border-2 border-[#FBBF24] hover:bg-[#FBBF24] hover:text-black text-[#FBBF24] font-black tracking-[0.15em] sm:tracking-widest text-[9px] sm:text-xs uppercase transition-all duration-200 shadow-[0_0_8px_rgba(251,191,36,0.2)] hover:shadow-[0_0_15px_rgba(251,191,36,0.6)] active:scale-95 flex items-center justify-center -skew-x-12 focus:outline-none"
+                      className="w-[84px] sm:w-[120px] lg:w-[144px] h-[34px] sm:h-[42px] lg:h-[48px] border-2 border-[#FBBF24] hover:bg-[#FBBF24] hover:text-black text-[#FBBF24] font-black tracking-[0.15em] sm:tracking-widest text-[9px] sm:text-xs uppercase transition-all duration-200 shadow-[0_0_8px_rgba(251,191,36,0.2)] hover:shadow-[0_0_15px_rgba(251,191,36,0.6)] active:scale-95 flex items-center justify-center -skew-x-12 focus:outline-none"
                     >
                       <span className="skew-x-12 whitespace-nowrap">
                         {mpState.roomId ? (mpMenuOpen ? '▶ RESUME' : '|| MENU') : (uiState.status === 'PAUSED' ? '▶ RESUME' : '|| PAUSE')}
@@ -14862,7 +14872,7 @@ export default function GameCanvas() {
                           setConfirmResign(true);
                         }
                       }}
-                      className="w-[84px] sm:w-[144px] h-[34px] sm:h-[48px] border-2 border-[#ff003c] hover:bg-[#ff003c] hover:text-white text-[#ff003c] font-black tracking-[0.15em] sm:tracking-widest text-[9px] sm:text-xs uppercase transition-all duration-200 shadow-[0_0_8px_rgba(255,0,60,0.2)] hover:shadow-[0_0_15px_rgba(255,0,60,0.6)] active:scale-95 flex items-center justify-center -skew-x-12"
+                      className="w-[84px] sm:w-[120px] lg:w-[144px] h-[34px] sm:h-[42px] lg:h-[48px] border-2 border-[#ff003c] hover:bg-[#ff003c] hover:text-white text-[#ff003c] font-black tracking-[0.15em] sm:tracking-widest text-[9px] sm:text-xs uppercase transition-all duration-200 shadow-[0_0_8px_rgba(255,0,60,0.2)] hover:shadow-[0_0_15px_rgba(255,0,60,0.6)] active:scale-95 flex items-center justify-center -skew-x-12"
                     >
                       <span className="skew-x-12 whitespace-nowrap">
                         <span className="inline-block scale-[1.3] -translate-y-[1px] mr-0.5">×</span> QUIT
