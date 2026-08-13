@@ -14666,17 +14666,18 @@ export default function GameCanvas() {
                 {!mpState.roomId && (
                   <div
                     ref={hudTopLeftRef}
-                    className="absolute left-4 top-3 z-30 flex w-[calc(100vw-132px)] max-w-[310px] flex-col items-center gap-2 sm:left-7 sm:top-6 sm:w-[310px]"
+                    className="absolute left-4 top-3 z-30 flex w-[calc(100vw-132px)] max-w-[330px] flex-col items-start gap-2 font-mono sm:left-7 sm:top-6 sm:w-[330px]"
                     style={{
                       top: 'calc(0.75rem + env(safe-area-inset-top, 0px))',
                       left: 'calc(0.75rem + env(safe-area-inset-left, 0px))',
                     }}
                   >
-                    <div className="w-full -skew-x-6 border-2 border-[#00f0ff]/55 bg-[#050811]/90 shadow-[0_0_12px_rgba(0,240,255,0.14)] backdrop-blur-sm">
-                      <div className="grid h-[46px] skew-x-6 grid-cols-[52px_minmax(76px,1fr)_54px] items-center px-2 sm:grid-cols-[62px_minmax(116px,1fr)_64px]">
+                    <div className="flex h-[46px] w-full items-stretch gap-3">
+                      <div className="min-w-0 flex-1 -skew-x-12 border-2 border-[#00f0ff]/55 bg-[#050811]/90 shadow-[0_0_12px_rgba(0,240,255,0.14)] backdrop-blur-sm">
+                        <div className="grid h-full skew-x-12 grid-cols-[52px_minmax(76px,1fr)] items-center px-2 sm:grid-cols-[62px_minmax(116px,1fr)]">
                         <div className="flex items-baseline justify-center border-r border-[#00f0ff]/15 pr-2">
                           <span className="text-[8px] font-black tracking-[0.12em] text-[#00f0ff]/70">LV</span>
-                          <span className="ml-1 font-black text-2xl leading-none tabular-nums text-white drop-shadow-[0_0_8px_rgba(0,240,255,0.55)]" style={{ fontFamily: 'var(--font-display, Anton, sans-serif)' }}>
+                          <span className="ml-1 font-black text-xl leading-none tabular-nums text-white drop-shadow-[0_0_8px_rgba(0,240,255,0.55)]">
                             {uiState.level.toString().padStart(2, '0')}
                           </span>
                         </div>
@@ -14697,18 +14698,21 @@ export default function GameCanvas() {
                           </div>
                           <span className="text-[9px] font-black tabular-nums text-white">{uiState.chainProgress}<span className="text-white/35">/4</span></span>
                         </div>
+                        </div>
+                      </div>
 
-                        <motion.div
+                      <motion.div
                           key={pulseSpawnerCounter ? `memory-spawner-pulse-${pulseKey}` : 'memory-spawner-idle'}
                           animate={pulseSpawnerCounter ? { scale: [1, 1.12, 1], filter: ['brightness(1)', 'brightness(1.8)', 'brightness(1)'] } : { scale: 1, filter: 'brightness(1)' }}
                           transition={{ duration: 0.55, ease: 'easeOut' }}
-                          className="flex items-baseline justify-center border-l border-[#00f0ff]/15 pl-2"
+                          className="flex w-[72px] shrink-0 -skew-x-12 items-center justify-center border-2 border-[#ff3344] bg-[#0b0509]/90 text-[#ff3344] shadow-[0_0_10px_rgba(255,51,68,0.2)] backdrop-blur-sm sm:w-[80px]"
                           aria-label={`${uiState.spawnersLeft} cores remaining`}
                         >
-                          <span className="text-[7px] font-bold tracking-[0.1em] text-[#00f0ff]/65">CORES</span>
-                          <span className="ml-1.5 text-base font-black tabular-nums text-white">{uiState.spawnersLeft}</span>
-                        </motion.div>
-                      </div>
+                        <span className="skew-x-12 whitespace-nowrap">
+                          <span className="text-[7px] font-black tracking-[0.08em]">CORES</span>
+                          <span className="ml-1.5 text-base font-black tabular-nums drop-shadow-[0_0_7px_rgba(255,51,68,0.65)]">{uiState.spawnersLeft}</span>
+                        </span>
+                      </motion.div>
                     </div>
                     {chainFeedback && (
                       <motion.div
