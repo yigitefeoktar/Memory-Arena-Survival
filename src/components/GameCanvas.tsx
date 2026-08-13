@@ -14666,23 +14666,24 @@ export default function GameCanvas() {
                 {!mpState.roomId && (
                   <div
                     ref={hudTopLeftRef}
-                    className="absolute left-4 top-3 z-30 flex w-[calc(100vw-132px)] max-w-[330px] flex-col items-start gap-2 font-mono sm:left-7 sm:top-6 sm:w-[330px]"
+                    className="absolute left-4 top-3 z-30 flex w-[calc(100vw-132px)] max-w-[380px] flex-col items-start gap-2 font-mono sm:left-7 sm:top-6 sm:w-[380px]"
                     style={{
                       top: 'calc(0.75rem + env(safe-area-inset-top, 0px))',
                       left: 'calc(0.75rem + env(safe-area-inset-left, 0px))',
                     }}
                   >
-                    <div className="flex h-[46px] w-full items-stretch gap-3">
-                      <div className="min-w-0 flex-1 -skew-x-12 border-2 border-[#00f0ff]/55 bg-[#050811]/90 shadow-[0_0_12px_rgba(0,240,255,0.14)] backdrop-blur-sm">
-                        <div className="grid h-full skew-x-12 grid-cols-[52px_minmax(76px,1fr)] items-center px-2 sm:grid-cols-[62px_minmax(116px,1fr)]">
-                        <div className="flex items-baseline justify-center border-r border-[#00f0ff]/15 pr-2">
-                          <span className="text-[8px] font-black tracking-[0.12em] text-[#00f0ff]/70">LV</span>
-                          <span className="ml-1 font-black text-xl leading-none tabular-nums text-white drop-shadow-[0_0_8px_rgba(0,240,255,0.55)]">
+                    <div className="flex h-[48px] w-full items-stretch gap-2.5 sm:gap-3">
+                      <div className="flex w-[58px] shrink-0 -skew-x-12 items-center justify-center border-2 border-[#00f0ff] bg-[#050811]/85 text-[#00f0ff] shadow-[0_0_8px_rgba(0,240,255,0.2)] backdrop-blur-sm sm:w-[72px]">
+                        <span className="skew-x-12 whitespace-nowrap">
+                          <span className="text-[8px] font-black tracking-[0.12em]">LV</span>
+                          <span className="ml-1 text-lg font-black leading-none tabular-nums drop-shadow-[0_0_7px_rgba(0,240,255,0.65)] sm:text-xl">
                             {uiState.level.toString().padStart(2, '0')}
                           </span>
-                        </div>
+                        </span>
+                      </div>
 
-                        <div className="flex min-w-0 items-center gap-2 px-3" aria-label={`Chain progress ${uiState.chainProgress} of 4`}>
+                      <div className="min-w-0 flex-1 -skew-x-12 border-2 border-[#FBBF24] bg-[#0a0905]/85 text-[#FBBF24] shadow-[0_0_8px_rgba(251,191,36,0.2)] backdrop-blur-sm">
+                        <div className="flex h-full skew-x-12 items-center gap-2 px-3" aria-label={`Chain progress ${uiState.chainProgress} of 4`}>
                           <div className="grid min-w-0 flex-1 grid-cols-4 gap-1.5">
                             {[0, 1, 2, 3].map(index => {
                               const isComplete = index < uiState.chainProgress;
@@ -14691,13 +14692,12 @@ export default function GameCanvas() {
                                   key={index}
                                   animate={isComplete ? { opacity: 1, scaleX: 1 } : { opacity: 0.34, scaleX: 0.92 }}
                                   transition={{ duration: 0.18 }}
-                                  className={`h-3 border ${isComplete ? 'border-[#9cffff] bg-[#00f0ff] shadow-[0_0_9px_rgba(0,240,255,0.8)]' : 'border-white/35 bg-transparent'}`}
+                                  className={`h-3 border ${isComplete ? 'border-[#FFE08A] bg-[#FBBF24] shadow-[0_0_9px_rgba(251,191,36,0.8)]' : 'border-[#FBBF24]/40 bg-transparent'}`}
                                 />
                               );
                             })}
                           </div>
-                          <span className="text-[9px] font-black tabular-nums text-white">{uiState.chainProgress}<span className="text-white/35">/4</span></span>
-                        </div>
+                          <span className="text-[9px] font-black tabular-nums">{uiState.chainProgress}<span className="opacity-45">/4</span></span>
                         </div>
                       </div>
 
@@ -14705,7 +14705,7 @@ export default function GameCanvas() {
                           key={pulseSpawnerCounter ? `memory-spawner-pulse-${pulseKey}` : 'memory-spawner-idle'}
                           animate={pulseSpawnerCounter ? { scale: [1, 1.12, 1], filter: ['brightness(1)', 'brightness(1.8)', 'brightness(1)'] } : { scale: 1, filter: 'brightness(1)' }}
                           transition={{ duration: 0.55, ease: 'easeOut' }}
-                          className="flex w-[72px] shrink-0 -skew-x-12 items-center justify-center border-2 border-[#ff3344] bg-[#0b0509]/90 text-[#ff3344] shadow-[0_0_10px_rgba(255,51,68,0.2)] backdrop-blur-sm sm:w-[80px]"
+                          className="flex w-[66px] shrink-0 -skew-x-12 items-center justify-center border-2 border-[#ff3344] bg-[#0b0509]/85 text-[#ff3344] shadow-[0_0_8px_rgba(255,51,68,0.2)] backdrop-blur-sm sm:w-[82px]"
                           aria-label={`${uiState.spawnersLeft} cores remaining`}
                         >
                         <span className="skew-x-12 whitespace-nowrap">
