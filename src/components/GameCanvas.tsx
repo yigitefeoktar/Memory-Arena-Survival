@@ -14737,15 +14737,15 @@ export default function GameCanvas() {
                         </div>
                       </motion.div>
                     </div>
-                    {chainFeedback && (
+                    {chainFeedback === 'level' && (
                       <motion.div
                         key={chainFeedback}
                         initial={{ opacity: 0, y: -6, scale: 0.9 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: -8 }}
-                        className={`font-black tracking-[0.25em] text-xs px-3 py-1 bg-black/80 border ${chainFeedback === 'level' ? 'text-[#00f0ff] border-[#00f0ff]' : 'text-[#ff3344] border-[#ff3344]'}`}
+                        className="border border-[#00f0ff] bg-black/80 px-3 py-1 text-xs font-black tracking-[0.25em] text-[#00f0ff]"
                       >
-                        {chainFeedback === 'level' ? `LEVEL ${uiState.level}` : 'CHAIN RESET'}
+                        LEVEL {uiState.level}
                       </motion.div>
                     )}
                   </div>
