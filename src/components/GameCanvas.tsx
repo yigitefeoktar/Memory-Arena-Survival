@@ -14682,7 +14682,7 @@ export default function GameCanvas() {
                         </span>
                       </div>
 
-                      <div className="min-w-0 flex-1 -skew-x-12 border-2 border-[#FBBF24] bg-[#0a0905]/85 text-[#FBBF24] shadow-[0_0_8px_rgba(251,191,36,0.2)] backdrop-blur-sm">
+                      <div className="min-w-0 flex-1 -skew-x-12 border-2 border-[#00f0ff] bg-[#050811]/85 text-[#00f0ff] shadow-[0_0_8px_rgba(0,240,255,0.2)] backdrop-blur-sm">
                         <div className="flex h-full skew-x-12 items-center gap-2 px-3" aria-label={`Chain progress ${uiState.chainProgress} of 4`}>
                           <div className="grid min-w-0 flex-1 grid-cols-4 gap-1.5">
                             {[0, 1, 2, 3].map(index => {
@@ -14692,7 +14692,7 @@ export default function GameCanvas() {
                                   key={index}
                                   animate={isComplete ? { opacity: 1, scaleX: 1 } : { opacity: 0.34, scaleX: 0.92 }}
                                   transition={{ duration: 0.18 }}
-                                  className={`h-3 border ${isComplete ? 'border-[#FFE08A] bg-[#FBBF24] shadow-[0_0_9px_rgba(251,191,36,0.8)]' : 'border-[#FBBF24]/40 bg-transparent'}`}
+                                  className={`h-3 border ${isComplete ? 'border-[#A8FAFF] bg-[#00f0ff] shadow-[0_0_9px_rgba(0,240,255,0.8)]' : 'border-[#00f0ff]/40 bg-transparent'}`}
                                 />
                               );
                             })}
@@ -14705,12 +14705,12 @@ export default function GameCanvas() {
                           key={pulseSpawnerCounter ? `memory-spawner-pulse-${pulseKey}` : 'memory-spawner-idle'}
                           animate={pulseSpawnerCounter ? { scale: [1, 1.12, 1], filter: ['brightness(1)', 'brightness(1.8)', 'brightness(1)'] } : { scale: 1, filter: 'brightness(1)' }}
                           transition={{ duration: 0.55, ease: 'easeOut' }}
-                          className="flex w-[66px] shrink-0 -skew-x-12 items-center justify-center border-2 border-[#ff3344] bg-[#0b0509]/85 text-[#ff3344] shadow-[0_0_8px_rgba(255,51,68,0.2)] backdrop-blur-sm sm:w-[82px]"
+                          className="flex w-[66px] shrink-0 -skew-x-12 items-center justify-center border-2 border-[#F5F7FF]/75 bg-[#050811]/85 text-[#F5F7FF] shadow-[0_0_8px_rgba(245,247,255,0.14)] backdrop-blur-sm sm:w-[82px]"
                           aria-label={`${uiState.spawnersLeft} cores remaining`}
                         >
                         <span className="skew-x-12 whitespace-nowrap">
                           <span className="text-[7px] font-black tracking-[0.08em]">CORES</span>
-                          <span className="ml-1.5 text-base font-black tabular-nums drop-shadow-[0_0_7px_rgba(255,51,68,0.65)]">{uiState.spawnersLeft}</span>
+                          <span className="ml-1.5 text-base font-black tabular-nums drop-shadow-[0_0_7px_rgba(245,247,255,0.45)]">{uiState.spawnersLeft}</span>
                         </span>
                       </motion.div>
                     </div>
