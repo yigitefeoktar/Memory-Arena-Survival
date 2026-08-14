@@ -15358,7 +15358,7 @@ export default function GameCanvas() {
                      {sharedCooldownSeconds > 0 && (
                        <span
                          aria-label={`Shared ability cooldown ${sharedCooldownSeconds}`}
-                         className="font-mono text-[10px] sm:text-xs font-bold tabular-nums text-[#CBD5E1]"
+                         className="-translate-y-0.5 font-mono text-[12px] sm:text-sm font-bold tabular-nums text-[#CBD5E1]"
                        >
                          {sharedCooldownSeconds}
                        </span>
