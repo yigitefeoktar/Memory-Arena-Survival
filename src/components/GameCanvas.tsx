@@ -14901,7 +14901,7 @@ export default function GameCanvas() {
             usableGlow: '0 0 5px rgba(46, 217, 154, 0.24), 0 0 12px rgba(46, 217, 154, 0.08)',
           },
         } as const;
-        const abilityHudOrder = ['damage', 'special', 'cooldown', 'build', 'unknown'] as const;
+        const abilityHudOrder = ['damage', 'special', 'build', 'unknown'] as const;
         const sharedCooldownSeconds = Math.max(
           uiState.buttonCounters.special,
           uiState.buttonCounters.build,
@@ -15349,34 +15349,23 @@ export default function GameCanvas() {
                 </div>
                 <div
                   ref={hudBottomCenterRef}
-                  className="absolute left-1/2 -translate-x-1/2 pointer-events-none z-10 flex items-end gap-[6px] sm:gap-[9px] bottom-3 sm:bottom-6 max-w-[calc(100vw-24px)]"
+                  className="absolute left-1/2 -translate-x-1/2 pointer-events-none z-10 flex flex-col items-center gap-1 sm:gap-1.5 bottom-3 sm:bottom-6 max-w-[calc(100vw-24px)]"
                   style={{
                     bottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))',
                   }}
                 >
+                   <div className="flex h-4 sm:h-5 items-end justify-center" aria-live="polite">
+                     {sharedCooldownSeconds > 0 && (
+                       <span
+                         aria-label={`Shared ability cooldown ${sharedCooldownSeconds}`}
+                         className="font-mono text-[10px] sm:text-xs font-bold tabular-nums text-[#CBD5E1]"
+                       >
+                         {sharedCooldownSeconds}
+                       </span>
+                     )}
+                   </div>
+                   <div className="flex items-end gap-[6px] sm:gap-[9px]">
                    {abilityHudOrder.map((toolKey) => {
-                     if (toolKey === 'cooldown') {
-                       const cooldownActive = sharedCooldownSeconds > 0;
-                       return (
-                         <div key="cooldown" className="relative flex h-[44px] w-[42px] sm:w-[50px] shrink-0 items-center justify-center">
-                           <div
-                             aria-label={`Shared ability cooldown ${sharedCooldownSeconds}`}
-                             className="absolute inset-0 -skew-x-6 border-2 bg-[rgba(8,10,15,0.92)]"
-                             style={{
-                               borderColor: cooldownActive ? '#F5F7FF' : 'rgba(148, 163, 184, 0.42)',
-                               boxShadow: cooldownActive ? '0 0 7px rgba(245, 247, 255, 0.20)' : 'none',
-                             }}
-                           />
-                           <span
-                             className="relative z-10 font-mono text-[17px] sm:text-[20px] font-black tabular-nums"
-                             style={{ color: cooldownActive ? '#F5F7FF' : 'rgba(148, 163, 184, 0.58)' }}
-                           >
-                             {sharedCooldownSeconds}
-                           </span>
-                         </div>
-                       );
-                     }
-
                      const tool = toolsData[toolKey];
                      const isProtected = isOpeningProtectionActiveLocal(performance.now());
                      const isGuestMode = Boolean(mpRef.current.roomId && !mpRef.current.isHost);
@@ -15430,6 +15419,7 @@ export default function GameCanvas() {
                        </div>
                      );
                    })}
+                   </div>
                 </div>
 
                 <div ref={hudBottomRightRef} className="hidden lg:block absolute bottom-0 right-0 p-8 pointer-events-none z-10 text-right">
