@@ -42,6 +42,17 @@ export const MEMORY_ARENA_CONFIG = {
     bulletRicochetEnabled: false,
     enemyFactionCombatEnabled: true,
   },
+  raids: {
+    armySize: 6,
+    preparationMs: 2000,
+    engagementRange: 300,
+    arrivalRange: 260,
+    minimumArrivals: 3,
+    siegeMs: 15000,
+    cooldownMs: 10000,
+    formationRadiusMin: 130,
+    formationRadiusMax: 210,
+  },
   relics: {
     enabled: false,
   },
@@ -187,6 +198,57 @@ export function isEnemyShape(value: unknown): value is EnemyShape {
 
 export function isEnemyFactionColor(value: unknown): value is EnemyFactionColor {
   return typeof value === 'string' && (ENEMY_FACTIONS as readonly string[]).includes(value);
+}
+
+export type FactionRaidPhase = 'idle' | 'forming' | 'marching' | 'sieging' | 'cooldown';
+
+export interface FactionRaidState {
+  phase: FactionRaidPhase;
+  targetFactionColor: EnemyFactionColor | null;
+  phaseStartedAt: number;
+}
+
+export type FactionRaidStates = Record<EnemyFactionColor, FactionRaidState>;
+
+export function createInitialFactionRaidStates(now = 0): FactionRaidStates {
+  return Object.fromEntries(ENEMY_FACTIONS.map(faction => [faction, {
+    phase: 'idle',
+    targetFactionColor: null,
+    phaseStartedAt: now,
+  }])) as FactionRaidStates;
+}
+
+export function isValidFactionRaidStates(value: unknown): value is FactionRaidStates {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Partial<Record<EnemyFactionColor, Partial<FactionRaidState>>>;
+  return ENEMY_FACTIONS.every(faction => {
+    const raid = candidate[faction];
+    const targetIsValid = raid?.targetFactionColor === null || (
+      isEnemyFactionColor(raid?.targetFactionColor) &&
+      raid.targetFactionColor !== faction
+    );
+    return Boolean(
+      raid &&
+      ['idle', 'forming', 'marching', 'sieging', 'cooldown'].includes(raid.phase ?? '') &&
+      targetIsValid &&
+      typeof raid.phaseStartedAt === 'number' &&
+      Number.isFinite(raid.phaseStartedAt) &&
+      raid.phaseStartedAt >= 0
+    );
+  });
+}
+
+export function getRaidFormationOffset(enemyId: string): Vector2 {
+  let hash = 2166136261;
+  for (let index = 0; index < enemyId.length; index++) {
+    hash ^= enemyId.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  const unsignedHash = hash >>> 0;
+  const angle = (unsignedHash / 0xffffffff) * Math.PI * 2;
+  const radiusRange = MEMORY_ARENA_CONFIG.raids.formationRadiusMax - MEMORY_ARENA_CONFIG.raids.formationRadiusMin;
+  const radius = MEMORY_ARENA_CONFIG.raids.formationRadiusMin + (unsignedHash % 997) / 996 * radiusRange;
+  return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
 }
 
 export function areEnemyFactionsHostile(

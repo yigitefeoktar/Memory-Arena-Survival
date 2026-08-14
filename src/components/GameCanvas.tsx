@@ -46,6 +46,7 @@ import {
 } from '../shared/gameplayAnalyticsRelay';
 import {
   ENEMY_COLOR_HEX,
+  ENEMY_FACTIONS,
   MEMORY_ARENA_CONFIG,
   MEMORY_ARENA_PALETTE,
   MEMORY_MAP_CORE_INDICES,
@@ -54,14 +55,17 @@ import {
   applyPlayerDamage,
   areEnemyFactionsHostile,
   createInitialChainState,
+  createInitialFactionRaidStates,
   createMemoryCoreSpawners,
   createShuffledShapeBag,
   createTriangleAiState,
   getSquareVolleyDirections,
+  getRaidFormationOffset,
   getTriangleTelegraphVisual,
   isEnemyFactionColor,
   isEnemyShape,
   isValidChainState,
+  isValidFactionRaidStates,
   markTrianglePlayerHit,
   regeneratePlayerHealth,
   registerPlayerEnemyKill,
@@ -70,6 +74,7 @@ import {
   type ChainState,
   type EnemyFactionColor,
   type EnemyShape,
+  type FactionRaidStates,
   type TriangleAiState,
 } from '../game/memoryArena';
 
@@ -3578,6 +3583,7 @@ export default function GameCanvas() {
     hardMode: false,
     memoryMode: false,
     chain: createInitialChainState() as ChainState,
+    factionRaids: createInitialFactionRaidStates() as FactionRaidStates,
     tutorial: { active: false, spawnerIndex: null as number | null, enemySpawned: false, timer: 0 },
   });
 
@@ -4184,6 +4190,12 @@ export default function GameCanvas() {
       }
     }
 
+    if (state.factionRaids) {
+      for (const faction of ENEMY_FACTIONS) {
+        state.factionRaids[faction].phaseStartedAt += pauseDuration;
+      }
+    }
+
     if (state.enemies) {
       for (const enemy of state.enemies) {
         enemy.lastShoot += pauseDuration;
@@ -4378,6 +4390,10 @@ export default function GameCanvas() {
         ...state.chain,
         target: state.chain.target ? { ...state.chain.target } : null,
       },
+      factionRaids: Object.fromEntries(ENEMY_FACTIONS.map(faction => [
+        faction,
+        { ...state.factionRaids[faction] },
+      ])),
       tutorial: { active: false, spawnerIndex: null, enemySpawned: false, timer: 0 },
     };
 
@@ -4579,6 +4595,9 @@ export default function GameCanvas() {
 
     if (isMemorySave) {
       if (rawState.memoryMode !== true || !isValidChainState(rawState.chain)) {
+        throw new Error("INVALID SAVE FILE");
+      }
+      if (rawState.factionRaids !== undefined && !isValidFactionRaidStates(rawState.factionRaids)) {
         throw new Error("INVALID SAVE FILE");
       }
       if (!isBoundedNum(rawPlayer.maxHp, 1, 1_000_000) ||
@@ -5159,6 +5178,15 @@ export default function GameCanvas() {
           completedChains: rawState.chain.completedChains,
         }
       : createInitialChainState();
+    const reconstructedFactionRaids: FactionRaidStates = isMemorySave && rawState.factionRaids !== undefined
+      ? Object.fromEntries(Object.entries(rawState.factionRaids).map(([faction, raid]) => [
+          faction,
+          {
+            ...(raid as FactionRaidStates[EnemyFactionColor]),
+            phaseStartedAt: adjustTime((raid as FactionRaidStates[EnemyFactionColor]).phaseStartedAt),
+          },
+        ])) as FactionRaidStates
+      : createInitialFactionRaidStates(loadNow);
 
     let specialCooldown = 0;
     if (reconstructedDash.active) {
@@ -5250,6 +5278,7 @@ export default function GameCanvas() {
       hardMode: cleanGameMode !== 'normal',
       memoryMode: isMemorySave,
       chain: reconstructedChain,
+      factionRaids: reconstructedFactionRaids,
       tutorial: { active: false, spawnerIndex: null, enemySpawned: false, timer: 0 },
     };
 
@@ -6017,6 +6046,7 @@ export default function GameCanvas() {
       spawnBag: state.memoryMode ? createShuffledShapeBag() : undefined,
     }));
     state.chain = createInitialChainState();
+    state.factionRaids = createInitialFactionRaidStates(resetTime);
     if (state.memoryMode) {
       playerProfileRef.current = { ...playerProfileRef.current, colorIdx: 0 };
       setPlayerProfile(prev => ({ ...prev, colorIdx: 0 }));
@@ -6219,6 +6249,7 @@ export default function GameCanvas() {
       const resetTime = performance.now();
       state.memoryMode = true;
       state.chain = createInitialChainState();
+      state.factionRaids = createInitialFactionRaidStates(resetTime);
       state.spawners = mapDef.spawners.map((s: any, index: number) => ({
         ...s,
         hp: s.hp,
@@ -9987,6 +10018,86 @@ export default function GameCanvas() {
         const isAuthoritativeMultiplayerSimulation =
           Boolean(mpRef.current.roomId && mpRef.current.isHost);
 
+        if (state.memoryMode && MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled) {
+          for (const faction of ENEMY_FACTIONS) {
+            const raid = state.factionRaids[faction];
+            const members = state.enemies.filter(enemy => enemy.factionColor === faction);
+            const targetSpawner = raid.targetFactionColor
+              ? state.spawners.find(spawner => spawner.factionColor === raid.targetFactionColor)
+              : undefined;
+            const finishRaid = () => {
+              raid.phase = 'cooldown';
+              raid.targetFactionColor = null;
+              raid.phaseStartedAt = currentTime;
+            };
+
+            if (raid.phase === 'idle' && members.length >= MEMORY_ARENA_CONFIG.raids.armySize) {
+              const possibleTargets = state.spawners.filter(spawner =>
+                spawner.factionColor && areEnemyFactionsHostile(faction, spawner.factionColor)
+              );
+              const selectedTarget = possibleTargets[Math.floor(Math.random() * possibleTargets.length)];
+              if (selectedTarget?.factionColor) {
+                raid.phase = 'forming';
+                raid.targetFactionColor = selectedTarget.factionColor;
+                raid.phaseStartedAt = currentTime;
+                const homeSpawner = state.spawners.find(spawner => spawner.factionColor === faction);
+                if (homeSpawner) {
+                  state.shockwaves.push({
+                    x: homeSpawner.x,
+                    y: homeSpawner.y,
+                    color: ENEMY_COLOR_HEX[faction],
+                    maxRadius: 170,
+                    age: 0,
+                    maxAge: 0.55,
+                    thickness: 9,
+                  });
+                }
+              }
+            } else if (raid.phase === 'forming') {
+              if (members.length === 0 || !targetSpawner) {
+                finishRaid();
+              } else if (currentTime - raid.phaseStartedAt >= MEMORY_ARENA_CONFIG.raids.preparationMs) {
+                raid.phase = 'marching';
+                raid.phaseStartedAt = currentTime;
+                state.shockwaves.push({
+                  x: targetSpawner.x,
+                  y: targetSpawner.y,
+                  color: ENEMY_COLOR_HEX[faction],
+                  maxRadius: 190,
+                  age: 0,
+                  maxAge: 0.65,
+                  thickness: 7,
+                });
+              }
+            } else if (raid.phase === 'marching') {
+              if (members.length === 0 || !targetSpawner) {
+                finishRaid();
+              } else {
+                const arrivals = members.filter(enemy =>
+                  Math.hypot(enemy.x - targetSpawner.x, enemy.y - targetSpawner.y) <= MEMORY_ARENA_CONFIG.raids.arrivalRange
+                ).length;
+                const arrivalsNeeded = Math.min(MEMORY_ARENA_CONFIG.raids.minimumArrivals, members.length);
+                if (arrivals >= arrivalsNeeded) {
+                  raid.phase = 'sieging';
+                  raid.phaseStartedAt = currentTime;
+                }
+              }
+            } else if (raid.phase === 'sieging') {
+              if (
+                members.length === 0 ||
+                !targetSpawner ||
+                currentTime - raid.phaseStartedAt >= MEMORY_ARENA_CONFIG.raids.siegeMs
+              ) finishRaid();
+            } else if (
+              raid.phase === 'cooldown' &&
+              currentTime - raid.phaseStartedAt >= MEMORY_ARENA_CONFIG.raids.cooldownMs
+            ) {
+              raid.phase = 'idle';
+              raid.phaseStartedAt = currentTime;
+            }
+          }
+        }
+
         // 3. Update Enemies
         const enemiesDefeatedByFactions = new Set<MemoryEnemy>();
         for (let i = state.enemies.length - 1; i >= 0; i--) {
@@ -10001,8 +10112,37 @@ export default function GameCanvas() {
             let targetX = state.player.x;
             let targetY = state.player.y;
             let distanceToTarget = distanceToPlayer;
+            let targetIsCombatant = true;
+            const raid = state.factionRaids[enemy.factionColor];
+            const raidIsActive = raid.phase === 'marching' || raid.phase === 'sieging';
+            const raidTargetSpawner = raidIsActive && raid.targetFactionColor
+              ? state.spawners.find(spawner => spawner.factionColor === raid.targetFactionColor)
+              : undefined;
+            const formationOffset = getRaidFormationOffset(enemy.id ?? `${enemy.factionColor}-${i}`);
+            const raidDestination = raidTargetSpawner
+              ? {
+                  x: raidTargetSpawner.x + formationOffset.x,
+                  y: raidTargetSpawner.y + formationOffset.y,
+                }
+              : null;
+            let nearestRaidCombatDistance = Infinity;
 
             if (MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled) {
+              if (raidDestination) {
+                targetX = raidDestination.x;
+                targetY = raidDestination.y;
+                distanceToTarget = Math.hypot(targetX - enemy.x, targetY - enemy.y);
+                targetIsCombatant = false;
+
+                if (distanceToPlayer <= MEMORY_ARENA_CONFIG.raids.engagementRange) {
+                  targetX = state.player.x;
+                  targetY = state.player.y;
+                  distanceToTarget = distanceToPlayer;
+                  targetIsCombatant = true;
+                  nearestRaidCombatDistance = distanceToPlayer;
+                }
+              }
+
               for (const candidate of state.enemies) {
                 if (
                   candidate === enemy ||
@@ -10011,10 +10151,15 @@ export default function GameCanvas() {
                   !areEnemyFactionsHostile(enemy.factionColor, candidate.factionColor)
                 ) continue;
                 const candidateDistance = Math.hypot(candidate.x - enemy.x, candidate.y - enemy.y);
-                if (candidateDistance < distanceToTarget) {
+                const shouldTargetCandidate = raidDestination
+                  ? candidateDistance <= MEMORY_ARENA_CONFIG.raids.engagementRange && candidateDistance < nearestRaidCombatDistance
+                  : candidateDistance < distanceToTarget;
+                if (shouldTargetCandidate) {
                   targetX = candidate.x;
                   targetY = candidate.y;
                   distanceToTarget = candidateDistance;
+                  targetIsCombatant = true;
+                  nearestRaidCombatDistance = candidateDistance;
                 }
               }
             }
@@ -10035,6 +10180,7 @@ export default function GameCanvas() {
               enemy.angle = Math.atan2(unitToTargetY, unitToTargetX);
 
               if (
+                targetIsCombatant &&
                 distanceToTarget < MEMORY_ARENA_CONFIG.circle.aggroRange &&
                 currentTime - enemy.lastShoot >= MEMORY_ARENA_CONFIG.circle.fireIntervalMs
               ) {
@@ -10058,7 +10204,11 @@ export default function GameCanvas() {
               }
             } else if (enemy.shape === 'square') {
               enemy.angle = (enemy.angle ?? 0) + MEMORY_ARENA_CONFIG.square.rotationRadiansPerSecond * dt;
-              if (currentTime >= (enemy.nextTurnAt ?? 0)) {
+              if (raidDestination) {
+                const distanceToRaidDestination = Math.hypot(raidDestination.x - enemy.x, raidDestination.y - enemy.y);
+                enemy.moveDx = distanceToRaidDestination > 8 ? (raidDestination.x - enemy.x) / distanceToRaidDestination : 0;
+                enemy.moveDy = distanceToRaidDestination > 8 ? (raidDestination.y - enemy.y) / distanceToRaidDestination : 0;
+              } else if (currentTime >= (enemy.nextTurnAt ?? 0)) {
                 const moveAngle = Math.random() * Math.PI * 2;
                 enemy.moveDx = Math.cos(moveAngle);
                 enemy.moveDy = Math.sin(moveAngle);
@@ -10109,7 +10259,7 @@ export default function GameCanvas() {
                 wall.w,
                 wall.h,
               ));
-              const seesTarget = STATUS === 'PLAYING' && distanceToTarget <= MEMORY_ARENA_CONFIG.triangle.detectionRange && !blockedByWall;
+              const seesTarget = targetIsCombatant && STATUS === 'PLAYING' && distanceToTarget <= MEMORY_ARENA_CONFIG.triangle.detectionRange && !blockedByWall;
               const beforeAi = enemy.triangleAi ?? createTriangleAiState(currentTime);
               let triangleAi = advanceTriangleAi(beforeAi, {
                 now: currentTime,
@@ -10153,7 +10303,11 @@ export default function GameCanvas() {
               }
 
               if (triangleAi.phase === 'wander') {
-                if (currentTime >= (enemy.nextTurnAt ?? 0)) {
+                if (raidDestination) {
+                  const distanceToRaidDestination = Math.hypot(raidDestination.x - enemy.x, raidDestination.y - enemy.y);
+                  enemy.moveDx = distanceToRaidDestination > 8 ? (raidDestination.x - enemy.x) / distanceToRaidDestination : 0;
+                  enemy.moveDy = distanceToRaidDestination > 8 ? (raidDestination.y - enemy.y) / distanceToRaidDestination : 0;
+                } else if (currentTime >= (enemy.nextTurnAt ?? 0)) {
                   const moveAngle = Math.random() * Math.PI * 2;
                   enemy.moveDx = Math.cos(moveAngle);
                   enemy.moveDy = Math.sin(moveAngle);

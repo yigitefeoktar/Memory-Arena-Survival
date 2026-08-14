@@ -9,12 +9,15 @@ import {
   areEnemyFactionsHostile,
   applyPlayerDamage,
   createInitialChainState,
+  createInitialFactionRaidStates,
   createMemoryCoreSpawners,
   createShuffledShapeBag,
   createTriangleAiState,
   getSquareVolleyDirections,
+  getRaidFormationOffset,
   getTriangleTelegraphVisual,
   isValidChainState,
+  isValidFactionRaidStates,
   markTrianglePlayerHit,
   preserveChainOnSpawnerDestroyed,
   regeneratePlayerHealth,
@@ -76,6 +79,22 @@ test('different enemy factions are hostile while matching factions are friendly'
   assert.equal(areEnemyFactionsHostile('red', 'blue'), true);
   assert.equal(areEnemyFactionsHostile('green', 'yellow'), true);
   assert.equal(areEnemyFactionsHostile('red', 'red'), false);
+});
+
+test('faction raids begin idle and use stable spread-out formation positions', () => {
+  const raids = createInitialFactionRaidStates(500);
+  assert.deepEqual(Object.keys(raids), [...ENEMY_FACTIONS]);
+  assert.equal(Object.values(raids).every(raid => raid.phase === 'idle' && raid.phaseStartedAt === 500), true);
+
+  const first = getRaidFormationOffset('enemy-17');
+  const repeated = getRaidFormationOffset('enemy-17');
+  const second = getRaidFormationOffset('enemy-18');
+  assert.deepEqual(first, repeated);
+  assert.notDeepEqual(first, second);
+  assert.ok(Math.hypot(first.x, first.y) >= MEMORY_ARENA_CONFIG.raids.formationRadiusMin);
+  assert.ok(Math.hypot(first.x, first.y) <= MEMORY_ARENA_CONFIG.raids.formationRadiusMax);
+  assert.equal(isValidFactionRaidStates(raids), true);
+  assert.equal(isValidFactionRaidStates({ ...raids, red: { ...raids.red, phase: 'retreating' } }), false);
 });
 
 test('enemy AI and colored core state remain serializable data', () => {
