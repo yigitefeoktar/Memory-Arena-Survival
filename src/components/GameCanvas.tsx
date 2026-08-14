@@ -52,6 +52,7 @@ import {
   PLAYER_COLOR_HEX,
   advanceTriangleAi,
   applyPlayerDamage,
+  areEnemyFactionsHostile,
   createInitialChainState,
   createMemoryCoreSpawners,
   createShuffledShapeBag,
@@ -9987,32 +9988,58 @@ export default function GameCanvas() {
           Boolean(mpRef.current.roomId && mpRef.current.isHost);
 
         // 3. Update Enemies
+        const enemiesDefeatedByFactions = new Set<MemoryEnemy>();
         for (let i = state.enemies.length - 1; i >= 0; i--) {
           const enemy = state.enemies[i];
+
+          if (enemiesDefeatedByFactions.has(enemy)) continue;
 
           if (state.memoryMode && enemy.shape && enemy.factionColor) {
             const dxToPlayer = state.player.x - enemy.x;
             const dyToPlayer = state.player.y - enemy.y;
             const distanceToPlayer = Math.hypot(dxToPlayer, dyToPlayer);
-            const unitToPlayerX = distanceToPlayer > 0 ? dxToPlayer / distanceToPlayer : 0;
-            const unitToPlayerY = distanceToPlayer > 0 ? dyToPlayer / distanceToPlayer : 0;
+            let targetX = state.player.x;
+            let targetY = state.player.y;
+            let distanceToTarget = distanceToPlayer;
+
+            if (MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled) {
+              for (const candidate of state.enemies) {
+                if (
+                  candidate === enemy ||
+                  enemiesDefeatedByFactions.has(candidate) ||
+                  !candidate.factionColor ||
+                  !areEnemyFactionsHostile(enemy.factionColor, candidate.factionColor)
+                ) continue;
+                const candidateDistance = Math.hypot(candidate.x - enemy.x, candidate.y - enemy.y);
+                if (candidateDistance < distanceToTarget) {
+                  targetX = candidate.x;
+                  targetY = candidate.y;
+                  distanceToTarget = candidateDistance;
+                }
+              }
+            }
+
+            const dxToTarget = targetX - enemy.x;
+            const dyToTarget = targetY - enemy.y;
+            const unitToTargetX = distanceToTarget > 0 ? dxToTarget / distanceToTarget : 0;
+            const unitToTargetY = distanceToTarget > 0 ? dyToTarget / distanceToTarget : 0;
 
             if (enemy.shape === 'circle') {
               const previousX = enemy.x;
               const previousY = enemy.y;
-              const desiredX = enemy.x + unitToPlayerX * enemy.speed * dt;
-              const desiredY = enemy.y + unitToPlayerY * enemy.speed * dt;
+              const desiredX = enemy.x + unitToTargetX * enemy.speed * dt;
+              const desiredY = enemy.y + unitToTargetY * enemy.speed * dt;
               const resolved = resolveWallCollisions(desiredX, desiredY, enemy.radius, activeWalls, previousX, previousY);
               enemy.x = resolved.x;
               enemy.y = resolved.y;
-              enemy.angle = Math.atan2(unitToPlayerY, unitToPlayerX);
+              enemy.angle = Math.atan2(unitToTargetY, unitToTargetX);
 
               if (
-                distanceToPlayer < MEMORY_ARENA_CONFIG.circle.aggroRange &&
+                distanceToTarget < MEMORY_ARENA_CONFIG.circle.aggroRange &&
                 currentTime - enemy.lastShoot >= MEMORY_ARENA_CONFIG.circle.fireIntervalMs
               ) {
                 enemy.lastShoot = currentTime;
-                const shotAngle = Math.atan2(dyToPlayer, dxToPlayer) + (Math.random() - 0.5) * 0.2;
+                const shotAngle = Math.atan2(dyToTarget, dxToTarget) + (Math.random() - 0.5) * 0.2;
                 state.bullets.push({
                   id: 'mec_' + state.nextEntityId++,
                   x: enemy.x + Math.cos(shotAngle) * enemy.radius,
@@ -10075,24 +10102,24 @@ export default function GameCanvas() {
               const blockedByWall = activeWalls.some(wall => lineIntersectsRect(
                 enemy.x,
                 enemy.y,
-                state.player.x,
-                state.player.y,
+                targetX,
+                targetY,
                 wall.x,
                 wall.y,
                 wall.w,
                 wall.h,
               ));
-              const seesPlayer = STATUS === 'PLAYING' && distanceToPlayer <= MEMORY_ARENA_CONFIG.triangle.detectionRange && !blockedByWall;
+              const seesTarget = STATUS === 'PLAYING' && distanceToTarget <= MEMORY_ARENA_CONFIG.triangle.detectionRange && !blockedByWall;
               const beforeAi = enemy.triangleAi ?? createTriangleAiState(currentTime);
               let triangleAi = advanceTriangleAi(beforeAi, {
                 now: currentTime,
-                seesTarget: seesPlayer,
+                seesTarget,
                 travelled: 0,
                 collidedWithWall: false,
               });
 
               if (beforeAi.phase === 'wander' && triangleAi.phase === 'telegraph') {
-                const targetAngle = Math.atan2(unitToPlayerY, unitToPlayerX);
+                const targetAngle = Math.atan2(unitToTargetY, unitToTargetX);
                 enemy.angle = turnAngleTowards(
                   enemy.angle ?? targetAngle,
                   targetAngle,
@@ -10106,7 +10133,7 @@ export default function GameCanvas() {
                   (currentTime - triangleAi.phaseStartedAt) / MEMORY_ARENA_CONFIG.triangle.telegraphMs,
                 ));
                 if (telegraphProgress < 0.84) {
-                  const targetAngle = Math.atan2(unitToPlayerY, unitToPlayerX);
+                  const targetAngle = Math.atan2(unitToTargetY, unitToTargetX);
                   enemy.angle = turnAngleTowards(
                     enemy.angle ?? targetAngle,
                     targetAngle,
@@ -10119,8 +10146,8 @@ export default function GameCanvas() {
 
               if (beforeAi.phase === 'telegraph' && triangleAi.phase === 'dash') {
                 if ((enemy.dashDx ?? 0) === 0 && (enemy.dashDy ?? 0) === 0) {
-                  enemy.dashDx = unitToPlayerX;
-                  enemy.dashDy = unitToPlayerY;
+                  enemy.dashDx = unitToTargetX;
+                  enemy.dashDy = unitToTargetY;
                 }
                 enemy.angle = Math.atan2(enemy.dashDy ?? 0, enemy.dashDx ?? 0);
               }
@@ -10164,9 +10191,34 @@ export default function GameCanvas() {
                   triangleAi = markTrianglePlayerHit(triangleAi);
                 }
 
+                if (MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled) {
+                  for (const candidate of state.enemies) {
+                    if (
+                      candidate === enemy ||
+                      enemiesDefeatedByFactions.has(candidate) ||
+                      !candidate.factionColor ||
+                      !areEnemyFactionsHostile(enemy.factionColor, candidate.factionColor)
+                    ) continue;
+                    if (segmentVersusCircle(
+                      previousX,
+                      previousY,
+                      enemy.x,
+                      enemy.y,
+                      candidate.x,
+                      candidate.y,
+                      enemy.radius + candidate.radius,
+                    )) {
+                      enemiesDefeatedByFactions.add(candidate);
+                      const defeatedColor = ENEMY_COLOR_HEX[candidate.factionColor];
+                      spawnParticles(candidate.x, candidate.y, defeatedColor, 18);
+                      state.shockwaves.push({ x: candidate.x, y: candidate.y, color: defeatedColor, maxRadius: 55, age: 0, maxAge: 0.2, thickness: 5 });
+                    }
+                  }
+                }
+
                 triangleAi = advanceTriangleAi(triangleAi, {
                   now: currentTime,
-                  seesTarget: seesPlayer,
+                  seesTarget,
                   travelled,
                   collidedWithWall,
                 });
@@ -10433,6 +10485,10 @@ export default function GameCanvas() {
               isNeutral: false,
             });
           }
+        }
+
+        if (enemiesDefeatedByFactions.size > 0) {
+          state.enemies = state.enemies.filter(enemy => !enemiesDefeatedByFactions.has(enemy));
         }
 
         // Bouncer Capacity increase
@@ -11765,10 +11821,20 @@ export default function GameCanvas() {
             }
           }
 
-          // Check hit Enemies (NPCs - Red)
-          if (!bulletDestroyed && bulletColor !== '#ff0066') {
+          // Player bullets kill any enemy. Faction bullets kill only enemies of another color.
+          const isMemoryFactionBullet = Boolean(
+            state.memoryMode &&
+            MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled &&
+            !bullet.isPlayer &&
+            bullet.factionColor
+          );
+          if (!bulletDestroyed && (bulletColor !== '#ff0066' || isMemoryFactionBullet)) {
             for (let e = state.enemies.length - 1; e >= 0; e--) {
               const enemy = state.enemies[e];
+              if (
+                isMemoryFactionBullet &&
+                (!enemy.factionColor || !areEnemyFactionsHostile(bullet.factionColor!, enemy.factionColor))
+              ) continue;
               const dx = enemy.x - bullet.x;
               const dy = enemy.y - bullet.y;
               const hitThisEnemy = isAuthoritativeMultiplayerBullet
@@ -11779,7 +11845,7 @@ export default function GameCanvas() {
                 const defeatedColor = enemy.factionColor ? ENEMY_COLOR_HEX[enemy.factionColor] : '#ff3333';
                 spawnParticles(enemy.x, enemy.y, defeatedColor, 30);
                 state.shockwaves.push({ x: enemy.x, y: enemy.y, color: defeatedColor, maxRadius: 80, age: 0, maxAge: 0.25, thickness: 8 });
-                state.shake = 10;
+                if (bullet.isPlayer) state.shake = 10;
                 state.enemies.splice(e, 1);
                 bulletDestroyed = true;
 

@@ -6,6 +6,7 @@ import {
   MEMORY_ARENA_CONFIG,
   MEMORY_MAP_CORE_INDICES,
   advanceTriangleAi,
+  areEnemyFactionsHostile,
   applyPlayerDamage,
   createInitialChainState,
   createMemoryCoreSpawners,
@@ -68,6 +69,13 @@ test('the prototype exposes all twelve shape and color identities', () => {
   const identities = ENEMY_FACTIONS.flatMap(color => ENEMY_SHAPES.map(shape => `${color}:${shape}`));
   assert.equal(identities.length, 12);
   assert.equal(new Set(identities).size, 12);
+});
+
+test('different enemy factions are hostile while matching factions are friendly', () => {
+  assert.equal(MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled, true);
+  assert.equal(areEnemyFactionsHostile('red', 'blue'), true);
+  assert.equal(areEnemyFactionsHostile('green', 'yellow'), true);
+  assert.equal(areEnemyFactionsHostile('red', 'red'), false);
 });
 
 test('enemy AI and colored core state remain serializable data', () => {

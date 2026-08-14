@@ -40,6 +40,7 @@ export const PLAYER_COLOR_HEX = MEMORY_ARENA_PALETTE.player.effect;
 export const MEMORY_ARENA_CONFIG = {
   combat: {
     bulletRicochetEnabled: false,
+    enemyFactionCombatEnabled: true,
   },
   relics: {
     enabled: false,
@@ -186,6 +187,13 @@ export function isEnemyShape(value: unknown): value is EnemyShape {
 
 export function isEnemyFactionColor(value: unknown): value is EnemyFactionColor {
   return typeof value === 'string' && (ENEMY_FACTIONS as readonly string[]).includes(value);
+}
+
+export function areEnemyFactionsHostile(
+  first: EnemyFactionColor,
+  second: EnemyFactionColor,
+): boolean {
+  return first !== second;
 }
 
 export function sameEnemyIdentity(a: EnemyIdentity | null, b: EnemyIdentity): boolean {
