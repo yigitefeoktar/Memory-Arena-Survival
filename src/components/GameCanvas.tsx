@@ -14848,32 +14848,64 @@ export default function GameCanvas() {
 
       {(uiState.status === 'PLAYING' || uiState.status === 'PAUSED') && (() => {
         const toolsData = {
+          damage: {
+            label: 'DAMAGE',
+            keyHint: 3,
+            control: null,
+            owned: false,
+            usableFill: 'linear-gradient(rgba(255, 77, 109, 0.58), rgba(255, 77, 109, 0.58)), rgba(6, 8, 14, 0.90)',
+            usableBorder: MEMORY_ARENA_PALETTE.factions.red.bright,
+            usableText: '#F5F7FF',
+            unusableFill: 'rgba(255, 77, 109, 0.05)',
+            unusableBorder: 'rgba(255, 77, 109, 0.42)',
+            unusableText: 'rgba(255, 77, 109, 0.52)',
+            usableGlow: '0 0 5px rgba(255, 77, 109, 0.24), 0 0 12px rgba(255, 77, 109, 0.08)',
+          },
           special: {
             label: 'SPECIAL',
-            usableFill: 'linear-gradient(rgba(139, 92, 246, 0.52), rgba(139, 92, 246, 0.52)), rgba(6, 8, 14, 0.90)',
-            usableBorder: '#C4B5FD',
+            keyHint: 1,
+            control: 'special',
+            owned: true,
+            usableFill: 'linear-gradient(rgba(99, 124, 255, 0.58), rgba(99, 124, 255, 0.58)), rgba(6, 8, 14, 0.90)',
+            usableBorder: MEMORY_ARENA_PALETTE.factions.blue.bright,
             usableText: '#F5F7FF',
-            unusableFill: 'rgba(139, 92, 246, 0.05)',
-            unusableBorder: 'rgba(139, 92, 246, 0.42)',
-            unusableText: 'rgba(139, 92, 246, 0.52)',
-            usableGlow: '0 0 5px rgba(139, 92, 246, 0.24), 0 0 12px rgba(139, 92, 246, 0.08)',
-            mobile: 'TAP TO USE',
-            desktop: 'KEY "1" TO USE'
+            unusableFill: 'rgba(99, 124, 255, 0.05)',
+            unusableBorder: 'rgba(99, 124, 255, 0.42)',
+            unusableText: 'rgba(99, 124, 255, 0.52)',
+            usableGlow: '0 0 5px rgba(99, 124, 255, 0.24), 0 0 12px rgba(99, 124, 255, 0.08)',
           },
           build: {
             label: 'BUILD',
-            usableFill: 'linear-gradient(rgba(14, 165, 233, 0.60), rgba(14, 165, 233, 0.60)), rgba(6, 8, 14, 0.90)',
-            usableBorder: '#67E8F9',
+            keyHint: 2,
+            control: 'build',
+            owned: true,
+            usableFill: 'linear-gradient(rgba(255, 200, 87, 0.62), rgba(255, 200, 87, 0.62)), rgba(6, 8, 14, 0.90)',
+            usableBorder: MEMORY_ARENA_PALETTE.factions.yellow.bright,
             usableText: '#F5F7FF',
-            unusableFill: 'rgba(14, 165, 233, 0.05)',
-            unusableBorder: 'rgba(14, 165, 233, 0.42)',
-            unusableText: 'rgba(14, 165, 233, 0.52)',
-            usableGlow: '0 0 5px rgba(14, 165, 233, 0.24), 0 0 12px rgba(14, 165, 233, 0.08)',
-            mobile: 'TAP TO USE',
-            desktop: 'KEY "2" TO USE'
-          }
+            unusableFill: 'rgba(255, 200, 87, 0.05)',
+            unusableBorder: 'rgba(255, 200, 87, 0.42)',
+            unusableText: 'rgba(255, 200, 87, 0.52)',
+            usableGlow: '0 0 5px rgba(255, 200, 87, 0.24), 0 0 12px rgba(255, 200, 87, 0.08)',
+          },
+          unknown: {
+            label: 'ABILITY',
+            keyHint: 4,
+            control: null,
+            owned: false,
+            usableFill: 'linear-gradient(rgba(46, 217, 154, 0.58), rgba(46, 217, 154, 0.58)), rgba(6, 8, 14, 0.90)',
+            usableBorder: MEMORY_ARENA_PALETTE.factions.green.bright,
+            usableText: '#F5F7FF',
+            unusableFill: 'rgba(46, 217, 154, 0.05)',
+            unusableBorder: 'rgba(46, 217, 154, 0.42)',
+            unusableText: 'rgba(46, 217, 154, 0.52)',
+            usableGlow: '0 0 5px rgba(46, 217, 154, 0.24), 0 0 12px rgba(46, 217, 154, 0.08)',
+          },
         } as const;
-        const activeT = toolsData[uiState.activeTool];
+        const abilityHudOrder = ['damage', 'special', 'cooldown', 'build', 'unknown'] as const;
+        const sharedCooldownSeconds = Math.max(
+          uiState.buttonCounters.special,
+          uiState.buttonCounters.build,
+        );
 
         return (
           <AnimatePresence>
@@ -15310,19 +15342,41 @@ export default function GameCanvas() {
 
             {uiState.status !== 'PAUSED' && (
               <>
-                <div ref={hudBottomLeftRef} className="hidden sm:block absolute bottom-0 left-0 p-8 pointer-events-none z-10">
+                <div ref={hudBottomLeftRef} className="hidden lg:block absolute bottom-0 left-0 p-8 pointer-events-none z-10">
                    <div className="text-sm text-[#94A3B8] tracking-[0.2em] font-bold font-mono">
                      {uiState.deviceType === 'mobile' ? 'JOYSTICK TO MOVE' : 'WASD TO MOVE'}
                    </div>
                 </div>
                 <div
                   ref={hudBottomCenterRef}
-                  className={`absolute left-1/2 -translate-x-1/2 pointer-events-none z-10 flex gap-[10px] sm:gap-[16px] bottom-3 sm:bottom-6 max-w-[calc(100vw-24px)]`}
+                  className="absolute left-1/2 -translate-x-1/2 pointer-events-none z-10 flex items-end gap-[6px] sm:gap-[9px] bottom-3 sm:bottom-6 max-w-[calc(100vw-24px)]"
                   style={{
                     bottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))',
                   }}
                 >
-                   {(Object.keys(toolsData) as Array<keyof typeof toolsData>).map((toolKey) => {
+                   {abilityHudOrder.map((toolKey) => {
+                     if (toolKey === 'cooldown') {
+                       const cooldownActive = sharedCooldownSeconds > 0;
+                       return (
+                         <div key="cooldown" className="relative flex h-[44px] w-[42px] sm:w-[50px] shrink-0 items-center justify-center">
+                           <div
+                             aria-label={`Shared ability cooldown ${sharedCooldownSeconds}`}
+                             className="absolute inset-0 -skew-x-6 border-2 bg-[rgba(8,10,15,0.92)]"
+                             style={{
+                               borderColor: cooldownActive ? '#F5F7FF' : 'rgba(148, 163, 184, 0.42)',
+                               boxShadow: cooldownActive ? '0 0 7px rgba(245, 247, 255, 0.20)' : 'none',
+                             }}
+                           />
+                           <span
+                             className="relative z-10 font-mono text-[17px] sm:text-[20px] font-black tabular-nums"
+                             style={{ color: cooldownActive ? '#F5F7FF' : 'rgba(148, 163, 184, 0.58)' }}
+                           >
+                             {sharedCooldownSeconds}
+                           </span>
+                         </div>
+                       );
+                     }
+
                      const tool = toolsData[toolKey];
                      const isProtected = isOpeningProtectionActiveLocal(performance.now());
                      const isGuestMode = Boolean(mpRef.current.roomId && !mpRef.current.isHost);
@@ -15336,44 +15390,40 @@ export default function GameCanvas() {
 
                      const isAuthorityUnknown = isGuestMode && !hasValidAuthority;
 
-                     const isReady = !isAuthorityUnknown && !isProtected && uiState.buttonCounters[toolKey as 'special' | 'build'] === 0;
-                     const showCooldownNumber = !isAuthorityUnknown && uiState.buttonCounters[toolKey as 'special' | 'build'] > 0;
+                     const toolCooldown = tool.control ? uiState.buttonCounters[tool.control] : 0;
+                     const isReady = tool.owned && !isAuthorityUnknown && !isProtected && toolCooldown === 0;
+                     const isLocked = !tool.owned;
 
                      return (
-                       <div key={toolKey} className="relative flex flex-col items-center gap-1 sm:gap-1.5">
-                         <div className="h-4 sm:h-5 flex items-end">
-                           {showCooldownNumber && (
-                             <span className="text-[10px] sm:text-xs font-mono font-bold" style={{ color: tool.unusableBorder }}>
-                               {uiState.buttonCounters[toolKey as 'special' | 'build']}
-                             </span>
-                           )}
-                         </div>
+                       <div key={toolKey} className="relative flex items-end">
                          <button
                            id={`tool-btn-${toolKey}`}
                            aria-disabled={!isReady}
+                           aria-label={`${tool.label}${isLocked ? ' locked' : ''}`}
                            onPointerDown={(e) => {
                              e.stopPropagation();
                              const isLocalMenuOpen = mpRef.current.roomId && (mpMenuOpenRef.current || confirmResignRef.current);
                              if (!isReady || isLocalMenuOpen) return;
                              const currentTime = performance.now();
-                             if (toolKey === 'special') {
+                             if (tool.control === 'special') {
                                requestSpecialActivation(currentTime);
-                             } else if (toolKey === 'build') {
+                             } else if (tool.control === 'build') {
                                requestBuildActivation(currentTime);
                              }
                            }}
-                           className={`pointer-events-auto h-[44px] border-2 font-black tracking-widest uppercase text-[12px] sm:text-[14px] relative overflow-hidden flex justify-center items-center gap-1 sm:gap-2 focus:outline-none ${isReady ? 'hover:brightness-110 active:brightness-90 active:scale-95 cursor-pointer' : 'cursor-default'}`}
+                           className={`pointer-events-auto h-[44px] border-2 font-black tracking-[0.08em] sm:tracking-widest uppercase text-[9px] min-[380px]:text-[10px] sm:text-[12px] relative overflow-hidden flex justify-center items-center gap-1 sm:gap-1.5 focus:outline-none ${isReady ? 'hover:brightness-110 active:brightness-90 active:scale-95 cursor-pointer' : 'cursor-default'}`}
                            style={{
-                             borderColor: isReady ? tool.usableBorder : tool.unusableBorder,
-                             background: isReady ? tool.usableFill : tool.unusableFill,
-                             color: isReady ? tool.usableText : tool.unusableText,
+                             borderColor: isLocked ? 'rgba(148, 163, 184, 0.44)' : (isReady ? tool.usableBorder : tool.unusableBorder),
+                             background: isLocked ? 'rgba(71, 85, 105, 0.20)' : (isReady ? tool.usableFill : tool.unusableFill),
+                             color: isLocked ? 'rgba(203, 213, 225, 0.50)' : (isReady ? tool.usableText : tool.unusableText),
                              boxShadow: isReady ? tool.usableGlow : 'none',
                              transition: isReady ? 'all 140ms ease-out' : 'all 100ms ease-in',
-                             width: 'min(162px, calc((100vw - 34px) / 2))',
+                             width: 'clamp(52px, 17.5vw, 142px)',
+                             filter: isLocked ? 'grayscale(1)' : 'none',
                            }}
                          >
                            {uiState.deviceType === 'desktop' && (
-                             <span className="hidden sm:inline-block relative z-10 opacity-70 font-mono">[{toolKey === 'special' ? 1 : 2}]</span>
+                             <span className="hidden sm:inline-block relative z-10 opacity-70 font-mono">[{tool.keyHint}]</span>
                            )}
                            <span className="relative z-10">{tool.label}</span>
                          </button>
@@ -15382,7 +15432,7 @@ export default function GameCanvas() {
                    })}
                 </div>
 
-                <div ref={hudBottomRightRef} className="hidden sm:block absolute bottom-0 right-0 p-8 pointer-events-none z-10 text-right">
+                <div ref={hudBottomRightRef} className="hidden lg:block absolute bottom-0 right-0 p-8 pointer-events-none z-10 text-right">
                    <div className="text-sm text-[#94A3B8] tracking-[0.2em] font-bold font-mono">
                      {uiState.deviceType === 'mobile' ? 'TAP TO SHOOT' : 'MOUSE TO SHOOT'}
                    </div>
