@@ -199,6 +199,9 @@ const ENEMY_FIRE_RATE = 2500;
 const ENEMY_SPEED = 60;
 const DASH_COOLDOWN = 25000;
 const BUILD_COOLDOWN = 25000;
+const MEMORY_ABILITY_SHARED_COOLDOWN = 15000;
+const DAMAGE_WAVE_RADIUS = 420;
+const DAMAGE_WAVE_DURATION = 0.85;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
@@ -2719,7 +2722,7 @@ export default function GameCanvas() {
     return true;
   }, []);
 
-  const [uiState, setUiState] = useState<{ status: 'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER' | 'VICTORY' | 'LOBBY'; score: number; deviceType: 'desktop' | 'mobile'; activeTool: 'weapon' | 'special' | 'build'; blocks: number; spawnersLeft: number; mapId: string; hardMode: boolean; gameMode: GameMode; hp: number; maxHp: number; level: number; chainProgress: number; buttonCounters: { special: number; build: number } }>({ status: 'MENU', score: 0, deviceType: 'desktop', activeTool: 'special', blocks: 50, spawnersLeft: 4, mapId: MEMORY_DEFAULT_MAP_ID, hardMode: false, gameMode: 'normal', hp: MEMORY_ARENA_CONFIG.player.maxHp, maxHp: MEMORY_ARENA_CONFIG.player.maxHp, level: 1, chainProgress: 0, buttonCounters: { special: 0, build: 0 } });
+  const [uiState, setUiState] = useState<{ status: 'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER' | 'VICTORY' | 'LOBBY'; score: number; deviceType: 'desktop' | 'mobile'; activeTool: 'weapon' | 'special' | 'build'; blocks: number; spawnersLeft: number; mapId: string; hardMode: boolean; gameMode: GameMode; hp: number; maxHp: number; level: number; chainProgress: number; buttonCounters: { damage: number; special: number; build: number } }>({ status: 'MENU', score: 0, deviceType: 'desktop', activeTool: 'special', blocks: 50, spawnersLeft: 4, mapId: MEMORY_DEFAULT_MAP_ID, hardMode: false, gameMode: 'normal', hp: MEMORY_ARENA_CONFIG.player.maxHp, maxHp: MEMORY_ARENA_CONFIG.player.maxHp, level: 1, chainProgress: 0, buttonCounters: { damage: 0, special: 0, build: 0 } });
   const uiRef = useRef(uiState);
   uiRef.current = uiState;
 
@@ -3531,7 +3534,7 @@ export default function GameCanvas() {
   // We use a ref for the entire game state to avoid stale closures
   const initialSpawn = useRef({ x: 500, y: 500 }).current;
   const stateRef = useRef({
-    player: { x: initialSpawn.x, y: initialSpawn.y, vx: 0, vy: 0, kbvx: 0, kbvy: 0, processedZoneKbs: [] as number[], radius: PLAYER_RADIUS, lastShoot: 0, hp: MEMORY_ARENA_CONFIG.player.maxHp, maxHp: MEMORY_ARENA_CONFIG.player.maxHp, dash: { active: false, endTime: 0, targetX: 0, targetY: 0, shieldRadius: 60, lastTime: performance.now() - DASH_COOLDOWN, wasReady: true }, build: { active: false, endTime: 0, lastBlockX: 0, lastBlockY: 0, lastTime: performance.now() - BUILD_COOLDOWN }, recentBlocks: [] as { key: string, x: number, y: number, timestamp: number }[] },
+    player: { x: initialSpawn.x, y: initialSpawn.y, vx: 0, vy: 0, kbvx: 0, kbvy: 0, processedZoneKbs: [] as number[], radius: PLAYER_RADIUS, lastShoot: 0, hp: MEMORY_ARENA_CONFIG.player.maxHp, maxHp: MEMORY_ARENA_CONFIG.player.maxHp, abilityLastUsed: performance.now() - MEMORY_ABILITY_SHARED_COOLDOWN, dash: { active: false, endTime: 0, targetX: 0, targetY: 0, shieldRadius: 60, lastTime: performance.now() - DASH_COOLDOWN, wasReady: true }, build: { active: false, endTime: 0, lastBlockX: 0, lastBlockY: 0, lastTime: performance.now() - BUILD_COOLDOWN }, recentBlocks: [] as { key: string, x: number, y: number, timestamp: number }[] },
     multiplayerPlayers: {} as Record<string, { x: number, y: number, radius: number, isDash: boolean, name?: string, colorIdx?: number, isDead?: boolean, kbvx?: number, kbvy?: number, recentBlocks?: { key: string, x: number, y: number, timestamp: number }[] }>,
     matchPhase: 'PLAYING' as 'PLAYING' | 'FINAL_RUN' | 'FINISHED',
     finalRunnerId: null as string | null,
@@ -3574,6 +3577,7 @@ export default function GameCanvas() {
     particles: [] as { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; radius: number }[],
     trails: [] as { x: number; y: number; age: number; color: string; radius: number, isSuperStrong?: boolean }[],
     shockwaves: [] as { x: number; y: number; color: string; maxRadius: number; age: number; maxAge: number; thickness: number }[],
+    damageWaves: [] as { x: number; y: number; age: number; maxAge: number; maxRadius: number; previousRadius: number }[],
     floatingTexts: [] as { x: number; y: number; text: string; age: number; maxAge: number; color: string; vy: number }[],
     shake: 0,
     lastTime: performance.now(),
@@ -4159,6 +4163,7 @@ export default function GameCanvas() {
     const state = stateRef.current;
 
     state.player.lastShoot += pauseDuration;
+    state.player.abilityLastUsed += pauseDuration;
     state.player.dash.lastTime += pauseDuration;
     if (state.player.dash.endTime !== 0) {
       state.player.dash.endTime += pauseDuration;
@@ -4314,6 +4319,7 @@ export default function GameCanvas() {
         hp: state.player.hp,
         maxHp: state.player.maxHp,
         lastShoot: state.player.lastShoot,
+        abilityLastUsed: state.player.abilityLastUsed,
         dash: { ...state.player.dash },
         build: { ...state.player.build },
         recentBlocks: (state.player.recentBlocks || []).map(rb => ({ ...rb })),
@@ -4377,6 +4383,7 @@ export default function GameCanvas() {
       particles: [],
       trails: [],
       shockwaves: [],
+      damageWaves: [],
       floatingTexts: [],
       shake: 0,
 
@@ -4780,6 +4787,10 @@ export default function GameCanvas() {
 
     const lastShootTime = version === 0 ? (loadNow - 1000) : adjustTime(rawPlayer.lastShoot);
 
+    const reconstructedAbilityLastUsed = typeof rawPlayer.abilityLastUsed === 'number' && Number.isFinite(rawPlayer.abilityLastUsed)
+      ? adjustTime(rawPlayer.abilityLastUsed)
+      : loadNow - MEMORY_ABILITY_SHARED_COOLDOWN;
+
     const reconstructedPlayer = {
       x: px,
       y: py,
@@ -4792,6 +4803,7 @@ export default function GameCanvas() {
       hp: isMemorySave ? rawPlayer.hp : MEMORY_ARENA_CONFIG.player.maxHp,
       maxHp: isMemorySave ? rawPlayer.maxHp : MEMORY_ARENA_CONFIG.player.maxHp,
       lastShoot: lastShootTime,
+      abilityLastUsed: reconstructedAbilityLastUsed,
       dash: reconstructedDash,
       build: reconstructedBuild,
       recentBlocks,
@@ -5206,6 +5218,15 @@ export default function GameCanvas() {
       buildCooldown = Math.max(0, Math.ceil((BUILD_COOLDOWN - (loadNow - reconstructedBuild.lastTime)) / 1000));
     }
 
+    const memorySharedCooldown = Math.max(
+      0,
+      Math.ceil((MEMORY_ABILITY_SHARED_COOLDOWN - (loadNow - reconstructedAbilityLastUsed)) / 1000),
+    );
+    if (isMemorySave) {
+      specialCooldown = memorySharedCooldown;
+      buildCooldown = memorySharedCooldown;
+    }
+
     const cleanUi = {
       status: 'PAUSED' as const,
       score: rawUi.score !== undefined ? rawUi.score : 0,
@@ -5221,6 +5242,7 @@ export default function GameCanvas() {
       level: reconstructedChain.level,
       chainProgress: reconstructedChain.progress,
       buttonCounters: {
+        damage: isMemorySave ? memorySharedCooldown : 0,
         special: specialCooldown,
         build: buildCooldown,
       }
@@ -5269,6 +5291,7 @@ export default function GameCanvas() {
       particles: [],
       trails: [],
       shockwaves: [],
+      damageWaves: [],
       floatingTexts: [],
       shake: 0,
       lastTime: loadNow,
@@ -6013,6 +6036,7 @@ export default function GameCanvas() {
     state.player.lastShoot = performance.now();
     state.player.hp = MEMORY_ARENA_CONFIG.player.maxHp;
     state.player.maxHp = MEMORY_ARENA_CONFIG.player.maxHp;
+    state.player.abilityLastUsed = performance.now() - MEMORY_ABILITY_SHARED_COOLDOWN;
     state.player.dash = { active: false, endTime: 0, targetX: 0, targetY: 0, shieldRadius: 60, lastTime: performance.now() - DASH_COOLDOWN, wasReady: true };
     state.player.build = { active: false, endTime: 0, lastBlockX: 0, lastBlockY: 0, lastTime: performance.now() - BUILD_COOLDOWN };
     state.blocks = [];
@@ -6054,6 +6078,7 @@ export default function GameCanvas() {
     state.particles = [];
     state.trails = [];
     state.shockwaves = [];
+    state.damageWaves = [];
     state.floatingTexts = [];
     state.shake = 0;
     state.lastTime = performance.now();
@@ -6064,7 +6089,7 @@ export default function GameCanvas() {
     releaseAllInputs();
 
     const uiHardMode = isMultiplayer ? (selectedGameMode !== 'normal') : isHardMode;
-    const newUi = { status: 'PLAYING' as const, score: 0, deviceType: dType, activeTool: 'special' as const, blocks: 50, spawnersLeft: state.spawners.length, mapId: selectedMapId, hardMode: uiHardMode, gameMode: selectedGameMode, hp: state.player.hp, maxHp: state.player.maxHp, level: state.chain.level, chainProgress: state.chain.progress, buttonCounters: { special: 0, build: 0 } };
+    const newUi = { status: 'PLAYING' as const, score: 0, deviceType: dType, activeTool: 'special' as const, blocks: 50, spawnersLeft: state.spawners.length, mapId: selectedMapId, hardMode: uiHardMode, gameMode: selectedGameMode, hp: state.player.hp, maxHp: state.player.maxHp, level: state.chain.level, chainProgress: state.chain.progress, buttonCounters: { damage: 0, special: 0, build: 0 } };
     uiRef.current = newUi;
     setUiState(newUi);
 
@@ -6221,6 +6246,7 @@ export default function GameCanvas() {
       state.player.lastShoot = performance.now();
       state.player.hp = MEMORY_ARENA_CONFIG.player.maxHp;
       state.player.maxHp = MEMORY_ARENA_CONFIG.player.maxHp;
+      state.player.abilityLastUsed = performance.now() - MEMORY_ABILITY_SHARED_COOLDOWN;
       state.player.dash = {
         active: false,
         endTime: 0,
@@ -6285,6 +6311,7 @@ export default function GameCanvas() {
       state.particles = [];
       state.trails = [];
       state.shockwaves = [];
+      state.damageWaves = [];
       state.floatingTexts = [];
       state.shake = 0;
       state.lastTime = performance.now();
@@ -6326,7 +6353,7 @@ export default function GameCanvas() {
         maxHp: state.player.maxHp,
         level: state.chain.level,
         chainProgress: state.chain.progress,
-        buttonCounters: { special: 0, build: 0 }
+        buttonCounters: { damage: 0, special: 0, build: 0 }
       };
       uiRef.current = finalUi;
       setUiState(finalUi);
@@ -6725,6 +6752,32 @@ export default function GameCanvas() {
      s.shockwaves.push({ x: x, y: y, color: '#ffffff', maxRadius: radius * 0.8, age: 0, maxAge: 0.3, thickness: 10 });
   }, []);
 
+  const requestDamageActivation = useCallback((currentTime: number) => {
+    const state = stateRef.current;
+    if (!state.memoryMode || mpRef.current.roomId || uiRef.current.status !== 'PLAYING') return;
+    if (currentTime - state.player.abilityLastUsed < MEMORY_ABILITY_SHARED_COOLDOWN) return;
+
+    state.player.abilityLastUsed = currentTime;
+    state.damageWaves.push({
+      x: state.player.x,
+      y: state.player.y,
+      age: 0,
+      maxAge: DAMAGE_WAVE_DURATION,
+      maxRadius: DAMAGE_WAVE_RADIUS,
+      previousRadius: 0,
+    });
+    state.shockwaves.push({
+      x: state.player.x,
+      y: state.player.y,
+      color: MEMORY_ARENA_PALETTE.factions.red.bright,
+      maxRadius: 95,
+      age: 0,
+      maxAge: 0.22,
+      thickness: 24,
+    });
+    state.shake = Math.max(state.shake, 12);
+  }, []);
+
   const isGuestSpecialReady = useCallback((currentTime: number) => {
      const socketId = socketRef.current?.id;
      if (!socketId) return false;
@@ -6758,10 +6811,15 @@ export default function GameCanvas() {
      if (!isMultiplayer) {
          const dash = stateRef.current.player.dash;
          const endTime = dash.endTime || 0;
-         if (!dash.active && (endTime === 0 || currentTime - endTime >= DASH_COOLDOWN)) {
+         const memoryAbilityReady = currentTime - stateRef.current.player.abilityLastUsed >= MEMORY_ABILITY_SHARED_COOLDOWN;
+         const canActivate = stateRef.current.memoryMode
+           ? !dash.active && memoryAbilityReady
+           : !dash.active && (endTime === 0 || currentTime - endTime >= DASH_COOLDOWN);
+         if (canActivate) {
              dash.active = true;
              dash.endTime = currentTime + 6000;
              dash.lastTime = currentTime;
+             if (stateRef.current.memoryMode) stateRef.current.player.abilityLastUsed = currentTime;
 
              const finalX = stateRef.current.player.x;
              const finalY = stateRef.current.player.y;
@@ -6832,10 +6890,15 @@ export default function GameCanvas() {
      if (!isMultiplayer) {
          const build = stateRef.current.player.build;
          const endTime = build.endTime || 0;
-         if (!build.active && (endTime === 0 || currentTime - endTime >= BUILD_COOLDOWN)) {
+         const memoryAbilityReady = currentTime - stateRef.current.player.abilityLastUsed >= MEMORY_ABILITY_SHARED_COOLDOWN;
+         const canActivate = stateRef.current.memoryMode
+           ? !build.active && memoryAbilityReady
+           : !build.active && (endTime === 0 || currentTime - endTime >= BUILD_COOLDOWN);
+         if (canActivate) {
              build.active = true;
              build.endTime = currentTime + 8000;
              build.lastTime = currentTime;
+             if (stateRef.current.memoryMode) stateRef.current.player.abilityLastUsed = currentTime;
 
              const gridX = Math.round(stateRef.current.player.x / 40) * 40;
              const gridY = Math.round(stateRef.current.player.y / 40) * 40;
@@ -8654,6 +8717,11 @@ export default function GameCanvas() {
             requestBuildActivation(currentTime);
          }
       }
+      if (key === '3') {
+         if (uiRef.current.status === 'PLAYING') {
+            requestDamageActivation(currentTime);
+         }
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -9244,6 +9312,108 @@ export default function GameCanvas() {
         };
 
         // --- LOGIC UPDATES ---
+
+        // The red damage ability is a moving blast front. It removes entities
+        // only when the visible ring reaches them; spawners are never queried.
+        for (let waveIndex = state.damageWaves.length - 1; waveIndex >= 0; waveIndex--) {
+          const wave = state.damageWaves[waveIndex];
+          const previousRadius = wave.previousRadius;
+          wave.age = Math.min(wave.maxAge, wave.age + dt);
+          const progress = Math.min(1, wave.age / wave.maxAge);
+          const currentRadius = wave.maxRadius * (1 - Math.pow(1 - progress, 3));
+
+          state.bullets = state.bullets.filter((bullet) => {
+            const distance = Math.hypot(bullet.x - wave.x, bullet.y - wave.y);
+            const crossedByWave = distance - bullet.radius <= currentRadius && distance + bullet.radius >= previousRadius;
+            if (crossedByWave) {
+              spawnParticles(bullet.x, bullet.y, MEMORY_ARENA_PALETTE.factions.red.bright, 5);
+            }
+            return !crossedByWave;
+          });
+
+          const crossedEnemies = state.enemies
+            .map((enemy) => ({
+              enemy,
+              distance: Math.hypot(enemy.x - wave.x, enemy.y - wave.y),
+            }))
+            .filter(({ enemy, distance }) =>
+              distance - enemy.radius <= currentRadius && distance + enemy.radius >= previousRadius)
+            .sort((a, b) => a.distance - b.distance);
+
+          if (crossedEnemies.length > 0) {
+            const defeatedEnemies = new Set(crossedEnemies.map(({ enemy }) => enemy));
+            state.enemies = state.enemies.filter((enemy) => !defeatedEnemies.has(enemy));
+
+            for (const { enemy } of crossedEnemies) {
+              const defeatedColor = enemy.factionColor ? ENEMY_COLOR_HEX[enemy.factionColor] : '#ff3333';
+              spawnParticles(enemy.x, enemy.y, defeatedColor, 30);
+              state.shockwaves.push({
+                x: enemy.x,
+                y: enemy.y,
+                color: defeatedColor,
+                maxRadius: 80,
+                age: 0,
+                maxAge: 0.25,
+                thickness: 8,
+              });
+
+              if (enemy.shape && enemy.factionColor) {
+                const chainTransition = registerPlayerEnemyKill(state.chain, {
+                  shape: enemy.shape,
+                  color: enemy.factionColor,
+                });
+                state.chain = chainTransition.state;
+                if (chainTransition.result === 'retargeted') {
+                  showChainFeedback('reset');
+                } else if (chainTransition.result === 'completed') {
+                  showChainFeedback('level');
+                  state.shockwaves.push({
+                    x: state.player.x,
+                    y: state.player.y,
+                    color: PLAYER_COLOR_HEX,
+                    maxRadius: 180,
+                    age: 0,
+                    maxAge: 0.5,
+                    thickness: 12,
+                  });
+                  state.floatingTexts.push({
+                    x: state.player.x,
+                    y: state.player.y - 35,
+                    text: `LEVEL ${state.chain.level}`,
+                    age: 0,
+                    maxAge: 1.2,
+                    color: PLAYER_COLOR_HEX,
+                    vy: -35,
+                  });
+                }
+              }
+            }
+
+            state.shake = Math.max(state.shake, 10);
+            setUiState((previousUi) => {
+              const newScore = previousUi.score + crossedEnemies.length * 100;
+              let newBlocks = previousUi.blocks;
+              while (newScore >= state.nextBlockScore) {
+                newBlocks++;
+                state.nextBlockScore += 100;
+              }
+              const nextUi = {
+                ...previousUi,
+                score: newScore,
+                blocks: newBlocks,
+                level: state.chain.level,
+                chainProgress: state.chain.progress,
+              };
+              uiRef.current = nextUi;
+              return nextUi;
+            });
+          }
+
+          wave.previousRadius = currentRadius;
+          if (progress >= 1) {
+            state.damageWaves.splice(waveIndex, 1);
+          }
+        }
 
         // Remote bullets are rendered from the reliable buffered host timeline.
         // A guest's own bullet keeps one continuous local-only visual; the host
@@ -13162,6 +13332,34 @@ export default function GameCanvas() {
       }
       ctx.globalAlpha = 1.0;
 
+      // Draw the expanding red damage front at the same eased radius used by
+      // gameplay collision, so the visual ring accurately communicates danger.
+      for (const wave of state.damageWaves) {
+        const progress = Math.min(1, wave.age / wave.maxAge);
+        const currentRadius = Math.max(1, wave.maxRadius * (1 - Math.pow(1 - progress, 3)));
+        const alpha = Math.max(0, 1 - progress);
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.shadowColor = MEMORY_ARENA_PALETTE.factions.red.bright;
+        ctx.shadowBlur = 24;
+        ctx.globalAlpha = alpha * 0.9;
+        ctx.strokeStyle = MEMORY_ARENA_PALETTE.factions.red.bright;
+        ctx.lineWidth = 14 - progress * 8;
+        ctx.beginPath();
+        ctx.arc(wave.x, wave.y, currentRadius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.shadowBlur = 8;
+        ctx.globalAlpha = alpha * 0.75;
+        ctx.strokeStyle = '#FFF1F3';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(wave.x, wave.y, Math.max(1, currentRadius - 5), 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       // Draw Shockwaves
       for (const s of state.shockwaves) {
         if (
@@ -13722,12 +13920,21 @@ export default function GameCanvas() {
 
       // Update cooldown UI
       if (STATUS !== 'PAUSED') {
+        let damageCooldown = 0;
         let specialCooldown = 0;
         let buildCooldown = 0;
         const now = currentTime;
 
         const isGuestMode = mpRef.current.roomId && !mpRef.current.isHost;
-        if (isGuestMode) {
+        if (state.memoryMode) {
+          const sharedCooldown = Math.max(
+            0,
+            Math.ceil((MEMORY_ABILITY_SHARED_COOLDOWN - (now - state.player.abilityLastUsed)) / 1000),
+          );
+          damageCooldown = sharedCooldown;
+          specialCooldown = sharedCooldown;
+          buildCooldown = sharedCooldown;
+        } else if (isGuestMode) {
           const socketId = socketRef.current?.id;
           const auth = socketId ? state.playerActionAuthority?.[socketId] : null;
           if (auth) {
@@ -13762,9 +13969,13 @@ export default function GameCanvas() {
           }
         }
 
-        if (uiRef.current.buttonCounters.special !== specialCooldown || uiRef.current.buttonCounters.build !== buildCooldown) {
+        if (
+          uiRef.current.buttonCounters.damage !== damageCooldown ||
+          uiRef.current.buttonCounters.special !== specialCooldown ||
+          uiRef.current.buttonCounters.build !== buildCooldown
+        ) {
            setUiState(prev => {
-             uiRef.current = { ...prev, buttonCounters: { special: specialCooldown, build: buildCooldown } };
+             uiRef.current = { ...prev, buttonCounters: { damage: damageCooldown, special: specialCooldown, build: buildCooldown } };
              return uiRef.current;
            });
         }
@@ -14851,8 +15062,8 @@ export default function GameCanvas() {
           damage: {
             label: 'DAMAGE',
             keyHint: 3,
-            control: null,
-            owned: false,
+            control: 'damage',
+            owned: !mpState.roomId,
             usableFill: 'linear-gradient(rgba(255, 77, 109, 0.58), rgba(255, 77, 109, 0.58)), rgba(6, 8, 14, 0.90)',
             usableBorder: MEMORY_ARENA_PALETTE.factions.red.bright,
             usableText: '#F5F7FF',
@@ -14903,6 +15114,7 @@ export default function GameCanvas() {
         } as const;
         const abilityHudOrder = ['damage', 'special', 'build', 'unknown'] as const;
         const sharedCooldownSeconds = Math.max(
+          uiState.buttonCounters.damage,
           uiState.buttonCounters.special,
           uiState.buttonCounters.build,
         );
@@ -15398,6 +15610,8 @@ export default function GameCanvas() {
                                requestSpecialActivation(currentTime);
                              } else if (tool.control === 'build') {
                                requestBuildActivation(currentTime);
+                             } else if (tool.control === 'damage') {
+                               requestDamageActivation(currentTime);
                              }
                            }}
                            className={`pointer-events-auto h-[44px] border-2 font-black tracking-[0.08em] sm:tracking-widest uppercase text-[9px] min-[380px]:text-[10px] sm:text-[12px] relative overflow-hidden flex justify-center items-center gap-1 sm:gap-1.5 focus:outline-none ${isReady ? 'hover:brightness-110 active:brightness-90 active:scale-95 cursor-pointer' : 'cursor-default'}`}
