@@ -202,6 +202,9 @@ const BUILD_COOLDOWN = 25000;
 const MEMORY_ABILITY_SHARED_COOLDOWN = 15000;
 const DAMAGE_WAVE_RADIUS = 420;
 const DAMAGE_WAVE_DURATION = 0.85;
+const CONVERSION_RADIUS = 650;
+const CONVERSION_PULL_DURATION_MS = 900;
+const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
@@ -1028,6 +1031,8 @@ interface MemoryEnemy {
   triangleAi?: TriangleAiState;
   dashDx?: number;
   dashDy?: number;
+  isPlayerAlly?: boolean;
+  conversionPullUntil?: number;
 }
 
 interface MemorySpawner {
@@ -1041,6 +1046,16 @@ interface MemorySpawner {
   isCore?: boolean;
   nextSpawnAt?: number;
   spawnBag?: EnemyShape[];
+}
+
+function areMemoryCombatantsHostile(a: MemoryEnemy, b: MemoryEnemy): boolean {
+  if (a.isPlayerAlly) return !b.isPlayerAlly;
+  if (b.isPlayerAlly) return true;
+  return Boolean(
+    a.factionColor &&
+    b.factionColor &&
+    areEnemyFactionsHostile(a.factionColor, b.factionColor)
+  );
 }
 
 function clamp(val: number, min: number, max: number) {
@@ -2722,7 +2737,7 @@ export default function GameCanvas() {
     return true;
   }, []);
 
-  const [uiState, setUiState] = useState<{ status: 'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER' | 'VICTORY' | 'LOBBY'; score: number; deviceType: 'desktop' | 'mobile'; activeTool: 'weapon' | 'special' | 'build'; blocks: number; spawnersLeft: number; mapId: string; hardMode: boolean; gameMode: GameMode; hp: number; maxHp: number; level: number; chainProgress: number; buttonCounters: { damage: number; special: number; build: number } }>({ status: 'MENU', score: 0, deviceType: 'desktop', activeTool: 'special', blocks: 50, spawnersLeft: 4, mapId: MEMORY_DEFAULT_MAP_ID, hardMode: false, gameMode: 'normal', hp: MEMORY_ARENA_CONFIG.player.maxHp, maxHp: MEMORY_ARENA_CONFIG.player.maxHp, level: 1, chainProgress: 0, buttonCounters: { damage: 0, special: 0, build: 0 } });
+  const [uiState, setUiState] = useState<{ status: 'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER' | 'VICTORY' | 'LOBBY'; score: number; deviceType: 'desktop' | 'mobile'; activeTool: 'weapon' | 'special' | 'build'; blocks: number; spawnersLeft: number; mapId: string; hardMode: boolean; gameMode: GameMode; hp: number; maxHp: number; level: number; chainProgress: number; buttonCounters: { damage: number; special: number; build: number; convert: number } }>({ status: 'MENU', score: 0, deviceType: 'desktop', activeTool: 'special', blocks: 50, spawnersLeft: 4, mapId: MEMORY_DEFAULT_MAP_ID, hardMode: false, gameMode: 'normal', hp: MEMORY_ARENA_CONFIG.player.maxHp, maxHp: MEMORY_ARENA_CONFIG.player.maxHp, level: 1, chainProgress: 0, buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 } });
   const uiRef = useRef(uiState);
   uiRef.current = uiState;
 
@@ -3552,7 +3567,7 @@ export default function GameCanvas() {
     forceBroadcast: false,
     blocks: [] as { x: number; y: number; size: number; createdAt: number, colorIdx?: number, ownerId?: string }[],
     nextBlockScore: 100,
-    bullets: [] as { id?: string; clientShotId?: string; x: number; y: number; dx: number; dy: number; radius: number, isPlayer: boolean, bounceCount: number, spawnTime: number, isNeutral: boolean, ownerId?: string, colorIdx?: number, factionColor?: EnemyFactionColor, damage?: number, targetX?: number, targetY?: number, repelMultiplied?: boolean, allowedBlockKeys?: string[], leftBlockKeys?: string[] }[],
+    bullets: [] as { id?: string; clientShotId?: string; x: number; y: number; dx: number; dy: number; radius: number, isPlayer: boolean, isPlayerAlly?: boolean, bounceCount: number, spawnTime: number, isNeutral: boolean, ownerId?: string, colorIdx?: number, factionColor?: EnemyFactionColor, damage?: number, targetX?: number, targetY?: number, repelMultiplied?: boolean, allowedBlockKeys?: string[], leftBlockKeys?: string[] }[],
     enemies: [] as MemoryEnemy[],
     bouncers: [] as { id?: string; x: number; y: number; dx: number; dy: number; size: number; radius: number; speed: number; lastDirChange: number; lastMultiply: number, targetX?: number, targetY?: number, kbvx?: number, kbvy?: number, processedZoneKbs?: number[] }[],
     zones: [] as { x: number; y: number; innerRadius: number; outerRadius: number; duration: number; spawnTime: number; ownerId: string; colorIdx?: number, type?: 'repel' }[],
@@ -4192,6 +4207,12 @@ export default function GameCanvas() {
         if (spawner.nextSpawnAt !== undefined) {
           spawner.nextSpawnAt += pauseDuration;
         }
+      }
+    }
+
+    for (const enemy of state.enemies) {
+      if (enemy.conversionPullUntil !== undefined) {
+        enemy.conversionPullUntil += pauseDuration;
       }
     }
 
@@ -4935,6 +4956,9 @@ export default function GameCanvas() {
       if (typeof b.isPlayer !== 'boolean' || typeof b.isNeutral !== 'boolean') {
         throw new Error("INVALID SAVE FILE");
       }
+      if (b.isPlayerAlly !== undefined && typeof b.isPlayerAlly !== 'boolean') {
+        throw new Error("INVALID SAVE FILE");
+      }
       if (!isBoundedInt(b.bounceCount, 0, 1000)) throw new Error("INVALID SAVE FILE");
       if (!isValidColorIdx(b.colorIdx)) throw new Error("INVALID SAVE FILE");
       if (b.targetX !== undefined && !isFiniteNum(b.targetX)) throw new Error("INVALID SAVE FILE");
@@ -4984,6 +5008,7 @@ export default function GameCanvas() {
         dy: b.dy,
         radius: b.radius,
         isPlayer: b.isPlayer,
+        isPlayerAlly: Boolean(b.isPlayerAlly),
         bounceCount: b.bounceCount,
         spawnTime,
         isNeutral: b.isNeutral,
@@ -5018,6 +5043,12 @@ export default function GameCanvas() {
             !isFiniteNum(e.nextTurnAt) || !isBoundedNum(e.dashDx, -1, 1) || !isBoundedNum(e.dashDy, -1, 1)) {
           throw new Error("INVALID SAVE FILE");
         }
+        if (e.isPlayerAlly !== undefined && typeof e.isPlayerAlly !== 'boolean') {
+          throw new Error("INVALID SAVE FILE");
+        }
+        if (e.conversionPullUntil !== undefined && !isFiniteNum(e.conversionPullUntil)) {
+          throw new Error("INVALID SAVE FILE");
+        }
 
         let triangleAi: TriangleAiState | undefined;
         if (e.shape === 'triangle') {
@@ -5048,6 +5079,10 @@ export default function GameCanvas() {
           triangleAi,
           dashDx: e.dashDx,
           dashDy: e.dashDy,
+          isPlayerAlly: Boolean(e.isPlayerAlly),
+          conversionPullUntil: e.conversionPullUntil !== undefined
+            ? adjustTime(e.conversionPullUntil)
+            : undefined,
         };
       }
 
@@ -5245,6 +5280,7 @@ export default function GameCanvas() {
         damage: isMemorySave ? memorySharedCooldown : 0,
         special: specialCooldown,
         build: buildCooldown,
+        convert: isMemorySave ? memorySharedCooldown : 0,
       }
     };
 
@@ -6089,7 +6125,7 @@ export default function GameCanvas() {
     releaseAllInputs();
 
     const uiHardMode = isMultiplayer ? (selectedGameMode !== 'normal') : isHardMode;
-    const newUi = { status: 'PLAYING' as const, score: 0, deviceType: dType, activeTool: 'special' as const, blocks: 50, spawnersLeft: state.spawners.length, mapId: selectedMapId, hardMode: uiHardMode, gameMode: selectedGameMode, hp: state.player.hp, maxHp: state.player.maxHp, level: state.chain.level, chainProgress: state.chain.progress, buttonCounters: { damage: 0, special: 0, build: 0 } };
+    const newUi = { status: 'PLAYING' as const, score: 0, deviceType: dType, activeTool: 'special' as const, blocks: 50, spawnersLeft: state.spawners.length, mapId: selectedMapId, hardMode: uiHardMode, gameMode: selectedGameMode, hp: state.player.hp, maxHp: state.player.maxHp, level: state.chain.level, chainProgress: state.chain.progress, buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 } };
     uiRef.current = newUi;
     setUiState(newUi);
 
@@ -6353,7 +6389,7 @@ export default function GameCanvas() {
         maxHp: state.player.maxHp,
         level: state.chain.level,
         chainProgress: state.chain.progress,
-        buttonCounters: { damage: 0, special: 0, build: 0 }
+        buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 }
       };
       uiRef.current = finalUi;
       setUiState(finalUi);
@@ -6776,6 +6812,74 @@ export default function GameCanvas() {
       thickness: 24,
     });
     state.shake = Math.max(state.shake, 12);
+  }, []);
+
+  const requestConversionActivation = useCallback((currentTime: number) => {
+    const state = stateRef.current;
+    if (!state.memoryMode || mpRef.current.roomId || uiRef.current.status !== 'PLAYING') return;
+    if (currentTime - state.player.abilityLastUsed < MEMORY_ABILITY_SHARED_COOLDOWN) return;
+
+    state.player.abilityLastUsed = currentTime;
+    let convertedCount = 0;
+
+    for (const enemy of state.enemies) {
+      if (enemy.isPlayerAlly) continue;
+      if (Math.hypot(enemy.x - state.player.x, enemy.y - state.player.y) > CONVERSION_RADIUS) continue;
+
+      enemy.isPlayerAlly = true;
+      enemy.conversionPullUntil = currentTime + CONVERSION_PULL_DURATION_MS;
+      enemy.lastShoot = currentTime;
+      enemy.dashDx = 0;
+      enemy.dashDy = 0;
+      if (enemy.shape === 'triangle') {
+        enemy.triangleAi = createTriangleAiState(currentTime);
+      }
+      convertedCount++;
+
+      for (let particleIndex = 0; particleIndex < 8; particleIndex++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 45 + Math.random() * 90;
+        state.particles.push({
+          x: enemy.x,
+          y: enemy.y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 0,
+          maxLife: 0.3 + Math.random() * 0.3,
+          color: PLAYER_COLOR_HEX,
+          radius: 1.5 + Math.random() * 2.5,
+        });
+      }
+    }
+
+    state.shockwaves.push({
+      x: state.player.x,
+      y: state.player.y,
+      color: MEMORY_ARENA_PALETTE.factions.green.bright,
+      maxRadius: CONVERSION_RADIUS,
+      age: 0,
+      maxAge: 0.75,
+      thickness: 18,
+    });
+    state.shockwaves.push({
+      x: state.player.x,
+      y: state.player.y,
+      color: PLAYER_COLOR_HEX,
+      maxRadius: CONVERSION_RADIUS * 0.82,
+      age: 0,
+      maxAge: 0.58,
+      thickness: 7,
+    });
+    state.floatingTexts.push({
+      x: state.player.x,
+      y: state.player.y - 38,
+      text: convertedCount > 0 ? `${convertedCount} CONVERTED` : 'NO TARGETS',
+      age: 0,
+      maxAge: 1.15,
+      color: PLAYER_COLOR_HEX,
+      vy: -32,
+    });
+    state.shake = Math.max(state.shake, convertedCount > 0 ? 14 : 6);
   }, []);
 
   const isGuestSpecialReady = useCallback((currentTime: number) => {
@@ -8722,6 +8826,11 @@ export default function GameCanvas() {
             requestDamageActivation(currentTime);
          }
       }
+      if (key === '4') {
+         if (uiRef.current.status === 'PLAYING') {
+            requestConversionActivation(currentTime);
+         }
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -9337,6 +9446,7 @@ export default function GameCanvas() {
               distance: Math.hypot(enemy.x - wave.x, enemy.y - wave.y),
             }))
             .filter(({ enemy, distance }) =>
+              !enemy.isPlayerAlly &&
               distance - enemy.radius <= currentRadius && distance + enemy.radius >= previousRadius)
             .sort((a, b) => a.distance - b.distance);
 
@@ -10191,7 +10301,7 @@ export default function GameCanvas() {
         if (state.memoryMode && MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled) {
           for (const faction of ENEMY_FACTIONS) {
             const raid = state.factionRaids[faction];
-            const members = state.enemies.filter(enemy => enemy.factionColor === faction);
+            const members = state.enemies.filter(enemy => !enemy.isPlayerAlly && enemy.factionColor === faction);
             const targetSpawner = raid.targetFactionColor
               ? state.spawners.find(spawner => spawner.factionColor === raid.targetFactionColor)
               : undefined;
@@ -10279,13 +10389,29 @@ export default function GameCanvas() {
             const dxToPlayer = state.player.x - enemy.x;
             const dyToPlayer = state.player.y - enemy.y;
             const distanceToPlayer = Math.hypot(dxToPlayer, dyToPlayer);
-            let targetX = state.player.x;
-            let targetY = state.player.y;
-            let distanceToTarget = distanceToPlayer;
-            let targetIsCombatant = true;
-            const raid = state.factionRaids[enemy.factionColor];
-            const raidIsActive = raid.phase === 'marching' || raid.phase === 'sieging';
-            const raidTargetSpawner = raidIsActive && raid.targetFactionColor
+            const isPlayerAlly = Boolean(enemy.isPlayerAlly);
+
+            if (isPlayerAlly && currentTime < (enemy.conversionPullUntil ?? 0)) {
+              const stopDistance = state.player.radius + enemy.radius + 32;
+              if (distanceToPlayer > stopDistance) {
+                const pullStep = Math.min(distanceToPlayer - stopDistance, CONVERSION_PULL_SPEED * dt);
+                const pullX = enemy.x + (dxToPlayer / distanceToPlayer) * pullStep;
+                const pullY = enemy.y + (dyToPlayer / distanceToPlayer) * pullStep;
+                const resolved = resolveWallCollisions(pullX, pullY, enemy.radius, activeWalls, enemy.x, enemy.y);
+                enemy.x = resolved.x;
+                enemy.y = resolved.y;
+                enemy.angle = Math.atan2(dyToPlayer, dxToPlayer);
+              }
+              continue;
+            }
+
+            let targetX = isPlayerAlly ? enemy.x : state.player.x;
+            let targetY = isPlayerAlly ? enemy.y : state.player.y;
+            let distanceToTarget = isPlayerAlly ? Infinity : distanceToPlayer;
+            let targetIsCombatant = !isPlayerAlly;
+            const raid = isPlayerAlly ? undefined : state.factionRaids[enemy.factionColor];
+            const raidIsActive = Boolean(raid && (raid.phase === 'marching' || raid.phase === 'sieging'));
+            const raidTargetSpawner = raidIsActive && raid?.targetFactionColor
               ? state.spawners.find(spawner => spawner.factionColor === raid.targetFactionColor)
               : undefined;
             const formationOffset = getRaidFormationOffset(enemy.id ?? `${enemy.factionColor}-${i}`);
@@ -10318,7 +10444,7 @@ export default function GameCanvas() {
                   candidate === enemy ||
                   enemiesDefeatedByFactions.has(candidate) ||
                   !candidate.factionColor ||
-                  !areEnemyFactionsHostile(enemy.factionColor, candidate.factionColor)
+                  !areMemoryCombatantsHostile(enemy, candidate)
                 ) continue;
                 const candidateDistance = Math.hypot(candidate.x - enemy.x, candidate.y - enemy.y);
                 const shouldTargetCandidate = raidDestination
@@ -10364,6 +10490,7 @@ export default function GameCanvas() {
                   dy: Math.sin(shotAngle) * BULLET_SPEED,
                   radius: BULLET_RADIUS,
                   isPlayer: false,
+                  isPlayerAlly,
                   bounceCount: 0,
                   spawnTime: currentTime,
                   isNeutral: false,
@@ -10409,6 +10536,7 @@ export default function GameCanvas() {
                     dy: direction.y * BULLET_SPEED,
                     radius: BULLET_RADIUS,
                     isPlayer: false,
+                    isPlayerAlly,
                     bounceCount: 0,
                     spawnTime: currentTime,
                     isNeutral: false,
@@ -10502,7 +10630,7 @@ export default function GameCanvas() {
                 const travelled = Math.hypot(enemy.x - previousX, enemy.y - previousY);
                 const collidedWithWall = Math.abs(resolved.x - desiredX) > 0.1 || Math.abs(resolved.y - desiredY) > 0.1;
 
-                if (!triangleAi.hitPlayer && segmentVersusCircle(
+                if (!isPlayerAlly && !triangleAi.hitPlayer && segmentVersusCircle(
                   previousX,
                   previousY,
                   enemy.x,
@@ -10521,7 +10649,7 @@ export default function GameCanvas() {
                       candidate === enemy ||
                       enemiesDefeatedByFactions.has(candidate) ||
                       !candidate.factionColor ||
-                      !areEnemyFactionsHostile(enemy.factionColor, candidate.factionColor)
+                      !areMemoryCombatantsHostile(enemy, candidate)
                     ) continue;
                     if (segmentVersusCircle(
                       previousX,
@@ -10533,7 +10661,9 @@ export default function GameCanvas() {
                       enemy.radius + candidate.radius,
                     )) {
                       enemiesDefeatedByFactions.add(candidate);
-                      const defeatedColor = ENEMY_COLOR_HEX[candidate.factionColor];
+                      const defeatedColor = candidate.isPlayerAlly
+                        ? PLAYER_COLOR_HEX
+                        : ENEMY_COLOR_HEX[candidate.factionColor];
                       spawnParticles(candidate.x, candidate.y, defeatedColor, 18);
                       state.shockwaves.push({ x: candidate.x, y: candidate.y, color: defeatedColor, maxRadius: 55, age: 0, maxAge: 0.2, thickness: 5 });
                     }
@@ -11483,6 +11613,7 @@ export default function GameCanvas() {
                              bullet.bounceCount++;
                              bullet.isNeutral = false;
                              bullet.isPlayer = true;
+                             bullet.isPlayerAlly = false;
                              bullet.ownerId = zone.ownerId;
                              bullet.colorIdx = zone.colorIdx;
 
@@ -11940,6 +12071,8 @@ export default function GameCanvas() {
                 const pDef = PLAYER_COLORS[bullet.colorIdx !== undefined ? bullet.colorIdx : 0] || PLAYER_COLORS[0];
                 trailColor = pDef.n;
               }
+            } else if (bullet.isPlayerAlly) {
+              trailColor = PLAYER_COLOR_HEX;
             } else if (bullet.factionColor) {
               trailColor = ENEMY_COLOR_HEX[bullet.factionColor];
             }
@@ -11956,7 +12089,9 @@ export default function GameCanvas() {
             collidedWithWall = true;
             const impactColor = bullet.isPlayer
               ? PLAYER_COLOR_HEX
-              : (bullet.factionColor ? ENEMY_COLOR_HEX[bullet.factionColor] : '#ff0066');
+              : (bullet.isPlayerAlly
+                ? PLAYER_COLOR_HEX
+                : (bullet.factionColor ? ENEMY_COLOR_HEX[bullet.factionColor] : '#ff0066'));
             spawnParticles(bullet.x, bullet.y, impactColor, 5);
           } else {
             for (const n of normalsToProcess) {
@@ -12143,20 +12278,31 @@ export default function GameCanvas() {
               const pDef = PLAYER_COLORS[bullet.colorIdx !== undefined ? bullet.colorIdx : 0] || PLAYER_COLORS[0];
               bulletColor = pDef.n;
             }
+          } else if (bullet.isPlayerAlly) {
+            bulletColor = PLAYER_COLOR_HEX;
           }
 
           // Player bullets kill any enemy. Faction bullets kill only enemies of another color.
+          const isMemoryAllyBullet = Boolean(
+            state.memoryMode &&
+            MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled &&
+            !bullet.isPlayer &&
+            bullet.isPlayerAlly
+          );
           const isMemoryFactionBullet = Boolean(
             state.memoryMode &&
             MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled &&
             !bullet.isPlayer &&
+            !bullet.isPlayerAlly &&
             bullet.factionColor
           );
-          if (!bulletDestroyed && (bulletColor !== '#ff0066' || isMemoryFactionBullet)) {
+          if (!bulletDestroyed && (bulletColor !== '#ff0066' || isMemoryFactionBullet || isMemoryAllyBullet)) {
             for (let e = state.enemies.length - 1; e >= 0; e--) {
               const enemy = state.enemies[e];
+              if ((bullet.isPlayer || isMemoryAllyBullet) && enemy.isPlayerAlly) continue;
               if (
                 isMemoryFactionBullet &&
+                !enemy.isPlayerAlly &&
                 (!enemy.factionColor || !areEnemyFactionsHostile(bullet.factionColor!, enemy.factionColor))
               ) continue;
               const dx = enemy.x - bullet.x;
@@ -12166,7 +12312,9 @@ export default function GameCanvas() {
                 : dx * dx + dy * dy < (enemy.radius + bullet.radius) ** 2;
               if (hitThisEnemy) {
                 // Kill enemy
-                const defeatedColor = enemy.factionColor ? ENEMY_COLOR_HEX[enemy.factionColor] : '#ff3333';
+                const defeatedColor = enemy.isPlayerAlly
+                  ? PLAYER_COLOR_HEX
+                  : (enemy.factionColor ? ENEMY_COLOR_HEX[enemy.factionColor] : '#ff3333');
                 spawnParticles(enemy.x, enemy.y, defeatedColor, 30);
                 state.shockwaves.push({ x: enemy.x, y: enemy.y, color: defeatedColor, maxRadius: 80, age: 0, maxAge: 0.25, thickness: 8 });
                 if (bullet.isPlayer) state.shake = 10;
@@ -12377,6 +12525,7 @@ export default function GameCanvas() {
                 const dy = state.player.y - bullet.y;
                 if (
                   !bullet.isPlayer &&
+                  !bullet.isPlayerAlly &&
                   dx * dx + dy * dy < (state.player.radius + bullet.radius * 0.5) ** 2
                 ) {
                   damageMemoryPlayer(bullet.damage ?? MEMORY_ARENA_CONFIG.circle.bulletDamage, bullet.x, bullet.y, 'HOSTILE FIRE');
@@ -12908,7 +13057,8 @@ export default function GameCanvas() {
 
         if (state.memoryMode && enemy.shape && enemy.factionColor) {
           const enemyPalette = MEMORY_ARENA_PALETTE.factions[enemy.factionColor];
-          const enemyColor = enemyPalette.bright;
+          const enemyColor = enemy.isPlayerAlly ? PLAYER_COLOR_HEX : enemyPalette.bright;
+          const enemyBody = enemy.isPlayerAlly ? MEMORY_ARENA_PALETTE.player.allyBody : enemyPalette.body;
           if (uiRef.current.status === 'PLAYING' && Math.random() > 0.72) {
             state.trails.push({
               x: enemy.x,
@@ -12945,7 +13095,7 @@ export default function GameCanvas() {
           }
           ctx.shadowColor = enemyColor;
           ctx.shadowBlur = telegraphVisual?.glowBlur ?? (enemy.shape === 'triangle' && enemy.triangleAi?.phase === 'dash' ? 24 : 12);
-          ctx.fillStyle = enemyPalette.body;
+          ctx.fillStyle = enemyBody;
           ctx.strokeStyle = enemyColor;
           ctx.lineWidth = 2.75;
           ctx.beginPath();
@@ -13272,6 +13422,9 @@ export default function GameCanvas() {
             color = pDef.n;
             glow = pDef.g || 'rgba(0, 204, 255, 0.3)';
           }
+        } else if (bullet.isPlayerAlly) {
+          color = PLAYER_COLOR_HEX;
+          glow = MEMORY_ARENA_PALETTE.player.glow;
         } else if (bullet.factionColor) {
           color = ENEMY_COLOR_HEX[bullet.factionColor];
           glow = `${color}55`;
@@ -13923,6 +14076,7 @@ export default function GameCanvas() {
         let damageCooldown = 0;
         let specialCooldown = 0;
         let buildCooldown = 0;
+        let convertCooldown = 0;
         const now = currentTime;
 
         const isGuestMode = mpRef.current.roomId && !mpRef.current.isHost;
@@ -13934,6 +14088,7 @@ export default function GameCanvas() {
           damageCooldown = sharedCooldown;
           specialCooldown = sharedCooldown;
           buildCooldown = sharedCooldown;
+          convertCooldown = sharedCooldown;
         } else if (isGuestMode) {
           const socketId = socketRef.current?.id;
           const auth = socketId ? state.playerActionAuthority?.[socketId] : null;
@@ -13972,10 +14127,11 @@ export default function GameCanvas() {
         if (
           uiRef.current.buttonCounters.damage !== damageCooldown ||
           uiRef.current.buttonCounters.special !== specialCooldown ||
-          uiRef.current.buttonCounters.build !== buildCooldown
+          uiRef.current.buttonCounters.build !== buildCooldown ||
+          uiRef.current.buttonCounters.convert !== convertCooldown
         ) {
            setUiState(prev => {
-             uiRef.current = { ...prev, buttonCounters: { damage: damageCooldown, special: specialCooldown, build: buildCooldown } };
+             uiRef.current = { ...prev, buttonCounters: { damage: damageCooldown, special: specialCooldown, build: buildCooldown, convert: convertCooldown } };
              return uiRef.current;
            });
         }
@@ -15098,11 +15254,11 @@ export default function GameCanvas() {
             unusableText: 'rgba(255, 200, 87, 0.52)',
             usableGlow: '0 0 5px rgba(255, 200, 87, 0.24), 0 0 12px rgba(255, 200, 87, 0.08)',
           },
-          unknown: {
-            label: 'ABILITY',
+          convert: {
+            label: 'CONVERT',
             keyHint: 4,
-            control: null,
-            owned: false,
+            control: 'convert',
+            owned: !mpState.roomId,
             usableFill: 'linear-gradient(rgba(46, 217, 154, 0.58), rgba(46, 217, 154, 0.58)), rgba(6, 8, 14, 0.90)',
             usableBorder: MEMORY_ARENA_PALETTE.factions.green.bright,
             usableText: '#F5F7FF',
@@ -15112,11 +15268,12 @@ export default function GameCanvas() {
             usableGlow: '0 0 5px rgba(46, 217, 154, 0.24), 0 0 12px rgba(46, 217, 154, 0.08)',
           },
         } as const;
-        const abilityHudOrder = ['damage', 'special', 'build', 'unknown'] as const;
+        const abilityHudOrder = ['damage', 'special', 'build', 'convert'] as const;
         const sharedCooldownSeconds = Math.max(
           uiState.buttonCounters.damage,
           uiState.buttonCounters.special,
           uiState.buttonCounters.build,
+          uiState.buttonCounters.convert,
         );
 
         return (
@@ -15612,6 +15769,8 @@ export default function GameCanvas() {
                                requestBuildActivation(currentTime);
                              } else if (tool.control === 'damage') {
                                requestDamageActivation(currentTime);
+                             } else if (tool.control === 'convert') {
+                               requestConversionActivation(currentTime);
                              }
                            }}
                            className={`pointer-events-auto h-[44px] border-2 font-black tracking-[0.08em] sm:tracking-widest uppercase text-[9px] min-[380px]:text-[10px] sm:text-[12px] relative overflow-hidden flex justify-center items-center gap-1 sm:gap-1.5 focus:outline-none ${isReady ? 'hover:brightness-110 active:brightness-90 active:scale-95 cursor-pointer' : 'cursor-default'}`}

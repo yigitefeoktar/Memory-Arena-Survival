@@ -13,6 +13,7 @@ export const MEMORY_ARENA_PALETTE = {
     body: '#F4FBFF',
     effect: '#00E5FF',
     glow: 'rgba(0, 229, 255, 0.34)',
+    allyBody: '#083B46',
   },
   walls: {
     fill: '#101820',
