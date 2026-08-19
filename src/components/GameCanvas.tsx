@@ -206,6 +206,7 @@ const CONVERSION_RADIUS = 650;
 const CONVERSION_PULL_DURATION_MS = 900;
 const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
+const MAX_TRANSIENT_BULLET_TRAILS = 1000;
 
 const SAVE_FORMAT = "memory-arena-save";
 const SAVE_VERSION = 1;
@@ -11618,6 +11619,7 @@ export default function GameCanvas() {
              }
 
              // Repel bullets
+             const newBullets: any[] = [];
              for (const bullet of state.bullets) {
                  // Ignore bullets of the same color that have not bounced off a wall yet
                  if (bullet.colorIdx === zone.colorIdx && bullet.isPlayer && !bullet.isNeutral) {
@@ -11633,10 +11635,11 @@ export default function GameCanvas() {
                          const ny = dy / dist;
                          const dot = bullet.dx * nx + bullet.dy * ny;
                          if (dot < 0) { // Moving inward
-                             // Reflect the existing projectile once. The old
-                             // implementation also created two copies here,
-                             // which could triple an already-large bullet pool
-                             // and stall the simulation under heavy fire.
+                             const origDx = bullet.dx;
+                             const origDy = bullet.dy;
+                             const speed = Math.sqrt(origDx * origDx + origDy * origDy);
+
+                             // 1. Mirrored bullet (modify existing)
                              bullet.dx -= 2 * dot * nx;
                              bullet.dy -= 2 * dot * ny;
                              bullet.bounceCount++;
@@ -11645,10 +11648,50 @@ export default function GameCanvas() {
                              bullet.isPlayerAlly = false;
                              bullet.ownerId = zone.ownerId;
                              bullet.colorIdx = zone.colorIdx;
-                             bullet.repelMultiplied = true;
+
+                             if (!bullet.repelMultiplied) {
+                                 bullet.repelMultiplied = true;
+
+                                 // 2. Reversed bullet (directly back where it came from)
+                                 newBullets.push({
+                                     id: Math.random().toString(36).substring(2, 9),
+                                     x: bullet.x,
+                                     y: bullet.y,
+                                     dx: -origDx,
+                                     dy: -origDy,
+                                     radius: bullet.radius,
+                                     isPlayer: true,
+                                     ownerId: zone.ownerId,
+                                     bounceCount: bullet.bounceCount,
+                                     isNeutral: false,
+                                     colorIdx: zone.colorIdx,
+                                     spawnTime: bullet.spawnTime || performance.now(),
+                                     repelMultiplied: true
+                                 });
+
+                                 // 3. Away bullet (shot directly away from player)
+                                 newBullets.push({
+                                     id: Math.random().toString(36).substring(2, 9),
+                                     x: bullet.x,
+                                     y: bullet.y,
+                                     dx: nx * speed,
+                                     dy: ny * speed,
+                                     radius: bullet.radius,
+                                     isPlayer: true,
+                                     ownerId: zone.ownerId,
+                                     bounceCount: bullet.bounceCount,
+                                     isNeutral: false,
+                                     colorIdx: zone.colorIdx,
+                                     spawnTime: bullet.spawnTime || performance.now(),
+                                     repelMultiplied: true
+                                 });
+                             }
                          }
                      }
                  }
+             }
+             if (newBullets.length > 0) {
+                 state.bullets.push(...newBullets);
              }
           }
 
@@ -12049,7 +12092,7 @@ export default function GameCanvas() {
           }
 
           // Keep trail creation at the bullet’s final resolved position for MP, but original direct endpoint for SP.
-          if (Math.random() > 0.3) {
+          if (state.trails.length < MAX_TRANSIENT_BULLET_TRAILS && Math.random() > 0.3) {
             let trailColor = '#ff0066';
             if (bullet.isNeutral) {
               trailColor = '#aaaaaa';
