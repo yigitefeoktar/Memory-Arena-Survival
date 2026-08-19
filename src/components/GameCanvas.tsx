@@ -206,7 +206,6 @@ const CONVERSION_RADIUS = 650;
 const CONVERSION_PULL_DURATION_MS = 900;
 const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
-const MAX_TRANSIENT_BULLET_TRAILS = 1000;
 
 const SAVE_FORMAT = "memory-arena-save";
 const SAVE_VERSION = 1;
@@ -11702,6 +11701,36 @@ export default function GameCanvas() {
         if (mpRef.current.roomId && mpRef.current.isHost) {
           hostBulletSimulationTickRef.current += 1;
         }
+
+        // Memory Arena can briefly have hundreds of bullets after Special is
+        // activated. Index enemies by position once per frame so each bullet
+        // checks only nearby enemies instead of scanning the entire arena.
+        // The original reverse entity order is retained for overlapping hits.
+        const memoryEnemyCollisionCellSize = 96;
+        const memoryEnemyCollisionGrid = state.memoryMode && !mpRef.current.roomId
+          ? new Map<string, MemoryEnemy[]>()
+          : null;
+        const memoryEnemyCollisionOrder = memoryEnemyCollisionGrid
+          ? new Map<MemoryEnemy, number>()
+          : null;
+        let memoryEnemyMaxRadius = 0;
+        if (memoryEnemyCollisionGrid && memoryEnemyCollisionOrder) {
+          for (let enemyIndex = 0; enemyIndex < state.enemies.length; enemyIndex++) {
+            const enemy = state.enemies[enemyIndex];
+            const cellX = Math.floor(enemy.x / memoryEnemyCollisionCellSize);
+            const cellY = Math.floor(enemy.y / memoryEnemyCollisionCellSize);
+            const cellKey = `${cellX}:${cellY}`;
+            const cell = memoryEnemyCollisionGrid.get(cellKey);
+            if (cell) {
+              cell.push(enemy);
+            } else {
+              memoryEnemyCollisionGrid.set(cellKey, [enemy]);
+            }
+            memoryEnemyCollisionOrder.set(enemy, enemyIndex);
+            memoryEnemyMaxRadius = Math.max(memoryEnemyMaxRadius, enemy.radius);
+          }
+        }
+
         for (let i = state.bullets.length - 1; i >= 0; i--) {
           const bullet = state.bullets[i];
           const isAuthoritativeMultiplayerBullet =
@@ -12092,7 +12121,7 @@ export default function GameCanvas() {
           }
 
           // Keep trail creation at the bullet’s final resolved position for MP, but original direct endpoint for SP.
-          if (state.trails.length < MAX_TRANSIENT_BULLET_TRAILS && Math.random() > 0.3) {
+          if (Math.random() > 0.3) {
             let trailColor = '#ff0066';
             if (bullet.isNeutral) {
               trailColor = '#aaaaaa';
@@ -12329,8 +12358,35 @@ export default function GameCanvas() {
             bullet.factionColor
           );
           if (!bulletDestroyed && (bulletColor !== '#ff0066' || isMemoryFactionBullet || isMemoryAllyBullet)) {
-            for (let e = state.enemies.length - 1; e >= 0; e--) {
-              const enemy = state.enemies[e];
+            let nearbyMemoryEnemies: MemoryEnemy[] | null = null;
+            if (memoryEnemyCollisionGrid && memoryEnemyCollisionOrder) {
+              nearbyMemoryEnemies = [];
+              const collisionReach = bullet.radius + memoryEnemyMaxRadius;
+              const minCellX = Math.floor((bullet.x - collisionReach) / memoryEnemyCollisionCellSize);
+              const maxCellX = Math.floor((bullet.x + collisionReach) / memoryEnemyCollisionCellSize);
+              const minCellY = Math.floor((bullet.y - collisionReach) / memoryEnemyCollisionCellSize);
+              const maxCellY = Math.floor((bullet.y + collisionReach) / memoryEnemyCollisionCellSize);
+              for (let cellY = minCellY; cellY <= maxCellY; cellY++) {
+                for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
+                  const cell = memoryEnemyCollisionGrid.get(`${cellX}:${cellY}`);
+                  if (cell) nearbyMemoryEnemies.push(...cell);
+                }
+              }
+              nearbyMemoryEnemies.sort((first, second) =>
+                (memoryEnemyCollisionOrder.get(second) ?? -1) -
+                (memoryEnemyCollisionOrder.get(first) ?? -1)
+              );
+            }
+
+            const enemyCandidateCount = nearbyMemoryEnemies?.length ?? state.enemies.length;
+            for (let candidateIndex = 0; candidateIndex < enemyCandidateCount; candidateIndex++) {
+              const enemy = nearbyMemoryEnemies
+                ? nearbyMemoryEnemies[candidateIndex]
+                : state.enemies[state.enemies.length - 1 - candidateIndex];
+              const e = nearbyMemoryEnemies
+                ? state.enemies.indexOf(enemy)
+                : state.enemies.length - 1 - candidateIndex;
+              if (!enemy || e < 0) continue;
               if ((bullet.isPlayer || isMemoryAllyBullet) && enemy.isPlayerAlly) continue;
               if (
                 isMemoryFactionBullet &&
