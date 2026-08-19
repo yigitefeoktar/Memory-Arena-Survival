@@ -6821,6 +6821,7 @@ export default function GameCanvas() {
 
     state.player.abilityLastUsed = currentTime;
     let convertedCount = 0;
+    let convertedBulletCount = 0;
 
     for (const enemy of state.enemies) {
       if (enemy.isPlayerAlly) continue;
@@ -6852,6 +6853,34 @@ export default function GameCanvas() {
       }
     }
 
+    for (const bullet of state.bullets) {
+      if (Math.hypot(bullet.x - state.player.x, bullet.y - state.player.y) > CONVERSION_RADIUS) continue;
+      if (bullet.isPlayer && !bullet.isNeutral) continue;
+
+      bullet.isPlayer = true;
+      bullet.isPlayerAlly = false;
+      bullet.isNeutral = false;
+      bullet.ownerId = 'local';
+      bullet.colorIdx = 0;
+      bullet.factionColor = undefined;
+      convertedBulletCount++;
+
+      for (let particleIndex = 0; particleIndex < 3; particleIndex++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 25 + Math.random() * 55;
+        state.particles.push({
+          x: bullet.x,
+          y: bullet.y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 0,
+          maxLife: 0.18 + Math.random() * 0.16,
+          color: PLAYER_COLOR_HEX,
+          radius: 1 + Math.random() * 1.5,
+        });
+      }
+    }
+
     state.shockwaves.push({
       x: state.player.x,
       y: state.player.y,
@@ -6873,13 +6902,15 @@ export default function GameCanvas() {
     state.floatingTexts.push({
       x: state.player.x,
       y: state.player.y - 38,
-      text: convertedCount > 0 ? `${convertedCount} CONVERTED` : 'NO TARGETS',
+      text: convertedCount + convertedBulletCount > 0
+        ? `${convertedCount} ALLIES // ${convertedBulletCount} BULLETS`
+        : 'NO TARGETS',
       age: 0,
       maxAge: 1.15,
       color: PLAYER_COLOR_HEX,
       vy: -32,
     });
-    state.shake = Math.max(state.shake, convertedCount > 0 ? 14 : 6);
+    state.shake = Math.max(state.shake, convertedCount + convertedBulletCount > 0 ? 14 : 6);
   }, []);
 
   const isGuestSpecialReady = useCallback((currentTime: number) => {
