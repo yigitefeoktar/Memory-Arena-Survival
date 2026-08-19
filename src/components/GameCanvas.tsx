@@ -9259,6 +9259,11 @@ export default function GameCanvas() {
     let lastStatus = uiRef.current.status;
 
     const gameLoop = (rawCurrentTime: number) => {
+      // Queue the following frame before doing any work. If a single update or
+      // render step throws, the canvas loop can recover on the next frame and
+      // a newly reset match is never left attached to a dead animation loop.
+      animationFrameId = requestAnimationFrame(gameLoop);
+
       const STATUS = uiRef.current.status;
 
       const currentTime =
@@ -11690,7 +11695,12 @@ export default function GameCanvas() {
                  }
              }
              if (newBullets.length > 0) {
-                 state.bullets.push(...newBullets);
+                 // Avoid passing the entire volley as function arguments.
+                 // Large Memory Arena bullet pools can exceed the JavaScript
+                 // engine's argument limit and abort the animation frame.
+                 for (const newBullet of newBullets) {
+                     state.bullets.push(newBullet);
+                 }
              }
           }
 
@@ -11701,36 +11711,6 @@ export default function GameCanvas() {
         if (mpRef.current.roomId && mpRef.current.isHost) {
           hostBulletSimulationTickRef.current += 1;
         }
-
-        // Memory Arena can briefly have hundreds of bullets after Special is
-        // activated. Index enemies by position once per frame so each bullet
-        // checks only nearby enemies instead of scanning the entire arena.
-        // The original reverse entity order is retained for overlapping hits.
-        const memoryEnemyCollisionCellSize = 96;
-        const memoryEnemyCollisionGrid = state.memoryMode && !mpRef.current.roomId
-          ? new Map<string, MemoryEnemy[]>()
-          : null;
-        const memoryEnemyCollisionOrder = memoryEnemyCollisionGrid
-          ? new Map<MemoryEnemy, number>()
-          : null;
-        let memoryEnemyMaxRadius = 0;
-        if (memoryEnemyCollisionGrid && memoryEnemyCollisionOrder) {
-          for (let enemyIndex = 0; enemyIndex < state.enemies.length; enemyIndex++) {
-            const enemy = state.enemies[enemyIndex];
-            const cellX = Math.floor(enemy.x / memoryEnemyCollisionCellSize);
-            const cellY = Math.floor(enemy.y / memoryEnemyCollisionCellSize);
-            const cellKey = `${cellX}:${cellY}`;
-            const cell = memoryEnemyCollisionGrid.get(cellKey);
-            if (cell) {
-              cell.push(enemy);
-            } else {
-              memoryEnemyCollisionGrid.set(cellKey, [enemy]);
-            }
-            memoryEnemyCollisionOrder.set(enemy, enemyIndex);
-            memoryEnemyMaxRadius = Math.max(memoryEnemyMaxRadius, enemy.radius);
-          }
-        }
-
         for (let i = state.bullets.length - 1; i >= 0; i--) {
           const bullet = state.bullets[i];
           const isAuthoritativeMultiplayerBullet =
@@ -12358,35 +12338,8 @@ export default function GameCanvas() {
             bullet.factionColor
           );
           if (!bulletDestroyed && (bulletColor !== '#ff0066' || isMemoryFactionBullet || isMemoryAllyBullet)) {
-            let nearbyMemoryEnemies: MemoryEnemy[] | null = null;
-            if (memoryEnemyCollisionGrid && memoryEnemyCollisionOrder) {
-              nearbyMemoryEnemies = [];
-              const collisionReach = bullet.radius + memoryEnemyMaxRadius;
-              const minCellX = Math.floor((bullet.x - collisionReach) / memoryEnemyCollisionCellSize);
-              const maxCellX = Math.floor((bullet.x + collisionReach) / memoryEnemyCollisionCellSize);
-              const minCellY = Math.floor((bullet.y - collisionReach) / memoryEnemyCollisionCellSize);
-              const maxCellY = Math.floor((bullet.y + collisionReach) / memoryEnemyCollisionCellSize);
-              for (let cellY = minCellY; cellY <= maxCellY; cellY++) {
-                for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
-                  const cell = memoryEnemyCollisionGrid.get(`${cellX}:${cellY}`);
-                  if (cell) nearbyMemoryEnemies.push(...cell);
-                }
-              }
-              nearbyMemoryEnemies.sort((first, second) =>
-                (memoryEnemyCollisionOrder.get(second) ?? -1) -
-                (memoryEnemyCollisionOrder.get(first) ?? -1)
-              );
-            }
-
-            const enemyCandidateCount = nearbyMemoryEnemies?.length ?? state.enemies.length;
-            for (let candidateIndex = 0; candidateIndex < enemyCandidateCount; candidateIndex++) {
-              const enemy = nearbyMemoryEnemies
-                ? nearbyMemoryEnemies[candidateIndex]
-                : state.enemies[state.enemies.length - 1 - candidateIndex];
-              const e = nearbyMemoryEnemies
-                ? state.enemies.indexOf(enemy)
-                : state.enemies.length - 1 - candidateIndex;
-              if (!enemy || e < 0) continue;
+            for (let e = state.enemies.length - 1; e >= 0; e--) {
+              const enemy = state.enemies[e];
               if ((bullet.isPlayer || isMemoryAllyBullet) && enemy.isPlayerAlly) continue;
               if (
                 isMemoryFactionBullet &&
@@ -14225,7 +14178,6 @@ export default function GameCanvas() {
         }
       }
 
-      animationFrameId = requestAnimationFrame(gameLoop);
     };
 
     animationFrameId = requestAnimationFrame(gameLoop);
