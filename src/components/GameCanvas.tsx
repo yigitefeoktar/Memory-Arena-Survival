@@ -9257,14 +9257,24 @@ export default function GameCanvas() {
 
     let animationFrameId: number;
     let lastStatus = uiRef.current.status;
+    let lastGameLoopErrorLogAt = 0;
+
+    const resetCanvasContext = () => {
+      const resetContext = (ctx as CanvasRenderingContext2D & { reset?: () => void }).reset;
+      if (typeof resetContext === 'function') {
+        resetContext.call(ctx);
+        return;
+      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.shadowBlur = 0;
+      ctx.setLineDash([]);
+    };
 
     const gameLoop = (rawCurrentTime: number) => {
-      // Queue the following frame before doing any work. If a single update or
-      // render step throws, the canvas loop can recover on the next frame and
-      // a newly reset match is never left attached to a dead animation loop.
-      animationFrameId = requestAnimationFrame(gameLoop);
-
-      const STATUS = uiRef.current.status;
+      try {
+        const STATUS = uiRef.current.status;
 
       const currentTime =
         STATUS === 'PAUSED' && pauseStartRef.current !== null
@@ -12732,6 +12742,11 @@ export default function GameCanvas() {
 
       // --- RENDERING --- (Always render, even if GAME_OVER)
 
+      // A failed canvas frame can leave unmatched save/translate state behind.
+      // Reset the complete drawing context before composing the next frame so
+      // recovery cannot displace or scale the world in subsequent matches.
+      resetCanvasContext();
+
       // Update Camera based on player (or keep it still if dead)
       if (STATUS !== 'PAUSED') {
         state.shake = Math.max(0, state.shake - dt * 60);
@@ -14178,6 +14193,17 @@ export default function GameCanvas() {
         }
       }
 
+      } catch (error) {
+        const errorTime = performance.now();
+        if (errorTime - lastGameLoopErrorLogAt >= 1000) {
+          lastGameLoopErrorLogAt = errorTime;
+          console.error('[Memory Arena] Recovered from a failed game frame', error);
+        }
+
+        resetCanvasContext();
+      } finally {
+        animationFrameId = requestAnimationFrame(gameLoop);
+      }
     };
 
     animationFrameId = requestAnimationFrame(gameLoop);
