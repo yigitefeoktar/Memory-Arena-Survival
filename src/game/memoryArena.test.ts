@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  ABILITY_BY_FACTION,
   ENEMY_FACTIONS,
   ENEMY_SHAPES,
   MEMORY_ARENA_CONFIG,
@@ -8,7 +9,10 @@ import {
   advanceTriangleAi,
   areEnemyFactionsHostile,
   applyPlayerDamage,
+  collectAbilityPickup,
   createInitialChainState,
+  createEmptyAbilityOwnership,
+  createInitialAbilityDropProgress,
   createInitialFactionRaidStates,
   createMemoryCoreSpawners,
   createShuffledShapeBag,
@@ -22,10 +26,91 @@ import {
   preserveChainOnSpawnerDestroyed,
   regeneratePlayerHealth,
   registerPlayerEnemyKill,
+  registerAbilityDropKill,
   turnAngleTowards,
   type ColoredCoreSpawnerState,
   type EnemyAiState,
 } from './memoryArena';
+
+test('ability colours map to the four existing tools', () => {
+  assert.deepEqual(ABILITY_BY_FACTION, {
+    red: 'damage',
+    blue: 'special',
+    green: 'convert',
+    yellow: 'build',
+  });
+});
+
+test('ability drops use a deterministic twelve percent roll', () => {
+  const ownership = createEmptyAbilityOwnership();
+  const progress = createInitialAbilityDropProgress();
+  const miss = registerAbilityDropKill({
+    factionColor: 'red', credit: 'player', defeatedWasPlayerAlly: false,
+    ownership, progress, hasActivePickup: false, randomValue: 0.12,
+  });
+  assert.equal(miss.shouldDrop, false);
+  assert.equal(miss.progress.red, 1);
+
+  const hit = registerAbilityDropKill({
+    factionColor: 'blue', credit: 'ally', defeatedWasPlayerAlly: false,
+    ownership, progress: miss.progress, hasActivePickup: false, randomValue: 0.119,
+  });
+  assert.equal(hit.shouldDrop, true);
+  assert.equal(hit.abilityId, 'special');
+  assert.equal(hit.progress.blue, 0);
+});
+
+test('the eighth eligible kill guarantees a drop independently per colour', () => {
+  const ownership = createEmptyAbilityOwnership();
+  let progress = createInitialAbilityDropProgress();
+  let result = registerAbilityDropKill({
+    factionColor: 'green', credit: 'player', defeatedWasPlayerAlly: false,
+    ownership, progress, hasActivePickup: false, randomValue: 1,
+  });
+  progress = result.progress;
+  for (let kill = 2; kill <= 8; kill++) {
+    result = registerAbilityDropKill({
+      factionColor: 'green', credit: 'ally', defeatedWasPlayerAlly: false,
+      ownership, progress, hasActivePickup: false, randomValue: 1,
+    });
+    progress = result.progress;
+  }
+  assert.equal(result.shouldDrop, true);
+  assert.equal(progress.green, 0);
+  assert.equal(progress.red, 0);
+});
+
+test('faction kills, ally deaths, owned abilities, and active pickups cannot drop duplicates', () => {
+  const base = {
+    factionColor: 'yellow' as const,
+    ownership: createEmptyAbilityOwnership(),
+    progress: createInitialAbilityDropProgress(),
+    randomValue: 0,
+  };
+  assert.equal(registerAbilityDropKill({ ...base, credit: 'faction', defeatedWasPlayerAlly: false, hasActivePickup: false }).shouldDrop, false);
+  assert.equal(registerAbilityDropKill({ ...base, credit: 'ally', defeatedWasPlayerAlly: true, hasActivePickup: false }).shouldDrop, false);
+  assert.equal(registerAbilityDropKill({ ...base, credit: 'player', defeatedWasPlayerAlly: false, hasActivePickup: true }).shouldDrop, false);
+  assert.equal(registerAbilityDropKill({
+    ...base,
+    credit: 'player',
+    defeatedWasPlayerAlly: false,
+    hasActivePickup: false,
+    ownership: { ...base.ownership, build: true },
+  }).shouldDrop, false);
+});
+
+test('collecting a pickup unlocks only its ability and preserves the shared cooldown timestamp', () => {
+  const ownership = createEmptyAbilityOwnership();
+  const collected = collectAbilityPickup(ownership, 'convert', 12345);
+  assert.deepEqual(collected.ownership, {
+    damage: false,
+    special: false,
+    build: false,
+    convert: true,
+  });
+  assert.equal(collected.abilityLastUsed, 12345);
+  assert.deepEqual(createEmptyAbilityOwnership(), ownership);
+});
 
 const redCircle = { shape: 'circle', color: 'red' } as const;
 const blueSquare = { shape: 'square', color: 'blue' } as const;

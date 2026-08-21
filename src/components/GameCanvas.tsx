@@ -45,6 +45,8 @@ import {
   type WorldRelayedGameplayEventName,
 } from '../shared/gameplayAnalyticsRelay';
 import {
+  ABILITY_BY_FACTION,
+  ABILITY_LABELS,
   ENEMY_COLOR_HEX,
   ENEMY_FACTIONS,
   MEMORY_ARENA_CONFIG,
@@ -54,7 +56,11 @@ import {
   advanceTriangleAi,
   applyPlayerDamage,
   areEnemyFactionsHostile,
+  collectAbilityPickup,
   createInitialChainState,
+  createEmptyAbilityOwnership,
+  createFullAbilityOwnership,
+  createInitialAbilityDropProgress,
   createInitialFactionRaidStates,
   createMemoryCoreSpawners,
   createShuffledShapeBag,
@@ -65,12 +71,19 @@ import {
   isEnemyFactionColor,
   isEnemyShape,
   isValidChainState,
+  isValidAbilityDropProgress,
+  isValidAbilityOwnership,
   isValidFactionRaidStates,
   markTrianglePlayerHit,
   regeneratePlayerHealth,
   registerPlayerEnemyKill,
+  registerAbilityDropKill,
   takeShapeFromBag,
   turnAngleTowards,
+  type AbilityDropProgress,
+  type AbilityKillCredit,
+  type AbilityOwnership,
+  type AbilityPickup,
   type ChainState,
   type EnemyFactionColor,
   type EnemyShape,
@@ -208,7 +221,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 1;
+const SAVE_VERSION = 2;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -2737,7 +2750,7 @@ export default function GameCanvas() {
     return true;
   }, []);
 
-  const [uiState, setUiState] = useState<{ status: 'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER' | 'VICTORY' | 'LOBBY'; score: number; deviceType: 'desktop' | 'mobile'; activeTool: 'weapon' | 'special' | 'build'; blocks: number; spawnersLeft: number; mapId: string; hardMode: boolean; gameMode: GameMode; hp: number; maxHp: number; level: number; chainProgress: number; buttonCounters: { damage: number; special: number; build: number; convert: number } }>({ status: 'MENU', score: 0, deviceType: 'desktop', activeTool: 'special', blocks: 50, spawnersLeft: 4, mapId: MEMORY_DEFAULT_MAP_ID, hardMode: false, gameMode: 'normal', hp: MEMORY_ARENA_CONFIG.player.maxHp, maxHp: MEMORY_ARENA_CONFIG.player.maxHp, level: 1, chainProgress: 0, buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 } });
+  const [uiState, setUiState] = useState<{ status: 'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER' | 'VICTORY' | 'LOBBY'; score: number; deviceType: 'desktop' | 'mobile'; activeTool: 'weapon' | 'special' | 'build'; blocks: number; spawnersLeft: number; mapId: string; hardMode: boolean; gameMode: GameMode; hp: number; maxHp: number; level: number; chainProgress: number; ownedAbilities: AbilityOwnership; buttonCounters: { damage: number; special: number; build: number; convert: number } }>({ status: 'MENU', score: 0, deviceType: 'desktop', activeTool: 'special', blocks: 50, spawnersLeft: 4, mapId: MEMORY_DEFAULT_MAP_ID, hardMode: false, gameMode: 'normal', hp: MEMORY_ARENA_CONFIG.player.maxHp, maxHp: MEMORY_ARENA_CONFIG.player.maxHp, level: 1, chainProgress: 0, ownedAbilities: createEmptyAbilityOwnership(), buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 } });
   const uiRef = useRef(uiState);
   uiRef.current = uiState;
 
@@ -3593,6 +3606,9 @@ export default function GameCanvas() {
     trails: [] as { x: number; y: number; age: number; color: string; radius: number, isSuperStrong?: boolean }[],
     shockwaves: [] as { x: number; y: number; color: string; maxRadius: number; age: number; maxAge: number; thickness: number }[],
     damageWaves: [] as { x: number; y: number; age: number; maxAge: number; maxRadius: number; previousRadius: number }[],
+    abilityOwnership: createEmptyAbilityOwnership() as AbilityOwnership,
+    abilityDropProgress: createInitialAbilityDropProgress() as AbilityDropProgress,
+    abilityPickups: [] as AbilityPickup[],
     floatingTexts: [] as { x: number; y: number; text: string; age: number; maxAge: number; color: string; vy: number }[],
     shake: 0,
     lastTime: performance.now(),
@@ -4405,6 +4421,9 @@ export default function GameCanvas() {
       trails: [],
       shockwaves: [],
       damageWaves: [],
+      abilityOwnership: { ...state.abilityOwnership },
+      abilityDropProgress: { ...state.abilityDropProgress },
+      abilityPickups: state.abilityPickups.map(pickup => ({ ...pickup })),
       floatingTexts: [],
       shake: 0,
 
@@ -4550,7 +4569,7 @@ export default function GameCanvas() {
       if (data.version > SAVE_VERSION) {
         throw new Error("UNSUPPORTED SAVE VERSION");
       }
-      if (data.version === 1) {
+      if (data.version >= 1) {
         if (data.format !== SAVE_FORMAT) {
           throw new Error("INVALID SAVE FILE");
         }
@@ -4635,6 +4654,13 @@ export default function GameCanvas() {
       if (rawState.chain.level > 1_000_000_000 || rawState.chain.completedChains > 1_000_000_000) {
         throw new Error("INVALID SAVE FILE");
       }
+      if (version >= 2 && (
+        !isValidAbilityOwnership(rawState.abilityOwnership) ||
+        !isValidAbilityDropProgress(rawState.abilityDropProgress) ||
+        !Array.isArray(rawState.abilityPickups)
+      )) {
+        throw new Error("INVALID SAVE FILE");
+      }
     }
 
     const rawEnemies = rawState.enemies;
@@ -4649,6 +4675,40 @@ export default function GameCanvas() {
 
     if (rawBullets.length > 1000 || rawBlocks.length > 500 || rawEnemies.length > 200 || rawBouncers.length > 200 || rawZones.length > 50) {
       throw new Error("INVALID SAVE FILE");
+    }
+
+    const reconstructedAbilityOwnership: AbilityOwnership = isMemorySave
+      ? (version >= 2 ? { ...rawState.abilityOwnership } : createFullAbilityOwnership())
+      : createFullAbilityOwnership();
+    const reconstructedAbilityDropProgress: AbilityDropProgress = isMemorySave && version >= 2
+      ? { ...rawState.abilityDropProgress }
+      : createInitialAbilityDropProgress();
+    let reconstructedAbilityPickups: AbilityPickup[] = [];
+    if (isMemorySave && version >= 2) {
+      if (rawState.abilityPickups.length > ENEMY_FACTIONS.length) {
+        throw new Error("INVALID SAVE FILE");
+      }
+      const pickupFactions = new Set<EnemyFactionColor>();
+      reconstructedAbilityPickups = rawState.abilityPickups.map((pickup: unknown) => {
+        if (!isObject(pickup)) throw new Error("INVALID SAVE FILE");
+        if (typeof pickup.id !== 'string' || pickup.id.length === 0 || pickup.id.length > 128 ||
+            !isBoundedNum(pickup.x, 0, MAP_WIDTH) || !isBoundedNum(pickup.y, 0, MAP_HEIGHT) ||
+            !isEnemyFactionColor(pickup.factionColor) ||
+            pickup.abilityId !== ABILITY_BY_FACTION[pickup.factionColor] ||
+            pickupFactions.has(pickup.factionColor) ||
+            reconstructedAbilityOwnership[pickup.abilityId]) {
+          throw new Error("INVALID SAVE FILE");
+        }
+        pickupFactions.add(pickup.factionColor);
+        return {
+          id: pickup.id,
+          x: pickup.x,
+          y: pickup.y,
+          radius: MEMORY_ARENA_CONFIG.abilityDrops.pickupRadius,
+          factionColor: pickup.factionColor,
+          abilityId: pickup.abilityId,
+        };
+      });
     }
 
     const loadNow = performance.now();
@@ -5281,7 +5341,8 @@ export default function GameCanvas() {
         special: specialCooldown,
         build: buildCooldown,
         convert: isMemorySave ? memorySharedCooldown : 0,
-      }
+      },
+      ownedAbilities: { ...reconstructedAbilityOwnership },
     };
 
     const camW = canvasRef.current?.width || containerSize.width || 1200;
@@ -5328,6 +5389,9 @@ export default function GameCanvas() {
       trails: [],
       shockwaves: [],
       damageWaves: [],
+      abilityOwnership: reconstructedAbilityOwnership,
+      abilityDropProgress: reconstructedAbilityDropProgress,
+      abilityPickups: reconstructedAbilityPickups,
       floatingTexts: [],
       shake: 0,
       lastTime: loadNow,
@@ -6115,6 +6179,9 @@ export default function GameCanvas() {
     state.trails = [];
     state.shockwaves = [];
     state.damageWaves = [];
+    state.abilityOwnership = createEmptyAbilityOwnership();
+    state.abilityDropProgress = createInitialAbilityDropProgress();
+    state.abilityPickups = [];
     state.floatingTexts = [];
     state.shake = 0;
     state.lastTime = performance.now();
@@ -6125,7 +6192,7 @@ export default function GameCanvas() {
     releaseAllInputs();
 
     const uiHardMode = isMultiplayer ? (selectedGameMode !== 'normal') : isHardMode;
-    const newUi = { status: 'PLAYING' as const, score: 0, deviceType: dType, activeTool: 'special' as const, blocks: 50, spawnersLeft: state.spawners.length, mapId: selectedMapId, hardMode: uiHardMode, gameMode: selectedGameMode, hp: state.player.hp, maxHp: state.player.maxHp, level: state.chain.level, chainProgress: state.chain.progress, buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 } };
+    const newUi = { status: 'PLAYING' as const, score: 0, deviceType: dType, activeTool: 'special' as const, blocks: 50, spawnersLeft: state.spawners.length, mapId: selectedMapId, hardMode: uiHardMode, gameMode: selectedGameMode, hp: state.player.hp, maxHp: state.player.maxHp, level: state.chain.level, chainProgress: state.chain.progress, ownedAbilities: { ...state.abilityOwnership }, buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 } };
     uiRef.current = newUi;
     setUiState(newUi);
 
@@ -6348,6 +6415,9 @@ export default function GameCanvas() {
       state.trails = [];
       state.shockwaves = [];
       state.damageWaves = [];
+      state.abilityOwnership = createEmptyAbilityOwnership();
+      state.abilityDropProgress = createInitialAbilityDropProgress();
+      state.abilityPickups = [];
       state.floatingTexts = [];
       state.shake = 0;
       state.lastTime = performance.now();
@@ -6389,6 +6459,7 @@ export default function GameCanvas() {
         maxHp: state.player.maxHp,
         level: state.chain.level,
         chainProgress: state.chain.progress,
+        ownedAbilities: { ...state.abilityOwnership },
         buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 }
       };
       uiRef.current = finalUi;
@@ -6791,6 +6862,7 @@ export default function GameCanvas() {
   const requestDamageActivation = useCallback((currentTime: number) => {
     const state = stateRef.current;
     if (!state.memoryMode || mpRef.current.roomId || uiRef.current.status !== 'PLAYING') return;
+    if (!state.abilityOwnership.damage) return;
     if (currentTime - state.player.abilityLastUsed < MEMORY_ABILITY_SHARED_COOLDOWN) return;
 
     state.player.abilityLastUsed = currentTime;
@@ -6817,6 +6889,7 @@ export default function GameCanvas() {
   const requestConversionActivation = useCallback((currentTime: number) => {
     const state = stateRef.current;
     if (!state.memoryMode || mpRef.current.roomId || uiRef.current.status !== 'PLAYING') return;
+    if (!state.abilityOwnership.convert) return;
     if (currentTime - state.player.abilityLastUsed < MEMORY_ABILITY_SHARED_COOLDOWN) return;
 
     state.player.abilityLastUsed = currentTime;
@@ -6948,7 +7021,7 @@ export default function GameCanvas() {
          const endTime = dash.endTime || 0;
          const memoryAbilityReady = currentTime - stateRef.current.player.abilityLastUsed >= MEMORY_ABILITY_SHARED_COOLDOWN;
          const canActivate = stateRef.current.memoryMode
-           ? !dash.active && memoryAbilityReady
+           ? stateRef.current.abilityOwnership.special && !dash.active && memoryAbilityReady
            : !dash.active && (endTime === 0 || currentTime - endTime >= DASH_COOLDOWN);
          if (canActivate) {
              dash.active = true;
@@ -7027,7 +7100,7 @@ export default function GameCanvas() {
          const endTime = build.endTime || 0;
          const memoryAbilityReady = currentTime - stateRef.current.player.abilityLastUsed >= MEMORY_ABILITY_SHARED_COOLDOWN;
          const canActivate = stateRef.current.memoryMode
-           ? !build.active && memoryAbilityReady
+           ? stateRef.current.abilityOwnership.build && !build.active && memoryAbilityReady
            : !build.active && (endTime === 0 || currentTime - endTime >= BUILD_COOLDOWN);
          if (canActivate) {
              build.active = true;
@@ -9466,7 +9539,96 @@ export default function GameCanvas() {
           }
         };
 
+        const maybeSpawnAbilityDrop = (enemy: MemoryEnemy, credit: AbilityKillCredit) => {
+          if (!state.memoryMode || !enemy.factionColor) return;
+          const result = registerAbilityDropKill({
+            factionColor: enemy.factionColor,
+            credit,
+            defeatedWasPlayerAlly: Boolean(enemy.isPlayerAlly),
+            ownership: state.abilityOwnership,
+            progress: state.abilityDropProgress,
+            hasActivePickup: state.abilityPickups.some(pickup => pickup.factionColor === enemy.factionColor),
+            randomValue: Math.random(),
+          });
+          state.abilityDropProgress = result.progress;
+          if (!result.shouldDrop) return;
+
+          state.abilityPickups.push({
+            id: `ability_${state.nextEntityId++}`,
+            x: enemy.x,
+            y: enemy.y,
+            radius: MEMORY_ARENA_CONFIG.abilityDrops.pickupRadius,
+            factionColor: enemy.factionColor,
+            abilityId: result.abilityId,
+          });
+          const color = ENEMY_COLOR_HEX[enemy.factionColor];
+          state.shockwaves.push({
+            x: enemy.x,
+            y: enemy.y,
+            color,
+            maxRadius: 92,
+            age: 0,
+            maxAge: 0.45,
+            thickness: 8,
+          });
+          state.floatingTexts.push({
+            x: enemy.x,
+            y: enemy.y - 28,
+            text: 'ABILITY DROP',
+            age: 0,
+            maxAge: 1.1,
+            color,
+            vy: -24,
+          });
+        };
+
         // --- LOGIC UPDATES ---
+
+        if (state.memoryMode && STATUS === 'PLAYING' && state.abilityPickups.length > 0) {
+          let ownershipChanged = false;
+          for (let pickupIndex = state.abilityPickups.length - 1; pickupIndex >= 0; pickupIndex--) {
+            const pickup = state.abilityPickups[pickupIndex];
+            if (
+              Math.hypot(state.player.x - pickup.x, state.player.y - pickup.y) >
+              state.player.radius + pickup.radius + MEMORY_ARENA_CONFIG.abilityDrops.collectionPadding
+            ) continue;
+
+            state.abilityPickups.splice(pickupIndex, 1);
+            const collected = collectAbilityPickup(
+              state.abilityOwnership,
+              pickup.abilityId,
+              state.player.abilityLastUsed,
+            );
+            state.abilityOwnership = collected.ownership;
+            state.player.abilityLastUsed = collected.abilityLastUsed;
+            ownershipChanged = true;
+            const color = ENEMY_COLOR_HEX[pickup.factionColor];
+            spawnParticles(pickup.x, pickup.y, color, 28);
+            state.shockwaves.push({
+              x: pickup.x,
+              y: pickup.y,
+              color,
+              maxRadius: 125,
+              age: 0,
+              maxAge: 0.5,
+              thickness: 12,
+            });
+            state.floatingTexts.push({
+              x: pickup.x,
+              y: pickup.y - 32,
+              text: `${ABILITY_LABELS[pickup.abilityId]} UNLOCKED`,
+              age: 0,
+              maxAge: 1.35,
+              color,
+              vy: -30,
+            });
+          }
+          if (ownershipChanged) {
+            const nextUi = { ...uiRef.current, ownedAbilities: { ...state.abilityOwnership } };
+            uiRef.current = nextUi;
+            setUiState(nextUi);
+          }
+        }
 
         // The red damage ability is a moving blast front. It removes entities
         // only when the visible ring reaches them; spawners are never queried.
@@ -9501,6 +9663,7 @@ export default function GameCanvas() {
             state.enemies = state.enemies.filter((enemy) => !defeatedEnemies.has(enemy));
 
             for (const { enemy } of crossedEnemies) {
+              maybeSpawnAbilityDrop(enemy, 'player');
               const defeatedColor = enemy.factionColor ? ENEMY_COLOR_HEX[enemy.factionColor] : '#ff3333';
               spawnParticles(enemy.x, enemy.y, defeatedColor, 30);
               state.shockwaves.push({
@@ -10707,6 +10870,7 @@ export default function GameCanvas() {
                       enemy.radius + candidate.radius,
                     )) {
                       enemiesDefeatedByFactions.add(candidate);
+                      if (enemy.isPlayerAlly) maybeSpawnAbilityDrop(candidate, 'ally');
                       const defeatedColor = candidate.isPlayerAlly
                         ? PLAYER_COLOR_HEX
                         : ENEMY_COLOR_HEX[candidate.factionColor];
@@ -12372,6 +12536,10 @@ export default function GameCanvas() {
                 state.enemies.splice(e, 1);
                 bulletDestroyed = true;
 
+                if (state.memoryMode && (bullet.isPlayer || isMemoryAllyBullet)) {
+                  maybeSpawnAbilityDrop(enemy, bullet.isPlayer ? 'player' : 'ally');
+                }
+
                 if (state.memoryMode && bullet.isPlayer && enemy.shape && enemy.factionColor) {
                   const chainTransition = registerPlayerEnemyKill(state.chain, {
                     shape: enemy.shape,
@@ -13640,6 +13808,45 @@ export default function GameCanvas() {
            ctx.stroke();
            ctx.restore();
          }
+      }
+
+      // Ability drops are persistent world pickups. They have no physics and
+      // render above combat until the player collects them.
+      for (const pickup of state.abilityPickups) {
+        const visualRadius = pickup.radius + 10;
+        if (
+          pickup.x + visualRadius < state.camera.x ||
+          pickup.x - visualRadius > state.camera.x + state.camera.width ||
+          pickup.y + visualRadius < state.camera.y ||
+          pickup.y - visualRadius > state.camera.y + state.camera.height
+        ) continue;
+
+        const color = ENEMY_COLOR_HEX[pickup.factionColor];
+        const bobY = Math.sin(currentTime * 0.004 + pickup.x * 0.01) * 3;
+        const pulse = 1 + Math.sin(currentTime * 0.006 + pickup.y * 0.01) * 0.06;
+        ctx.save();
+        ctx.translate(pickup.x, pickup.y + bobY);
+        ctx.scale(pulse, pulse);
+        ctx.rotate(Math.PI / 4 + currentTime * 0.00045);
+        ctx.fillStyle = 'rgba(6, 8, 14, 0.94)';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 18;
+        ctx.fillRect(-pickup.radius, -pickup.radius, pickup.radius * 2, pickup.radius * 2);
+        ctx.strokeRect(-pickup.radius, -pickup.radius, pickup.radius * 2, pickup.radius * 2);
+        ctx.restore();
+
+        ctx.save();
+        ctx.translate(pickup.x, pickup.y + bobY + 1);
+        ctx.fillStyle = '#F5F7FF';
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 9;
+        ctx.font = '900 14px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(ABILITY_LABELS[pickup.abilityId][0], 0, 0);
+        ctx.restore();
       }
 
       // Draw Player
@@ -15285,7 +15492,7 @@ export default function GameCanvas() {
             label: 'DAMAGE',
             keyHint: 3,
             control: 'damage',
-            owned: !mpState.roomId,
+            owned: !mpState.roomId && (!stateRef.current.memoryMode || uiState.ownedAbilities.damage),
             usableFill: 'linear-gradient(rgba(255, 77, 109, 0.58), rgba(255, 77, 109, 0.58)), rgba(6, 8, 14, 0.90)',
             usableBorder: MEMORY_ARENA_PALETTE.factions.red.bright,
             usableText: '#F5F7FF',
@@ -15298,7 +15505,7 @@ export default function GameCanvas() {
             label: 'SPECIAL',
             keyHint: 1,
             control: 'special',
-            owned: true,
+            owned: mpState.roomId ? true : (!stateRef.current.memoryMode || uiState.ownedAbilities.special),
             usableFill: 'linear-gradient(rgba(99, 124, 255, 0.58), rgba(99, 124, 255, 0.58)), rgba(6, 8, 14, 0.90)',
             usableBorder: MEMORY_ARENA_PALETTE.factions.blue.bright,
             usableText: '#F5F7FF',
@@ -15311,7 +15518,7 @@ export default function GameCanvas() {
             label: 'BUILD',
             keyHint: 2,
             control: 'build',
-            owned: true,
+            owned: mpState.roomId ? true : (!stateRef.current.memoryMode || uiState.ownedAbilities.build),
             usableFill: 'linear-gradient(rgba(255, 200, 87, 0.62), rgba(255, 200, 87, 0.62)), rgba(6, 8, 14, 0.90)',
             usableBorder: MEMORY_ARENA_PALETTE.factions.yellow.bright,
             usableText: '#F5F7FF',
@@ -15324,7 +15531,7 @@ export default function GameCanvas() {
             label: 'CONVERT',
             keyHint: 4,
             control: 'convert',
-            owned: !mpState.roomId,
+            owned: !mpState.roomId && (!stateRef.current.memoryMode || uiState.ownedAbilities.convert),
             usableFill: 'linear-gradient(rgba(46, 217, 154, 0.58), rgba(46, 217, 154, 0.58)), rgba(6, 8, 14, 0.90)',
             usableBorder: MEMORY_ARENA_PALETTE.factions.green.bright,
             usableText: '#F5F7FF',
@@ -16284,4 +16491,3 @@ export default function GameCanvas() {
     </div>
   );
 }
-

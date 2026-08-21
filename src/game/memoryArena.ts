@@ -4,6 +4,36 @@ export type EnemyShape = (typeof ENEMY_SHAPES)[number];
 export const ENEMY_FACTIONS = ['red', 'blue', 'green', 'yellow'] as const;
 export type EnemyFactionColor = (typeof ENEMY_FACTIONS)[number];
 
+export const ABILITY_IDS = ['damage', 'special', 'build', 'convert'] as const;
+export type AbilityId = (typeof ABILITY_IDS)[number];
+
+export type AbilityOwnership = Record<AbilityId, boolean>;
+export type AbilityDropProgress = Record<EnemyFactionColor, number>;
+export type AbilityKillCredit = 'player' | 'ally' | 'faction';
+
+export interface AbilityPickup {
+  id: string;
+  x: number;
+  y: number;
+  radius: number;
+  factionColor: EnemyFactionColor;
+  abilityId: AbilityId;
+}
+
+export const ABILITY_BY_FACTION: Record<EnemyFactionColor, AbilityId> = {
+  red: 'damage',
+  blue: 'special',
+  green: 'convert',
+  yellow: 'build',
+};
+
+export const ABILITY_LABELS: Record<AbilityId, string> = {
+  damage: 'DAMAGE',
+  special: 'SPECIAL',
+  build: 'BUILD',
+  convert: 'CONVERT',
+};
+
 /**
  * The complete solo-gameplay palette lives here so visual tuning never
  * requires hunting through canvas rendering code.
@@ -57,6 +87,12 @@ export const MEMORY_ARENA_CONFIG = {
   relics: {
     enabled: false,
   },
+  abilityDrops: {
+    chance: 0.12,
+    pityKills: 8,
+    pickupRadius: 16,
+    collectionPadding: 4,
+  },
   player: {
     maxHp: 100,
     regenerationPerSecond: 2,
@@ -90,6 +126,86 @@ export const MEMORY_ARENA_CONFIG = {
     recoveryMs: 4000,
   },
 } as const;
+
+export function createEmptyAbilityOwnership(): AbilityOwnership {
+  return { damage: false, special: false, build: false, convert: false };
+}
+
+export function createFullAbilityOwnership(): AbilityOwnership {
+  return { damage: true, special: true, build: true, convert: true };
+}
+
+export function createInitialAbilityDropProgress(): AbilityDropProgress {
+  return { red: 0, blue: 0, green: 0, yellow: 0 };
+}
+
+export function collectAbilityPickup(
+  ownership: AbilityOwnership,
+  abilityId: AbilityId,
+  abilityLastUsed: number,
+): { ownership: AbilityOwnership; abilityLastUsed: number } {
+  return {
+    ownership: ownership[abilityId] ? ownership : { ...ownership, [abilityId]: true },
+    abilityLastUsed,
+  };
+}
+
+export function isValidAbilityOwnership(value: unknown): value is AbilityOwnership {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Partial<AbilityOwnership>;
+  return ABILITY_IDS.every(abilityId => typeof candidate[abilityId] === 'boolean');
+}
+
+export function isValidAbilityDropProgress(value: unknown): value is AbilityDropProgress {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Partial<AbilityDropProgress>;
+  return ENEMY_FACTIONS.every(faction => (
+    Number.isInteger(candidate[faction]) &&
+    (candidate[faction] as number) >= 0 &&
+    (candidate[faction] as number) < MEMORY_ARENA_CONFIG.abilityDrops.pityKills
+  ));
+}
+
+export interface AbilityDropKillInput {
+  factionColor: EnemyFactionColor;
+  credit: AbilityKillCredit;
+  defeatedWasPlayerAlly: boolean;
+  ownership: AbilityOwnership;
+  progress: AbilityDropProgress;
+  hasActivePickup: boolean;
+  randomValue: number;
+}
+
+export interface AbilityDropKillResult {
+  abilityId: AbilityId;
+  shouldDrop: boolean;
+  progress: AbilityDropProgress;
+}
+
+export function registerAbilityDropKill(input: AbilityDropKillInput): AbilityDropKillResult {
+  const abilityId = ABILITY_BY_FACTION[input.factionColor];
+  const eligibleCredit = input.credit === 'player' || input.credit === 'ally';
+  if (
+    !eligibleCredit ||
+    input.defeatedWasPlayerAlly ||
+    input.ownership[abilityId] ||
+    input.hasActivePickup
+  ) {
+    return { abilityId, shouldDrop: false, progress: input.progress };
+  }
+
+  const nextCount = input.progress[input.factionColor] + 1;
+  const shouldDrop = nextCount >= MEMORY_ARENA_CONFIG.abilityDrops.pityKills ||
+    input.randomValue < MEMORY_ARENA_CONFIG.abilityDrops.chance;
+  return {
+    abilityId,
+    shouldDrop,
+    progress: {
+      ...input.progress,
+      [input.factionColor]: shouldDrop ? 0 : nextCount,
+    },
+  };
+}
 
 export interface EnemyIdentity {
   shape: EnemyShape;
