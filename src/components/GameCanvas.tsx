@@ -46,7 +46,6 @@ import {
 } from '../shared/gameplayAnalyticsRelay';
 import {
   ABILITY_BY_FACTION,
-  ABILITY_LABELS,
   ENEMY_COLOR_HEX,
   ENEMY_FACTIONS,
   MEMORY_ARENA_CONFIG,
@@ -9571,15 +9570,6 @@ export default function GameCanvas() {
             maxAge: 0.45,
             thickness: 8,
           });
-          state.floatingTexts.push({
-            x: enemy.x,
-            y: enemy.y - 28,
-            text: 'ABILITY DROP',
-            age: 0,
-            maxAge: 1.1,
-            color,
-            vy: -24,
-          });
         };
 
         // --- LOGIC UPDATES ---
@@ -9612,15 +9602,6 @@ export default function GameCanvas() {
               age: 0,
               maxAge: 0.5,
               thickness: 12,
-            });
-            state.floatingTexts.push({
-              x: pickup.x,
-              y: pickup.y - 32,
-              text: `${ABILITY_LABELS[pickup.abilityId]} UNLOCKED`,
-              age: 0,
-              maxAge: 1.35,
-              color,
-              vy: -30,
             });
           }
           if (ownershipChanged) {
@@ -13822,30 +13803,96 @@ export default function GameCanvas() {
         ) continue;
 
         const color = ENEMY_COLOR_HEX[pickup.factionColor];
-        const bobY = Math.sin(currentTime * 0.004 + pickup.x * 0.01) * 3;
-        const pulse = 1 + Math.sin(currentTime * 0.006 + pickup.y * 0.01) * 0.06;
+        const phase = currentTime * 0.004 + pickup.x * 0.01 + pickup.y * 0.006;
+        const bobY = Math.sin(phase) * 2;
+        const pulse = 1 + Math.sin(phase * 1.35) * 0.035;
+
         ctx.save();
         ctx.translate(pickup.x, pickup.y + bobY);
-        ctx.scale(pulse, pulse);
-        ctx.rotate(Math.PI / 4 + currentTime * 0.00045);
-        ctx.fillStyle = 'rgba(6, 8, 14, 0.94)';
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 3;
+        ctx.globalAlpha = 0.12 + Math.sin(phase) * 0.025;
+        ctx.fillStyle = color;
         ctx.shadowColor = color;
-        ctx.shadowBlur = 18;
-        ctx.fillRect(-pickup.radius, -pickup.radius, pickup.radius * 2, pickup.radius * 2);
-        ctx.strokeRect(-pickup.radius, -pickup.radius, pickup.radius * 2, pickup.radius * 2);
+        ctx.shadowBlur = 22;
+        ctx.beginPath();
+        ctx.arc(0, 0, pickup.radius + 10, 0, Math.PI * 2);
+        ctx.fill();
         ctx.restore();
 
         ctx.save();
-        ctx.translate(pickup.x, pickup.y + bobY + 1);
-        ctx.fillStyle = '#F5F7FF';
+        ctx.translate(pickup.x, pickup.y + bobY);
+        ctx.scale(pulse, pulse);
+        ctx.rotate(Math.PI / 4);
+        ctx.fillStyle = 'rgba(6, 8, 14, 0.96)';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2.5;
         ctx.shadowColor = color;
-        ctx.shadowBlur = 9;
-        ctx.font = '900 14px ui-monospace, SFMono-Regular, Menlo, monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(ABILITY_LABELS[pickup.abilityId][0], 0, 0);
+        ctx.shadowBlur = 13;
+        ctx.fillRect(-pickup.radius, -pickup.radius, pickup.radius * 2, pickup.radius * 2);
+        ctx.strokeRect(-pickup.radius, -pickup.radius, pickup.radius * 2, pickup.radius * 2);
+        ctx.globalAlpha = 0.28;
+        ctx.strokeStyle = '#F5F7FF';
+        ctx.lineWidth = 1;
+        const inset = pickup.radius - 4;
+        ctx.strokeRect(-inset, -inset, inset * 2, inset * 2);
+        ctx.restore();
+
+        ctx.save();
+        ctx.translate(pickup.x, pickup.y + bobY);
+        ctx.strokeStyle = '#F5F7FF';
+        ctx.fillStyle = color;
+        ctx.lineWidth = 2.2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 8;
+
+        if (pickup.abilityId === 'damage') {
+          ctx.beginPath();
+          for (let ray = 0; ray < 8; ray++) {
+            const angle = ray * Math.PI / 4;
+            const inner = ray % 2 === 0 ? 4 : 5;
+            const outer = ray % 2 === 0 ? 10 : 8;
+            ctx.moveTo(Math.cos(angle) * inner, Math.sin(angle) * inner);
+            ctx.lineTo(Math.cos(angle) * outer, Math.sin(angle) * outer);
+          }
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(0, 0, 3.5, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (pickup.abilityId === 'special') {
+          ctx.beginPath();
+          ctx.moveTo(0, -9);
+          ctx.lineTo(8, -5);
+          ctx.lineTo(6.5, 3);
+          ctx.quadraticCurveTo(4, 8, 0, 10);
+          ctx.quadraticCurveTo(-4, 8, -6.5, 3);
+          ctx.lineTo(-8, -5);
+          ctx.closePath();
+          ctx.globalAlpha = 0.3;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.stroke();
+        } else if (pickup.abilityId === 'build') {
+          ctx.globalAlpha = 0.34;
+          ctx.fillRect(-4, -8, 8, 6);
+          ctx.fillRect(-9, 1, 8, 6);
+          ctx.fillRect(1, 1, 8, 6);
+          ctx.globalAlpha = 1;
+          ctx.strokeRect(-4, -8, 8, 6);
+          ctx.strokeRect(-9, 1, 8, 6);
+          ctx.strokeRect(1, 1, 8, 6);
+        } else {
+          ctx.beginPath();
+          for (let segment = 0; segment < 3; segment++) {
+            const start = segment * Math.PI * 2 / 3 + phase * 0.18;
+            ctx.moveTo(Math.cos(start) * 8, Math.sin(start) * 8);
+            ctx.arc(0, 0, 8, start, start + 0.95);
+          }
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(0, 0, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
         ctx.restore();
       }
 
