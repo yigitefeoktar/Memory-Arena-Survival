@@ -14,12 +14,16 @@ import {
   createEmptyAbilityOwnership,
   createInitialAbilityDropProgress,
   createInitialFactionRaidStates,
+  createInitialPlayerUpgradeRanks,
   createMemoryCoreSpawners,
   createShuffledShapeBag,
   createTriangleAiState,
   getSquareVolleyDirections,
   getRaidFormationOffset,
   getTriangleTelegraphVisual,
+  getPlayerLevelStats,
+  grantPlayerLevelUpgrade,
+  derivePlayerUpgradeRanks,
   isValidChainState,
   isValidFactionRaidStates,
   markTrianglePlayerHit,
@@ -255,8 +259,63 @@ test('damage stacks and continuous regeneration clamps to maximum health', () =>
   hp = applyPlayerDamage(hp, 12);
   hp = applyPlayerDamage(hp, 12);
   assert.equal(hp, 46);
-  assert.equal(regeneratePlayerHealth(hp, 100, 2), 50);
-  assert.equal(regeneratePlayerHealth(99, 100, 10), 100);
+  assert.equal(regeneratePlayerHealth(hp, 100, 0.02, 2), 50);
+  assert.equal(regeneratePlayerHealth(99, 100, 0.02, 10), 100);
+});
+
+test('player levels follow the fixed fire, hp, regeneration, cooldown cycle', () => {
+  let ranks = createInitialPlayerUpgradeRanks();
+  const upgradedStats = [];
+  for (let level = 2; level <= 5; level++) {
+    const upgrade = grantPlayerLevelUpgrade(level, ranks);
+    ranks = upgrade.ranks;
+    upgradedStats.push(upgrade.stat);
+  }
+  assert.deepEqual(upgradedStats, ['fireRate', 'maxHp', 'regeneration', 'cooldown']);
+  assert.deepEqual(ranks, { fireRate: 1, maxHp: 1, regeneration: 1, cooldown: 1 });
+});
+
+test('level stats scale quickly with percentage regeneration and whole cooldowns', () => {
+  const levelFive = getPlayerLevelStats(derivePlayerUpgradeRanks(5));
+  assert.equal(levelFive.maxHp, 140);
+  assert.equal(levelFive.regenerationPercentPerSecond, 0.0275);
+  assert.equal(levelFive.bulletsPerSecond, 1.75);
+  assert.equal(levelFive.cooldownSeconds, 13);
+
+  const levelSeventeen = getPlayerLevelStats(derivePlayerUpgradeRanks(17));
+  assert.equal(levelSeventeen.maxHp, 384);
+  assert.ok(Math.abs(levelSeventeen.regenerationPercentPerSecond - 0.05) < 1e-12);
+  assert.ok(Math.abs(levelSeventeen.bulletsPerSecond - 4.802) < 1e-12);
+  assert.equal(levelSeventeen.cooldownSeconds, 7);
+});
+
+test('high fire rate becomes three streams while preserving total bullet output', () => {
+  const threeStreamStats = getPlayerLevelStats({
+    ...createInitialPlayerUpgradeRanks(),
+    fireRate: 7,
+  });
+  assert.equal(threeStreamStats.streamCount, 3);
+  assert.ok(Math.abs(threeStreamStats.bulletsPerSecond - 1.25 * Math.pow(1.4, 7)) < 1e-10);
+  assert.ok(Math.abs(3000 / threeStreamStats.volleyIntervalMs - threeStreamStats.bulletsPerSecond) < 1e-10);
+
+  const capped = getPlayerLevelStats({
+    ...createInitialPlayerUpgradeRanks(),
+    fireRate: 100,
+  });
+  assert.equal(capped.bulletsPerSecond, 30);
+  assert.equal(capped.volleyIntervalMs, 100);
+});
+
+test('capped fire and cooldown cycle slots continue upgrading hp and regeneration', () => {
+  const before = derivePlayerUpgradeRanks(45);
+  const after = derivePlayerUpgradeRanks(49);
+  assert.equal(getPlayerLevelStats(before).cooldownSeconds, 4);
+  assert.equal(getPlayerLevelStats(before).bulletsPerSecond, 30);
+  assert.equal(after.maxHp - before.maxHp, 2);
+  assert.equal(after.regeneration - before.regeneration, 2);
+  assert.equal(after.fireRate, before.fireRate);
+  assert.equal(after.cooldown, before.cooldown);
+  assert.deepEqual(derivePlayerUpgradeRanks(1_000_000), derivePlayerUpgradeRanks(1_000_000));
 });
 
 test('Memory Arena wall ricochets are disabled by prototype configuration', () => {

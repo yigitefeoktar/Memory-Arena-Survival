@@ -95,7 +95,17 @@ export const MEMORY_ARENA_CONFIG = {
   },
   player: {
     maxHp: 100,
-    regenerationPerSecond: 2,
+    regenerationPercentPerSecond: 0.02,
+  },
+  progression: {
+    hpMultiplierPerUpgrade: 1.4,
+    fireRateMultiplierPerUpgrade: 1.4,
+    regenerationPercentPerUpgrade: 0.0075,
+    cooldownSecondsPerUpgrade: 2,
+    minimumCooldownSeconds: 4,
+    threeStreamThresholdBulletsPerSecond: 10,
+    maximumBulletsPerSecond: 30,
+    maximumVisualRadius: 22,
   },
   spawner: {
     hp: 100,
@@ -126,6 +136,122 @@ export const MEMORY_ARENA_CONFIG = {
     recoveryMs: 4000,
   },
 } as const;
+
+export const PLAYER_UPGRADE_STATS = ['fireRate', 'maxHp', 'regeneration', 'cooldown'] as const;
+export type PlayerUpgradeStat = (typeof PLAYER_UPGRADE_STATS)[number];
+
+export interface PlayerUpgradeRanks {
+  fireRate: number;
+  maxHp: number;
+  regeneration: number;
+  cooldown: number;
+}
+
+export interface PlayerLevelStats {
+  maxHp: number;
+  regenerationPercentPerSecond: number;
+  bulletsPerSecond: number;
+  streamCount: 1 | 3;
+  volleyIntervalMs: number;
+  cooldownSeconds: number;
+  visualRadius: number;
+}
+
+export interface PlayerLevelUpgrade {
+  stat: PlayerUpgradeStat;
+  ranks: PlayerUpgradeRanks;
+  stats: PlayerLevelStats;
+}
+
+export function createInitialPlayerUpgradeRanks(): PlayerUpgradeRanks {
+  return { fireRate: 0, maxHp: 0, regeneration: 0, cooldown: 0 };
+}
+
+export function isValidPlayerUpgradeRanks(value: unknown): value is PlayerUpgradeRanks {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Partial<PlayerUpgradeRanks>;
+  return PLAYER_UPGRADE_STATS.every(stat => (
+    Number.isInteger(candidate[stat]) &&
+    (candidate[stat] as number) >= 0 &&
+    (candidate[stat] as number) <= 1_000_000_000
+  ));
+}
+
+export function getPlayerLevelStats(ranks: PlayerUpgradeRanks): PlayerLevelStats {
+  const progression = MEMORY_ARENA_CONFIG.progression;
+  const uncappedBulletsPerSecond = 1.25 * Math.pow(progression.fireRateMultiplierPerUpgrade, ranks.fireRate);
+  const bulletsPerSecond = Math.min(progression.maximumBulletsPerSecond, uncappedBulletsPerSecond);
+  const streamCount: 1 | 3 = bulletsPerSecond > progression.threeStreamThresholdBulletsPerSecond ? 3 : 1;
+  return {
+    maxHp: Math.min(1_000_000_000, Math.round(
+      MEMORY_ARENA_CONFIG.player.maxHp * Math.pow(progression.hpMultiplierPerUpgrade, ranks.maxHp),
+    )),
+    regenerationPercentPerSecond:
+      MEMORY_ARENA_CONFIG.player.regenerationPercentPerSecond +
+      ranks.regeneration * progression.regenerationPercentPerUpgrade,
+    bulletsPerSecond,
+    streamCount,
+    volleyIntervalMs: 1000 * streamCount / bulletsPerSecond,
+    cooldownSeconds: Math.max(
+      progression.minimumCooldownSeconds,
+      15 - ranks.cooldown * progression.cooldownSecondsPerUpgrade,
+    ),
+    visualRadius: Math.min(
+      progression.maximumVisualRadius,
+      16 + ranks.maxHp * 0.75,
+    ),
+  };
+}
+
+function isPlayerUpgradeStatCapped(stat: PlayerUpgradeStat, ranks: PlayerUpgradeRanks): boolean {
+  const stats = getPlayerLevelStats(ranks);
+  if (stat === 'fireRate') {
+    return stats.bulletsPerSecond >= MEMORY_ARENA_CONFIG.progression.maximumBulletsPerSecond;
+  }
+  if (stat === 'cooldown') {
+    return stats.cooldownSeconds <= MEMORY_ARENA_CONFIG.progression.minimumCooldownSeconds;
+  }
+  return false;
+}
+
+export function grantPlayerLevelUpgrade(
+  newLevel: number,
+  currentRanks: PlayerUpgradeRanks,
+): PlayerLevelUpgrade {
+  const cycleIndex = Math.max(0, newLevel - 2) % PLAYER_UPGRADE_STATS.length;
+  let stat = PLAYER_UPGRADE_STATS[cycleIndex];
+  if (isPlayerUpgradeStatCapped(stat, currentRanks)) {
+    stat = currentRanks.maxHp <= currentRanks.regeneration ? 'maxHp' : 'regeneration';
+  }
+  const ranks = { ...currentRanks, [stat]: currentRanks[stat] + 1 };
+  return { stat, ranks, stats: getPlayerLevelStats(ranks) };
+}
+
+export function derivePlayerUpgradeRanks(level: number): PlayerUpgradeRanks {
+  const boundedLevel = Math.max(1, Math.floor(level));
+  let ranks = createInitialPlayerUpgradeRanks();
+  const exactEnd = Math.min(boundedLevel, 45);
+  for (let nextLevel = 2; nextLevel <= exactEnd; nextLevel++) {
+    ranks = grantPlayerLevelUpgrade(nextLevel, ranks).ranks;
+  }
+
+  if (boundedLevel <= exactEnd) return ranks;
+
+  let remaining = boundedLevel - exactEnd;
+  const completeCycles = Math.floor(remaining / 4);
+  if (completeCycles > 0) {
+    ranks = {
+      ...ranks,
+      maxHp: ranks.maxHp + completeCycles * 2,
+      regeneration: ranks.regeneration + completeCycles * 2,
+    };
+    remaining -= completeCycles * 4;
+  }
+  for (let offset = 1; offset <= remaining; offset++) {
+    ranks = grantPlayerLevelUpgrade(exactEnd + completeCycles * 4 + offset, ranks).ranks;
+  }
+  return ranks;
+}
 
 export function createEmptyAbilityOwnership(): AbilityOwnership {
   return { damage: false, special: false, build: false, convert: false };
@@ -542,8 +668,16 @@ export function applyPlayerDamage(hp: number, damage: number): number {
   return Math.max(0, hp - Math.max(0, damage));
 }
 
-export function regeneratePlayerHealth(hp: number, maxHp: number, deltaSeconds: number): number {
-  return Math.min(maxHp, hp + MEMORY_ARENA_CONFIG.player.regenerationPerSecond * Math.max(0, deltaSeconds));
+export function regeneratePlayerHealth(
+  hp: number,
+  maxHp: number,
+  regenerationPercentPerSecond: number,
+  deltaSeconds: number,
+): number {
+  return Math.min(
+    maxHp,
+    hp + maxHp * Math.max(0, regenerationPercentPerSecond) * Math.max(0, deltaSeconds),
+  );
 }
 
 export function isValidChainState(value: unknown): value is ChainState {

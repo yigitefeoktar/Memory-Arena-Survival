@@ -52,6 +52,7 @@ import {
   MEMORY_ARENA_PALETTE,
   MEMORY_MAP_CORE_INDICES,
   PLAYER_COLOR_HEX,
+  PLAYER_UPGRADE_STATS,
   advanceTriangleAi,
   applyPlayerDamage,
   areEnemyFactionsHostile,
@@ -61,18 +62,23 @@ import {
   createFullAbilityOwnership,
   createInitialAbilityDropProgress,
   createInitialFactionRaidStates,
+  createInitialPlayerUpgradeRanks,
   createMemoryCoreSpawners,
   createShuffledShapeBag,
   createTriangleAiState,
   getSquareVolleyDirections,
   getRaidFormationOffset,
   getTriangleTelegraphVisual,
+  getPlayerLevelStats,
+  grantPlayerLevelUpgrade,
+  derivePlayerUpgradeRanks,
   isEnemyFactionColor,
   isEnemyShape,
   isValidChainState,
   isValidAbilityDropProgress,
   isValidAbilityOwnership,
   isValidFactionRaidStates,
+  isValidPlayerUpgradeRanks,
   markTrianglePlayerHit,
   regeneratePlayerHealth,
   registerPlayerEnemyKill,
@@ -87,6 +93,7 @@ import {
   type EnemyFactionColor,
   type EnemyShape,
   type FactionRaidStates,
+  type PlayerUpgradeRanks,
   type TriangleAiState,
 } from '../game/memoryArena';
 
@@ -220,7 +227,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -3224,13 +3231,16 @@ export default function GameCanvas() {
   }, []);
   const [flashScore, setFlashScore] = useState(false);
   const [chainFeedback, setChainFeedback] = useState<'reset' | 'level' | null>(null);
+  const [levelUpgradeNotice, setLevelUpgradeNotice] = useState<string | null>(null);
   const chainFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showChainFeedback = useCallback((feedback: 'reset' | 'level') => {
+  const showChainFeedback = useCallback((feedback: 'reset' | 'level', upgradeNotice?: string) => {
     if (chainFeedbackTimerRef.current) clearTimeout(chainFeedbackTimerRef.current);
     setChainFeedback(feedback);
+    setLevelUpgradeNotice(feedback === 'level' ? (upgradeNotice ?? null) : null);
     chainFeedbackTimerRef.current = setTimeout(() => {
       setChainFeedback(null);
+      setLevelUpgradeNotice(null);
       chainFeedbackTimerRef.current = null;
     }, feedback === 'level' ? 1200 : 700);
   }, []);
@@ -3617,6 +3627,7 @@ export default function GameCanvas() {
     hardMode: false,
     memoryMode: false,
     chain: createInitialChainState() as ChainState,
+    playerUpgradeRanks: createInitialPlayerUpgradeRanks() as PlayerUpgradeRanks,
     factionRaids: createInitialFactionRaidStates() as FactionRaidStates,
     tutorial: { active: false, spawnerIndex: null as number | null, enemySpawned: false, timer: 0 },
   });
@@ -4436,6 +4447,7 @@ export default function GameCanvas() {
         ...state.chain,
         target: state.chain.target ? { ...state.chain.target } : null,
       },
+      playerUpgradeRanks: { ...state.playerUpgradeRanks },
       factionRaids: Object.fromEntries(ENEMY_FACTIONS.map(faction => [
         faction,
         { ...state.factionRaids[faction] },
@@ -4646,12 +4658,24 @@ export default function GameCanvas() {
       if (rawState.factionRaids !== undefined && !isValidFactionRaidStates(rawState.factionRaids)) {
         throw new Error("INVALID SAVE FILE");
       }
-      if (!isBoundedNum(rawPlayer.maxHp, 1, 1_000_000) ||
+      if (!isBoundedNum(rawPlayer.maxHp, 1, 1_000_000_000) ||
           !isBoundedNum(rawPlayer.hp, 0, rawPlayer.maxHp)) {
         throw new Error("INVALID SAVE FILE");
       }
       if (rawState.chain.level > 1_000_000_000 || rawState.chain.completedChains > 1_000_000_000) {
         throw new Error("INVALID SAVE FILE");
+      }
+      if (version >= 3) {
+        if (!isValidPlayerUpgradeRanks(rawState.playerUpgradeRanks)) {
+          throw new Error("INVALID SAVE FILE");
+        }
+        const upgradeRankTotal = PLAYER_UPGRADE_STATS.reduce(
+          (total, stat) => total + rawState.playerUpgradeRanks[stat],
+          0,
+        );
+        if (upgradeRankTotal !== rawState.chain.level - 1) {
+          throw new Error("INVALID SAVE FILE");
+        }
       }
       if (version >= 2 && (
         !isValidAbilityOwnership(rawState.abilityOwnership) ||
@@ -4682,6 +4706,12 @@ export default function GameCanvas() {
     const reconstructedAbilityDropProgress: AbilityDropProgress = isMemorySave && version >= 2
       ? { ...rawState.abilityDropProgress }
       : createInitialAbilityDropProgress();
+    const reconstructedPlayerUpgradeRanks: PlayerUpgradeRanks = isMemorySave
+      ? (version >= 3
+          ? { ...rawState.playerUpgradeRanks }
+          : derivePlayerUpgradeRanks(rawState.chain.level))
+      : createInitialPlayerUpgradeRanks();
+    const reconstructedPlayerLevelStats = getPlayerLevelStats(reconstructedPlayerUpgradeRanks);
     let reconstructedAbilityPickups: AbilityPickup[] = [];
     if (isMemorySave && version >= 2) {
       if (rawState.abilityPickups.length > ENEMY_FACTIONS.length) {
@@ -4871,6 +4901,11 @@ export default function GameCanvas() {
       ? adjustTime(rawPlayer.abilityLastUsed)
       : loadNow - MEMORY_ABILITY_SHARED_COOLDOWN;
 
+    const reconstructedHp = isMemorySave
+      ? (version >= 3
+          ? Math.min(rawPlayer.hp, reconstructedPlayerLevelStats.maxHp)
+          : reconstructedPlayerLevelStats.maxHp * Math.max(0, Math.min(1, rawPlayer.hp / rawPlayer.maxHp)))
+      : MEMORY_ARENA_CONFIG.player.maxHp;
     const reconstructedPlayer = {
       x: px,
       y: py,
@@ -4880,8 +4915,8 @@ export default function GameCanvas() {
       kbvy: rawPlayer.kbvy,
       processedZoneKbs,
       radius: PLAYER_RADIUS,
-      hp: isMemorySave ? rawPlayer.hp : MEMORY_ARENA_CONFIG.player.maxHp,
-      maxHp: isMemorySave ? rawPlayer.maxHp : MEMORY_ARENA_CONFIG.player.maxHp,
+      hp: reconstructedHp,
+      maxHp: isMemorySave ? reconstructedPlayerLevelStats.maxHp : MEMORY_ARENA_CONFIG.player.maxHp,
       lastShoot: lastShootTime,
       abilityLastUsed: reconstructedAbilityLastUsed,
       dash: reconstructedDash,
@@ -5312,9 +5347,10 @@ export default function GameCanvas() {
       buildCooldown = Math.max(0, Math.ceil((BUILD_COOLDOWN - (loadNow - reconstructedBuild.lastTime)) / 1000));
     }
 
+    const memorySharedCooldownMs = reconstructedPlayerLevelStats.cooldownSeconds * 1000;
     const memorySharedCooldown = Math.max(
       0,
-      Math.ceil((MEMORY_ABILITY_SHARED_COOLDOWN - (loadNow - reconstructedAbilityLastUsed)) / 1000),
+      Math.ceil((memorySharedCooldownMs - (loadNow - reconstructedAbilityLastUsed)) / 1000),
     );
     if (isMemorySave) {
       specialCooldown = memorySharedCooldown;
@@ -5400,6 +5436,7 @@ export default function GameCanvas() {
       hardMode: cleanGameMode !== 'normal',
       memoryMode: isMemorySave,
       chain: reconstructedChain,
+      playerUpgradeRanks: reconstructedPlayerUpgradeRanks,
       factionRaids: reconstructedFactionRaids,
       tutorial: { active: false, spawnerIndex: null, enemySpawned: false, timer: 0 },
     };
@@ -6110,6 +6147,12 @@ export default function GameCanvas() {
     setPulseSpawnerCounter(false);
     setPulseKey(0);
     spawnerPointerAnimRef.current = null;
+    if (chainFeedbackTimerRef.current) {
+      clearTimeout(chainFeedbackTimerRef.current);
+      chainFeedbackTimerRef.current = null;
+    }
+    setChainFeedback(null);
+    setLevelUpgradeNotice(null);
     activeWalls = mapDef.walls;
 
     const state = stateRef.current;
@@ -6133,8 +6176,10 @@ export default function GameCanvas() {
     state.player.kbvy = 0;
     state.player.processedZoneKbs = [];
     state.player.lastShoot = performance.now();
-    state.player.hp = MEMORY_ARENA_CONFIG.player.maxHp;
-    state.player.maxHp = MEMORY_ARENA_CONFIG.player.maxHp;
+    state.playerUpgradeRanks = createInitialPlayerUpgradeRanks();
+    const initialPlayerStats = getPlayerLevelStats(state.playerUpgradeRanks);
+    state.player.hp = initialPlayerStats.maxHp;
+    state.player.maxHp = initialPlayerStats.maxHp;
     state.player.abilityLastUsed = performance.now() - MEMORY_ABILITY_SHARED_COOLDOWN;
     state.player.dash = { active: false, endTime: 0, targetX: 0, targetY: 0, shieldRadius: 60, lastTime: performance.now() - DASH_COOLDOWN, wasReady: true };
     state.player.build = { active: false, endTime: 0, lastBlockX: 0, lastBlockY: 0, lastTime: performance.now() - BUILD_COOLDOWN };
@@ -6346,8 +6391,10 @@ export default function GameCanvas() {
       state.player.processedZoneKbs = [];
       state.player.recentBlocks = [];
       state.player.lastShoot = performance.now();
-      state.player.hp = MEMORY_ARENA_CONFIG.player.maxHp;
-      state.player.maxHp = MEMORY_ARENA_CONFIG.player.maxHp;
+      state.playerUpgradeRanks = createInitialPlayerUpgradeRanks();
+      const initialPlayerStats = getPlayerLevelStats(state.playerUpgradeRanks);
+      state.player.hp = initialPlayerStats.maxHp;
+      state.player.maxHp = initialPlayerStats.maxHp;
       state.player.abilityLastUsed = performance.now() - MEMORY_ABILITY_SHARED_COOLDOWN;
       state.player.dash = {
         active: false,
@@ -6862,7 +6909,8 @@ export default function GameCanvas() {
     const state = stateRef.current;
     if (!state.memoryMode || mpRef.current.roomId || uiRef.current.status !== 'PLAYING') return;
     if (!state.abilityOwnership.damage) return;
-    if (currentTime - state.player.abilityLastUsed < MEMORY_ABILITY_SHARED_COOLDOWN) return;
+    const cooldownMs = getPlayerLevelStats(state.playerUpgradeRanks).cooldownSeconds * 1000;
+    if (currentTime - state.player.abilityLastUsed < cooldownMs) return;
 
     state.player.abilityLastUsed = currentTime;
     state.damageWaves.push({
@@ -6889,7 +6937,8 @@ export default function GameCanvas() {
     const state = stateRef.current;
     if (!state.memoryMode || mpRef.current.roomId || uiRef.current.status !== 'PLAYING') return;
     if (!state.abilityOwnership.convert) return;
-    if (currentTime - state.player.abilityLastUsed < MEMORY_ABILITY_SHARED_COOLDOWN) return;
+    const cooldownMs = getPlayerLevelStats(state.playerUpgradeRanks).cooldownSeconds * 1000;
+    if (currentTime - state.player.abilityLastUsed < cooldownMs) return;
 
     state.player.abilityLastUsed = currentTime;
     let convertedCount = 0;
@@ -7018,7 +7067,8 @@ export default function GameCanvas() {
      if (!isMultiplayer) {
          const dash = stateRef.current.player.dash;
          const endTime = dash.endTime || 0;
-         const memoryAbilityReady = currentTime - stateRef.current.player.abilityLastUsed >= MEMORY_ABILITY_SHARED_COOLDOWN;
+         const memoryCooldownMs = getPlayerLevelStats(stateRef.current.playerUpgradeRanks).cooldownSeconds * 1000;
+         const memoryAbilityReady = currentTime - stateRef.current.player.abilityLastUsed >= memoryCooldownMs;
          const canActivate = stateRef.current.memoryMode
            ? stateRef.current.abilityOwnership.special && !dash.active && memoryAbilityReady
            : !dash.active && (endTime === 0 || currentTime - endTime >= DASH_COOLDOWN);
@@ -7097,7 +7147,8 @@ export default function GameCanvas() {
      if (!isMultiplayer) {
          const build = stateRef.current.player.build;
          const endTime = build.endTime || 0;
-         const memoryAbilityReady = currentTime - stateRef.current.player.abilityLastUsed >= MEMORY_ABILITY_SHARED_COOLDOWN;
+         const memoryCooldownMs = getPlayerLevelStats(stateRef.current.playerUpgradeRanks).cooldownSeconds * 1000;
+         const memoryAbilityReady = currentTime - stateRef.current.player.abilityLastUsed >= memoryCooldownMs;
          const canActivate = stateRef.current.memoryMode
            ? stateRef.current.abilityOwnership.build && !build.active && memoryAbilityReady
            : !build.active && (endTime === 0 || currentTime - endTime >= BUILD_COOLDOWN);
@@ -9538,6 +9589,37 @@ export default function GameCanvas() {
           }
         };
 
+        const applyCompletedPlayerLevelUpgrade = () => {
+          const previousStats = getPlayerLevelStats(state.playerUpgradeRanks);
+          const upgrade = grantPlayerLevelUpgrade(state.chain.level, state.playerUpgradeRanks);
+          state.playerUpgradeRanks = upgrade.ranks;
+          state.player.maxHp = upgrade.stats.maxHp;
+          if (upgrade.stat === 'maxHp') {
+            state.player.hp = Math.min(
+              upgrade.stats.maxHp,
+              state.player.hp + (upgrade.stats.maxHp - previousStats.maxHp),
+            );
+          }
+
+          const notice = upgrade.stat === 'fireRate'
+            ? `FIRE ${upgrade.stats.bulletsPerSecond.toFixed(2).replace(/\.?0+$/, '')}/S`
+            : upgrade.stat === 'maxHp'
+              ? `MAX HP ${upgrade.stats.maxHp}`
+              : upgrade.stat === 'regeneration'
+                ? `REGEN ${(upgrade.stats.regenerationPercentPerSecond * 100).toFixed(2).replace(/\.?0+$/, '')}%`
+                : `COOLDOWN ${upgrade.stats.cooldownSeconds}S`;
+          showChainFeedback('level', notice);
+          state.shockwaves.push({
+            x: state.player.x,
+            y: state.player.y,
+            color: PLAYER_COLOR_HEX,
+            maxRadius: 180,
+            age: 0,
+            maxAge: 0.5,
+            thickness: 12,
+          });
+        };
+
         const maybeSpawnAbilityDrop = (enemy: MemoryEnemy, credit: AbilityKillCredit) => {
           if (!state.memoryMode || !enemy.factionColor) return;
           const result = registerAbilityDropKill({
@@ -9666,25 +9748,7 @@ export default function GameCanvas() {
                 if (chainTransition.result === 'retargeted') {
                   showChainFeedback('reset');
                 } else if (chainTransition.result === 'completed') {
-                  showChainFeedback('level');
-                  state.shockwaves.push({
-                    x: state.player.x,
-                    y: state.player.y,
-                    color: PLAYER_COLOR_HEX,
-                    maxRadius: 180,
-                    age: 0,
-                    maxAge: 0.5,
-                    thickness: 12,
-                  });
-                  state.floatingTexts.push({
-                    x: state.player.x,
-                    y: state.player.y - 35,
-                    text: `LEVEL ${state.chain.level}`,
-                    age: 0,
-                    maxAge: 1.2,
-                    color: PLAYER_COLOR_HEX,
-                    vy: -35,
-                  });
+                  applyCompletedPlayerLevelUpgrade();
                 }
               }
             }
@@ -9701,6 +9765,8 @@ export default function GameCanvas() {
                 ...previousUi,
                 score: newScore,
                 blocks: newBlocks,
+                hp: state.player.hp,
+                maxHp: state.player.maxHp,
                 level: state.chain.level,
                 chainProgress: state.chain.progress,
               };
@@ -10163,7 +10229,13 @@ export default function GameCanvas() {
 
           if (state.memoryMode && STATUS === 'PLAYING' && state.player.hp > 0) {
             const previousHp = state.player.hp;
-            state.player.hp = regeneratePlayerHealth(state.player.hp, state.player.maxHp, dt);
+            const regenerationPercent = getPlayerLevelStats(state.playerUpgradeRanks).regenerationPercentPerSecond;
+            state.player.hp = regeneratePlayerHealth(
+              state.player.hp,
+              state.player.maxHp,
+              regenerationPercent,
+              dt,
+            );
             if (Math.floor(previousHp) !== Math.floor(state.player.hp)) {
               const nextUi = { ...uiRef.current, hp: state.player.hp };
               uiRef.current = nextUi;
@@ -11597,7 +11669,9 @@ export default function GameCanvas() {
         }
 
         const isLocalMenuOpen = mpRef.current.roomId && (mpMenuOpenRef.current || confirmResignRef.current);
-        if (isShooting && !isOpeningProtectionActiveLocal(currentTime) && !isLocalMenuOpen && currentTime - state.player.lastShoot > FIRE_RATE) {
+        const memoryPlayerStats = state.memoryMode ? getPlayerLevelStats(state.playerUpgradeRanks) : null;
+        const playerFireIntervalMs = memoryPlayerStats?.volleyIntervalMs ?? FIRE_RATE;
+        if (isShooting && !isOpeningProtectionActiveLocal(currentTime) && !isLocalMenuOpen && currentTime - state.player.lastShoot > playerFireIntervalMs) {
           const isGuest = !!(mpRef.current.roomId && !mpRef.current.isHost);
           let clientShotId: string | undefined = undefined;
           let localBulletId = '';
@@ -11694,39 +11768,51 @@ export default function GameCanvas() {
             // multiplayer guest sends responsive input and keeps a cosmetic
             // local visual while the host owns the authoritative bullet.
             if (!isGuest) {
-              state.bullets.push({
-                id: localBulletId,
-                clientShotId,
-                x: state.player.x,
-                y: state.player.y,
-                dx: bvx,
-                dy: bvy,
-                radius: BULLET_RADIUS,
-                isPlayer: true,
-                bounceCount: 0,
-                spawnTime: currentTime,
-                isNeutral: false,
-                ownerId: socketRef.current?.id || 'local',
-                colorIdx: state.memoryMode ? 0 : playerProfileRef.current.colorIdx,
-                allowedBlockKeys: localAllowedKeys,
-                leftBlockKeys: []
-              });
               const bulletSpeed = Math.hypot(bvx, bvy);
               const directionX = bulletSpeed > 0 ? bvx / bulletSpeed : 0;
               const directionY = bulletSpeed > 0 ? bvy / bulletSpeed : 0;
-              gameplayAnalytics.track('player_bullet_fired', {
-                event_source: mpRef.current.roomId ? 'host_authoritative' : 'local_authoritative',
-                player_x: state.player.x,
-                player_y: state.player.y,
-                bullet_id: localBulletId,
-                direction_x: directionX,
-                direction_y: directionY,
-                target_x: uiRef.current.deviceType === 'desktop'
-                  ? state.player.x + shootDirX
-                  : state.player.x + directionX * 500,
-                target_y: uiRef.current.deviceType === 'desktop'
-                  ? state.player.y + shootDirY
-                  : state.player.y + directionY * 500,
+              const perpendicularX = -directionY;
+              const perpendicularY = directionX;
+              const streamOffsets = state.memoryMode && memoryPlayerStats?.streamCount === 3
+                ? [-12, 0, 12]
+                : [0];
+              const muzzleForward = state.memoryMode ? state.player.radius + BULLET_RADIUS + 2 : 0;
+
+              streamOffsets.forEach((streamOffset, streamIndex) => {
+                const bulletId = streamIndex === 0 ? localBulletId : 'bh_' + state.nextEntityId++;
+                const spawnX = state.player.x + directionX * muzzleForward + perpendicularX * streamOffset;
+                const spawnY = state.player.y + directionY * muzzleForward + perpendicularY * streamOffset;
+                state.bullets.push({
+                  id: bulletId,
+                  clientShotId,
+                  x: spawnX,
+                  y: spawnY,
+                  dx: bvx,
+                  dy: bvy,
+                  radius: BULLET_RADIUS,
+                  isPlayer: true,
+                  bounceCount: 0,
+                  spawnTime: currentTime,
+                  isNeutral: false,
+                  ownerId: socketRef.current?.id || 'local',
+                  colorIdx: state.memoryMode ? 0 : playerProfileRef.current.colorIdx,
+                  allowedBlockKeys: [...localAllowedKeys],
+                  leftBlockKeys: [],
+                });
+                gameplayAnalytics.track('player_bullet_fired', {
+                  event_source: mpRef.current.roomId ? 'host_authoritative' : 'local_authoritative',
+                  player_x: state.player.x,
+                  player_y: state.player.y,
+                  bullet_id: bulletId,
+                  direction_x: directionX,
+                  direction_y: directionY,
+                  target_x: uiRef.current.deviceType === 'desktop'
+                    ? state.player.x + shootDirX
+                    : state.player.x + directionX * 500,
+                  target_y: uiRef.current.deviceType === 'desktop'
+                    ? state.player.y + shootDirY
+                    : state.player.y + directionY * 500,
+                });
               });
             }
 
@@ -12527,20 +12613,20 @@ export default function GameCanvas() {
                     color: enemy.factionColor,
                   });
                   state.chain = chainTransition.state;
+                  if (chainTransition.result === 'retargeted') {
+                    showChainFeedback('reset');
+                  } else if (chainTransition.result === 'completed') {
+                    applyCompletedPlayerLevelUpgrade();
+                  }
                   const nextUi = {
                     ...uiRef.current,
+                    hp: state.player.hp,
+                    maxHp: state.player.maxHp,
                     level: state.chain.level,
                     chainProgress: state.chain.progress,
                   };
                   uiRef.current = nextUi;
                   setUiState(nextUi);
-                  if (chainTransition.result === 'retargeted') {
-                    showChainFeedback('reset');
-                  } else if (chainTransition.result === 'completed') {
-                    showChainFeedback('level');
-                    state.shockwaves.push({ x: state.player.x, y: state.player.y, color: PLAYER_COLOR_HEX, maxRadius: 180, age: 0, maxAge: 0.5, thickness: 12 });
-                    state.floatingTexts.push({ x: state.player.x, y: state.player.y - 35, text: `LEVEL ${state.chain.level}`, age: 0, maxAge: 1.2, color: PLAYER_COLOR_HEX, vy: -35 });
-                  }
                 }
 
                 let pts = 0;
@@ -13903,6 +13989,8 @@ export default function GameCanvas() {
         const pColor = state.memoryMode ? MEMORY_ARENA_PALETTE.player.body : pDef.n;
         const pGlow = state.memoryMode ? MEMORY_ARENA_PALETTE.player.glow : pDef.g;
         const pName = playerProfileRef.current.name || 'PLAYER';
+        const playerLevelStats = state.memoryMode ? getPlayerLevelStats(state.playerUpgradeRanks) : null;
+        const visualRadius = playerLevelStats?.visualRadius ?? state.player.radius;
 
         const worldMouseX = state.mouse.x + state.camera.x;
         const worldMouseY = state.mouse.y + state.camera.y;
@@ -13937,6 +14025,27 @@ export default function GameCanvas() {
           ctx.stroke();
         }
 
+        if (state.memoryMode && playerLevelStats) {
+          const regenerationVisualRank = Math.min(8, state.playerUpgradeRanks.regeneration);
+          const isRegenerating = state.player.hp > 0 && state.player.hp < state.player.maxHp;
+          const auraPulse = Math.sin(currentTime * (0.004 + regenerationVisualRank * 0.00035));
+          ctx.save();
+          ctx.globalAlpha = 0.08 + regenerationVisualRank * 0.018 + (isRegenerating ? 0.08 : 0);
+          ctx.fillStyle = PLAYER_COLOR_HEX;
+          ctx.shadowColor = PLAYER_COLOR_HEX;
+          ctx.shadowBlur = 12 + regenerationVisualRank * 3 + (isRegenerating ? 8 : 0);
+          ctx.beginPath();
+          ctx.arc(
+            state.player.x,
+            state.player.y,
+            visualRadius + 8 + regenerationVisualRank * 1.5 + auraPulse * (1 + regenerationVisualRank * 0.2),
+            0,
+            Math.PI * 2,
+          );
+          ctx.fill();
+          ctx.restore();
+        }
+
         if (state.player.dash.active) {
           // Draw shield
           ctx.beginPath();
@@ -13949,14 +14058,14 @@ export default function GameCanvas() {
         } else {
           ctx.fillStyle = pGlow;
           ctx.beginPath();
-          ctx.arc(state.player.x, state.player.y, state.player.radius * 2, 0, Math.PI * 2);
+          ctx.arc(state.player.x, state.player.y, visualRadius * 2, 0, Math.PI * 2);
           ctx.fill();
         }
 
         if (isOpeningProtectionActiveLocal(currentTime)) {
           ctx.save();
           ctx.beginPath();
-          const shieldRadius = state.player.radius + 8 + Math.sin(currentTime * 0.008) * 2;
+          const shieldRadius = visualRadius + 8 + Math.sin(currentTime * 0.008) * 2;
           ctx.arc(state.player.x, state.player.y, shieldRadius, 0, Math.PI * 2);
           ctx.strokeStyle = pColor;
           ctx.lineWidth = 2;
@@ -13967,19 +14076,47 @@ export default function GameCanvas() {
 
         ctx.fillStyle = pColor;
         ctx.beginPath();
-        ctx.arc(state.player.x, state.player.y, state.player.radius, 0, Math.PI * 2);
+        ctx.arc(state.player.x, state.player.y, visualRadius, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.strokeStyle = '#000';
         ctx.lineWidth = 2;
         ctx.stroke();
 
+        if (state.memoryMode && playerLevelStats?.streamCount === 3 && shouldDrawAimLine) {
+          const aimDx = aimX - state.player.x;
+          const aimDy = aimY - state.player.y;
+          const aimLength = Math.hypot(aimDx, aimDy);
+          if (aimLength > 0) {
+            const dirX = aimDx / aimLength;
+            const dirY = aimDy / aimLength;
+            const sideX = -dirY;
+            const sideY = dirX;
+            ctx.save();
+            ctx.fillStyle = PLAYER_COLOR_HEX;
+            ctx.shadowColor = PLAYER_COLOR_HEX;
+            ctx.shadowBlur = 7;
+            for (const offset of [-8, 0, 8]) {
+              ctx.beginPath();
+              ctx.arc(
+                state.player.x + dirX * visualRadius * 0.72 + sideX * offset,
+                state.player.y + dirY * visualRadius * 0.72 + sideY * offset,
+                2.4,
+                0,
+                Math.PI * 2,
+              );
+              ctx.fill();
+            }
+            ctx.restore();
+          }
+        }
+
         if (state.memoryMode) {
           const hpPercent = Math.max(0, Math.min(1, state.player.hp / Math.max(1, state.player.maxHp)));
-          const barW = 42;
+          const barW = 42 + Math.min(18, state.playerUpgradeRanks.maxHp * 2);
           const barH = 6;
           const barX = state.player.x - barW / 2;
-          const barY = state.player.y - state.player.radius * 2 - 10;
+          const barY = state.player.y - visualRadius * 2 - 10;
 
           ctx.save();
           ctx.fillStyle = 'rgba(3, 10, 18, 0.92)';
@@ -14391,9 +14528,10 @@ export default function GameCanvas() {
 
         const isGuestMode = mpRef.current.roomId && !mpRef.current.isHost;
         if (state.memoryMode) {
+          const memoryCooldownMs = getPlayerLevelStats(state.playerUpgradeRanks).cooldownSeconds * 1000;
           const sharedCooldown = Math.max(
             0,
-            Math.ceil((MEMORY_ABILITY_SHARED_COOLDOWN - (now - state.player.abilityLastUsed)) / 1000),
+            Math.ceil((memoryCooldownMs - (now - state.player.abilityLastUsed)) / 1000),
           );
           damageCooldown = sharedCooldown;
           specialCooldown = sharedCooldown;
@@ -15714,7 +15852,12 @@ export default function GameCanvas() {
                         exit={{ opacity: 0, y: -8 }}
                         className="border border-[#00f0ff] bg-black/80 px-3 py-1 text-xs font-black tracking-[0.25em] text-[#00f0ff]"
                       >
-                        LEVEL {uiState.level}
+                        <span>LEVEL {uiState.level}</span>
+                        {levelUpgradeNotice && (
+                          <span className="ml-2 border-l border-[#00f0ff]/45 pl-2 tracking-[0.12em] text-white">
+                            {levelUpgradeNotice}
+                          </span>
+                        )}
                       </motion.div>
                     )}
                   </div>
