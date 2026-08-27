@@ -414,6 +414,8 @@ export const MEMORY_MAP_CORE_INDICES: Record<string, readonly [number, number, n
 
 export interface ChainState {
   target: EnemyIdentity | null;
+  matchingShape: EnemyShape | null;
+  matchingColor: EnemyFactionColor | null;
   progress: number;
   level: number;
   completedChains: number;
@@ -429,6 +431,8 @@ export interface ChainTransition {
 export function createInitialChainState(): ChainState {
   return {
     target: null,
+    matchingShape: null,
+    matchingColor: null,
     progress: 0,
     level: 1,
     completedChains: 0,
@@ -501,22 +505,32 @@ export function areEnemyFactionsHostile(
   return first !== second;
 }
 
-export function sameEnemyIdentity(a: EnemyIdentity | null, b: EnemyIdentity): boolean {
-  return Boolean(a && a.shape === b.shape && a.color === b.color);
-}
-
 export function registerPlayerEnemyKill(current: ChainState, killed: EnemyIdentity): ChainTransition {
   if (!current.target) {
     return {
       result: 'started',
-      state: { ...current, target: { ...killed }, progress: 1 },
+      state: {
+        ...current,
+        target: { ...killed },
+        matchingShape: killed.shape,
+        matchingColor: killed.color,
+        progress: 1,
+      },
     };
   }
 
-  if (!sameEnemyIdentity(current.target, killed)) {
+  const matchingShape = current.matchingShape === killed.shape ? current.matchingShape : null;
+  const matchingColor = current.matchingColor === killed.color ? current.matchingColor : null;
+  if (!matchingShape && !matchingColor) {
     return {
       result: 'retargeted',
-      state: { ...current, target: { ...killed }, progress: 1 },
+      state: {
+        ...current,
+        target: { ...killed },
+        matchingShape: killed.shape,
+        matchingColor: killed.color,
+        progress: 1,
+      },
     };
   }
 
@@ -526,6 +540,8 @@ export function registerPlayerEnemyKill(current: ChainState, killed: EnemyIdenti
       result: 'completed',
       state: {
         target: null,
+        matchingShape: null,
+        matchingColor: null,
         progress: 0,
         level: current.level + 1,
         completedChains: current.completedChains + 1,
@@ -535,7 +551,7 @@ export function registerPlayerEnemyKill(current: ChainState, killed: EnemyIdenti
 
   return {
     result: 'advanced',
-    state: { ...current, progress: nextProgress },
+    state: { ...current, matchingShape, matchingColor, progress: nextProgress },
   };
 }
 
@@ -688,11 +704,25 @@ export function isValidChainState(value: unknown): value is ChainState {
     isEnemyShape(candidate.target?.shape) &&
     isEnemyFactionColor(candidate.target?.color)
   );
+  const matchingShapeValid = candidate.matchingShape === null || isEnemyShape(candidate.matchingShape);
+  const matchingColorValid = candidate.matchingColor === null || isEnemyFactionColor(candidate.matchingColor);
+  const progressValid = Number.isInteger(candidate.progress) &&
+    (candidate.progress as number) >= 0 &&
+    (candidate.progress as number) <= 3;
+  const targetAndTraitsAgree = candidate.progress === 0
+    ? candidate.target === null && candidate.matchingShape === null && candidate.matchingColor === null
+    : Boolean(
+        candidate.target &&
+        (candidate.matchingShape !== null || candidate.matchingColor !== null) &&
+        (candidate.matchingShape === null || candidate.matchingShape === candidate.target.shape) &&
+        (candidate.matchingColor === null || candidate.matchingColor === candidate.target.color)
+      );
   return Boolean(
     targetValid &&
-    Number.isInteger(candidate.progress) &&
-    (candidate.progress as number) >= 0 &&
-    (candidate.progress as number) <= 3 &&
+    matchingShapeValid &&
+    matchingColorValid &&
+    progressValid &&
+    targetAndTraitsAgree &&
     Number.isInteger(candidate.level) &&
     (candidate.level as number) >= 1 &&
     Number.isInteger(candidate.completedChains) &&

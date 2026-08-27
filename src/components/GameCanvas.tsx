@@ -227,7 +227,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -4606,6 +4606,13 @@ export default function GameCanvas() {
     const rawState = data.state;
 
     const isMemorySave = rawState.memoryMode === true;
+    const normalizedRawChain = isMemorySave && version < 4 && isObject(rawState.chain)
+      ? {
+          ...rawState.chain,
+          matchingShape: rawState.chain.target?.shape ?? null,
+          matchingColor: rawState.chain.target?.color ?? null,
+        }
+      : rawState.chain;
     if (typeof rawUi.mapId !== 'string' || !(isMemorySave ? MEMORY_MAPS[rawUi.mapId] : MAPS[rawUi.mapId])) {
       throw new Error("UNKNOWN MAP");
     }
@@ -4652,7 +4659,7 @@ export default function GameCanvas() {
     }
 
     if (isMemorySave) {
-      if (rawState.memoryMode !== true || !isValidChainState(rawState.chain)) {
+      if (rawState.memoryMode !== true || !isValidChainState(normalizedRawChain)) {
         throw new Error("INVALID SAVE FILE");
       }
       if (rawState.factionRaids !== undefined && !isValidFactionRaidStates(rawState.factionRaids)) {
@@ -5313,10 +5320,12 @@ export default function GameCanvas() {
     const spawnersLeftCount = reconstructedSpawners.filter(s => (s.hp ?? 0) > 0).length;
     const reconstructedChain: ChainState = isMemorySave
       ? {
-          target: rawState.chain.target ? { ...rawState.chain.target } : null,
-          progress: rawState.chain.progress,
-          level: rawState.chain.level,
-          completedChains: rawState.chain.completedChains,
+          target: normalizedRawChain.target ? { ...normalizedRawChain.target } : null,
+          matchingShape: normalizedRawChain.matchingShape,
+          matchingColor: normalizedRawChain.matchingColor,
+          progress: normalizedRawChain.progress,
+          level: normalizedRawChain.level,
+          completedChains: normalizedRawChain.completedChains,
         }
       : createInitialChainState();
     const reconstructedFactionRaids: FactionRaidStates = isMemorySave && rawState.factionRaids !== undefined
