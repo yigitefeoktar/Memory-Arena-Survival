@@ -113,6 +113,18 @@ export const MEMORY_ARENA_CONFIG = {
     spawnIntervalMs: 6000,
     spawnStaggerMs: 1500,
     livingEnemyCap: 120,
+    replicationIntervalMs: 25000,
+    replicationStaggerMs: 2500,
+    replicationRetryMs: 5000,
+    replicaHp: 60,
+    replicaRadius: 32,
+    maximumLivingSpawners: 40,
+    replicationStartDistance: 180,
+    replicationSearchStep: 48,
+    replicationSearchRadius: 720,
+    replicationCandidateAngles: 16,
+    replicationPlacementPadding: 14,
+    replicationPlayerClearance: 120,
   },
   circle: {
     bulletDamage: 30,
@@ -583,6 +595,42 @@ export function takeShapeFromBag(
 export interface Vector2 {
   x: number;
   y: number;
+}
+
+export function countRemainingCoreSpawners(
+  spawners: readonly { isCore?: boolean; hp?: number }[],
+): number {
+  return spawners.filter(spawner => spawner.isCore === true && (spawner.hp ?? 1) > 0).length;
+}
+
+export function canEnemyFactionDamageSpawner(
+  attackingFaction: EnemyFactionColor,
+  spawner: { isCore?: boolean; factionColor?: EnemyFactionColor },
+): boolean {
+  return spawner.isCore === false && Boolean(
+    spawner.factionColor && areEnemyFactionsHostile(attackingFaction, spawner.factionColor),
+  );
+}
+
+export function findNearestSpawnerReplicationPosition(
+  origin: Vector2,
+  isValid: (x: number, y: number) => boolean,
+  angleOffset = 0,
+): Vector2 | null {
+  const config = MEMORY_ARENA_CONFIG.spawner;
+  for (
+    let distance = config.replicationStartDistance;
+    distance <= config.replicationSearchRadius;
+    distance += config.replicationSearchStep
+  ) {
+    for (let index = 0; index < config.replicationCandidateAngles; index++) {
+      const angle = angleOffset + index * Math.PI * 2 / config.replicationCandidateAngles;
+      const x = origin.x + Math.cos(angle) * distance;
+      const y = origin.y + Math.sin(angle) * distance;
+      if (isValid(x, y)) return { x, y };
+    }
+  }
+  return null;
 }
 
 export function getSquareVolleyDirections(rotation: number): [Vector2, Vector2, Vector2, Vector2] {

@@ -56,6 +56,7 @@ import {
   advanceTriangleAi,
   applyPlayerDamage,
   areEnemyFactionsHostile,
+  canEnemyFactionDamageSpawner,
   collectAbilityPickup,
   createInitialChainState,
   createEmptyAbilityOwnership,
@@ -66,6 +67,8 @@ import {
   createMemoryCoreSpawners,
   createShuffledShapeBag,
   createTriangleAiState,
+  countRemainingCoreSpawners,
+  findNearestSpawnerReplicationPosition,
   getSquareVolleyDirections,
   getRaidFormationOffset,
   getTriangleTelegraphVisual,
@@ -227,7 +230,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 4;
+const SAVE_VERSION = 5;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -1064,6 +1067,7 @@ interface MemorySpawner {
   factionColor?: EnemyFactionColor;
   isCore?: boolean;
   nextSpawnAt?: number;
+  nextReplicationAt?: number;
   spawnBag?: EnemyShape[];
 }
 
@@ -3168,7 +3172,9 @@ export default function GameCanvas() {
     const player = state.player;
 
     const wasDestroyedSpawnerVisible = isSpawnerVisible(destroyedSpawner, camera, canvasW, canvasH);
-    const livingSpawners = state.spawners.filter(s => s.hp === undefined || s.hp > 0);
+    const livingSpawners = state.spawners.filter(s => (
+      (s.hp === undefined || s.hp > 0) && (!state.memoryMode || s.isCore)
+    ));
     const remainingVisible = livingSpawners.some(s => isSpawnerVisible(s, camera, canvasW, canvasH));
 
     if (wasDestroyedSpawnerVisible && !remainingVisible && livingSpawners.length > 0) {
@@ -4233,6 +4239,9 @@ export default function GameCanvas() {
         if (spawner.nextSpawnAt !== undefined) {
           spawner.nextSpawnAt += pauseDuration;
         }
+        if (spawner.nextReplicationAt !== undefined) {
+          spawner.nextReplicationAt += pauseDuration;
+        }
       }
     }
 
@@ -4933,6 +4942,79 @@ export default function GameCanvas() {
 
     let reconstructedSpawners: any[] = [];
     if (version >= 1) {
+      if (isMemorySave && version >= 5) {
+        if (!Array.isArray(rawState.spawners) || rawState.spawners.length > MEMORY_ARENA_CONFIG.spawner.maximumLivingSpawners) {
+          throw new Error("INVALID SAVE FILE");
+        }
+        const restoredPositions = new Set<string>();
+        const restoredCoreIndices = new Set<number>();
+        reconstructedSpawners = rawState.spawners.map((savedSpawner: unknown) => {
+          if (!isObject(savedSpawner) || !isEnemyFactionColor(savedSpawner.factionColor) ||
+              typeof savedSpawner.isCore !== 'boolean' ||
+              !isFiniteNum(savedSpawner.x) || !isFiniteNum(savedSpawner.y)) {
+            throw new Error("INVALID SAVE FILE");
+          }
+
+          const expectedRadius = savedSpawner.isCore
+            ? mapDef.spawners.find(spawner => (
+                spawner.isCore === true &&
+                spawner.factionColor === savedSpawner.factionColor &&
+                Math.abs(spawner.x - savedSpawner.x) < 0.1 &&
+                Math.abs(spawner.y - savedSpawner.y) < 0.1
+              ))?.radius
+            : MEMORY_ARENA_CONFIG.spawner.replicaRadius;
+          if (expectedRadius === undefined || savedSpawner.radius !== expectedRadius ||
+              !isBoundedNum(savedSpawner.x, expectedRadius, MAP_WIDTH - expectedRadius) ||
+              !isBoundedNum(savedSpawner.y, expectedRadius, MAP_HEIGHT - expectedRadius)) {
+            throw new Error("INVALID SAVE FILE");
+          }
+
+          const canonicalCoreIndex = savedSpawner.isCore
+            ? mapDef.spawners.findIndex(spawner => (
+                spawner.isCore === true &&
+                spawner.factionColor === savedSpawner.factionColor &&
+                Math.abs(spawner.x - savedSpawner.x) < 0.1 &&
+                Math.abs(spawner.y - savedSpawner.y) < 0.1
+              ))
+            : -1;
+          if (savedSpawner.isCore && (canonicalCoreIndex < 0 || restoredCoreIndices.has(canonicalCoreIndex))) {
+            throw new Error("INVALID SAVE FILE");
+          }
+          if (canonicalCoreIndex >= 0) restoredCoreIndices.add(canonicalCoreIndex);
+
+          const maxHp = savedSpawner.isCore
+            ? mapDef.spawners[canonicalCoreIndex].maxHp
+            : MEMORY_ARENA_CONFIG.spawner.replicaHp;
+          if (savedSpawner.maxHp !== maxHp || !isBoundedNum(savedSpawner.hp, 1, maxHp) ||
+              !isFiniteNum(savedSpawner.nextSpawnAt) || !isFiniteNum(savedSpawner.nextReplicationAt) ||
+              !Array.isArray(savedSpawner.spawnBag) || savedSpawner.spawnBag.length > 3 ||
+              savedSpawner.spawnBag.some((shape: unknown) => !isEnemyShape(shape)) ||
+              new Set(savedSpawner.spawnBag).size !== savedSpawner.spawnBag.length) {
+            throw new Error("INVALID SAVE FILE");
+          }
+          if (!savedSpawner.isCore && savedSpawner.specialType !== undefined) {
+            throw new Error("INVALID SAVE FILE");
+          }
+
+          const positionKey = `${savedSpawner.x.toFixed(3)}:${savedSpawner.y.toFixed(3)}`;
+          if (restoredPositions.has(positionKey)) throw new Error("INVALID SAVE FILE");
+          restoredPositions.add(positionKey);
+          const canonicalCore = canonicalCoreIndex >= 0 ? mapDef.spawners[canonicalCoreIndex] : null;
+          return {
+            x: savedSpawner.x,
+            y: savedSpawner.y,
+            radius: expectedRadius,
+            hp: Math.floor(savedSpawner.hp),
+            maxHp,
+            specialType: canonicalCore?.specialType,
+            factionColor: savedSpawner.factionColor,
+            isCore: savedSpawner.isCore,
+            nextSpawnAt: adjustTime(savedSpawner.nextSpawnAt),
+            nextReplicationAt: adjustTime(savedSpawner.nextReplicationAt),
+            spawnBag: [...savedSpawner.spawnBag],
+          };
+        });
+      } else {
       if (!Array.isArray(rawState.spawners) || !isBoundedNum(rawState.spawners.length, 0, mapDef.spawners.length)) {
         throw new Error("INVALID SAVE FILE");
       }
@@ -4983,6 +5065,7 @@ export default function GameCanvas() {
         const hp = Math.floor(savedSpawner.hp);
         if (hp > 0) {
           let nextSpawnAt: number | undefined;
+          let nextReplicationAt: number | undefined;
           let spawnBag: EnemyShape[] | undefined;
           if (isMemorySave) {
             if (!isFiniteNum(savedSpawner.nextSpawnAt)) {
@@ -4994,6 +5077,8 @@ export default function GameCanvas() {
               throw new Error("INVALID SAVE FILE");
             }
             nextSpawnAt = adjustTime(savedSpawner.nextSpawnAt);
+            nextReplicationAt = loadNow + MEMORY_ARENA_CONFIG.spawner.replicationIntervalMs +
+              MEMORY_ARENA_CONFIG.spawner.replicationStaggerMs * matchedIdx;
             spawnBag = [...savedSpawner.spawnBag];
           }
           tempSpawners.push({
@@ -5001,12 +5086,14 @@ export default function GameCanvas() {
             hp,
             maxHp,
             nextSpawnAt,
+            nextReplicationAt,
             spawnBag,
           });
         }
       }
 
       reconstructedSpawners = tempSpawners;
+      }
     } else {
       reconstructedSpawners = mapDef.spawners.map((canonicalSpawner, idx) => {
         const savedSpawner = Array.isArray(rawState.spawners) ? rawState.spawners[idx] : null;
@@ -5317,7 +5404,9 @@ export default function GameCanvas() {
       };
     });
 
-    const spawnersLeftCount = reconstructedSpawners.filter(s => (s.hp ?? 0) > 0).length;
+    const spawnersLeftCount = isMemorySave
+      ? countRemainingCoreSpawners(reconstructedSpawners)
+      : reconstructedSpawners.filter(s => (s.hp ?? 0) > 0).length;
     const reconstructedChain: ChainState = isMemorySave
       ? {
           target: normalizedRawChain.target ? { ...normalizedRawChain.target } : null,
@@ -6220,6 +6309,9 @@ export default function GameCanvas() {
       nextSpawnAt: state.memoryMode
         ? resetTime + MEMORY_ARENA_CONFIG.spawner.spawnStaggerMs * (index + 1)
         : undefined,
+      nextReplicationAt: state.memoryMode
+        ? resetTime + MEMORY_ARENA_CONFIG.spawner.replicationIntervalMs + MEMORY_ARENA_CONFIG.spawner.replicationStaggerMs * index
+        : undefined,
       spawnBag: state.memoryMode ? createShuffledShapeBag() : undefined,
     }));
     state.chain = createInitialChainState();
@@ -6245,7 +6337,10 @@ export default function GameCanvas() {
     releaseAllInputs();
 
     const uiHardMode = isMultiplayer ? (selectedGameMode !== 'normal') : isHardMode;
-    const newUi = { status: 'PLAYING' as const, score: 0, deviceType: dType, activeTool: 'special' as const, blocks: 50, spawnersLeft: state.spawners.length, mapId: selectedMapId, hardMode: uiHardMode, gameMode: selectedGameMode, hp: state.player.hp, maxHp: state.player.maxHp, level: state.chain.level, chainProgress: state.chain.progress, ownedAbilities: { ...state.abilityOwnership }, buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 } };
+    const objectiveSpawnersLeft = state.memoryMode
+      ? countRemainingCoreSpawners(state.spawners)
+      : state.spawners.length;
+    const newUi = { status: 'PLAYING' as const, score: 0, deviceType: dType, activeTool: 'special' as const, blocks: 50, spawnersLeft: objectiveSpawnersLeft, mapId: selectedMapId, hardMode: uiHardMode, gameMode: selectedGameMode, hp: state.player.hp, maxHp: state.player.maxHp, level: state.chain.level, chainProgress: state.chain.progress, ownedAbilities: { ...state.abilityOwnership }, buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 } };
     uiRef.current = newUi;
     setUiState(newUi);
 
@@ -6438,6 +6533,7 @@ export default function GameCanvas() {
         ...s,
         hp: s.hp,
         nextSpawnAt: resetTime + MEMORY_ARENA_CONFIG.spawner.spawnStaggerMs * (index + 1),
+        nextReplicationAt: resetTime + MEMORY_ARENA_CONFIG.spawner.replicationIntervalMs + MEMORY_ARENA_CONFIG.spawner.replicationStaggerMs * index,
         spawnBag: createShuffledShapeBag(),
       }));
       state.nextEntityId = 1;
@@ -6506,7 +6602,7 @@ export default function GameCanvas() {
         deviceType: dType,
         activeTool: 'special' as const,
         blocks: 50,
-        spawnersLeft: state.spawners.length,
+        spawnersLeft: countRemainingCoreSpawners(state.spawners),
         mapId: selectedMapId,
         hardMode: isHardMode,
         gameMode: selectedGameMode,
@@ -9629,6 +9725,28 @@ export default function GameCanvas() {
           });
         };
 
+        const damageMemoryReplicaSpawner = (spawner: MemorySpawner, damage: number): boolean => {
+          if (!state.memoryMode || spawner.isCore || !spawner.factionColor || damage <= 0) return false;
+          spawner.hp = Math.max(0, spawner.hp - damage);
+          const color = ENEMY_COLOR_HEX[spawner.factionColor];
+          spawnParticles(spawner.x, spawner.y, color, spawner.hp <= 0 ? 45 : 8);
+          if (spawner.hp <= 0) {
+            const spawnerIndex = state.spawners.indexOf(spawner);
+            if (spawnerIndex >= 0) state.spawners.splice(spawnerIndex, 1);
+            state.shockwaves.push({
+              x: spawner.x,
+              y: spawner.y,
+              color,
+              maxRadius: 130,
+              age: 0,
+              maxAge: 0.4,
+              thickness: 12,
+            });
+            state.shake = Math.max(state.shake, 12);
+          }
+          return true;
+        };
+
         const maybeSpawnAbilityDrop = (enemy: MemoryEnemy, credit: AbilityKillCredit) => {
           if (!state.memoryMode || !enemy.factionColor) return;
           const result = registerAbilityDropKill({
@@ -10365,6 +10483,77 @@ export default function GameCanvas() {
 
 
           if (state.memoryMode) {
+            const replicationParents = [...state.spawners] as MemorySpawner[];
+            for (const parent of replicationParents) {
+              if (!parent.factionColor || currentTime < (parent.nextReplicationAt ?? Infinity)) continue;
+              parent.nextReplicationAt = currentTime + MEMORY_ARENA_CONFIG.spawner.replicationIntervalMs;
+              if (state.spawners.length >= MEMORY_ARENA_CONFIG.spawner.maximumLivingSpawners) continue;
+
+              const replicaRadius = MEMORY_ARENA_CONFIG.spawner.replicaRadius;
+              const angleOffset = ((parent.x * 0.017 + parent.y * 0.031) % (Math.PI * 2));
+              const replicaPosition = findNearestSpawnerReplicationPosition(
+                { x: parent.x, y: parent.y },
+                (candidateX, candidateY) => {
+                  if (
+                    candidateX < replicaRadius + MEMORY_ARENA_CONFIG.spawner.replicationPlacementPadding ||
+                    candidateX > MAP_WIDTH - replicaRadius - MEMORY_ARENA_CONFIG.spawner.replicationPlacementPadding ||
+                    candidateY < replicaRadius + MEMORY_ARENA_CONFIG.spawner.replicationPlacementPadding ||
+                    candidateY > MAP_HEIGHT - replicaRadius - MEMORY_ARENA_CONFIG.spawner.replicationPlacementPadding
+                  ) return false;
+                  if (activeWalls.some(wall => circleOverlapsWall(
+                    candidateX,
+                    candidateY,
+                    replicaRadius + MEMORY_ARENA_CONFIG.spawner.replicationPlacementPadding,
+                    wall,
+                  ))) return false;
+                  if (state.spawners.some(other => (
+                    Math.hypot(candidateX - other.x, candidateY - other.y) <
+                    MEMORY_ARENA_CONFIG.spawner.replicationStartDistance
+                  ))) return false;
+                  if (Math.hypot(candidateX - state.player.x, candidateY - state.player.y) <
+                      replicaRadius + state.player.radius + MEMORY_ARENA_CONFIG.spawner.replicationPlayerClearance) return false;
+                  return !state.blocks.some(block => {
+                    const halfSize = block.size / 2;
+                    const closestX = Math.max(block.x - halfSize, Math.min(candidateX, block.x + halfSize));
+                    const closestY = Math.max(block.y - halfSize, Math.min(candidateY, block.y + halfSize));
+                    return Math.hypot(candidateX - closestX, candidateY - closestY) <
+                      replicaRadius + MEMORY_ARENA_CONFIG.spawner.replicationPlacementPadding;
+                  });
+                },
+                angleOffset,
+              );
+
+              if (!replicaPosition) {
+                parent.nextReplicationAt = currentTime + MEMORY_ARENA_CONFIG.spawner.replicationRetryMs;
+                continue;
+              }
+
+              const replica: MemorySpawner = {
+                x: replicaPosition.x,
+                y: replicaPosition.y,
+                radius: replicaRadius,
+                hp: MEMORY_ARENA_CONFIG.spawner.replicaHp,
+                maxHp: MEMORY_ARENA_CONFIG.spawner.replicaHp,
+                factionColor: parent.factionColor,
+                isCore: false,
+                nextSpawnAt: currentTime + MEMORY_ARENA_CONFIG.spawner.spawnIntervalMs,
+                nextReplicationAt: currentTime + MEMORY_ARENA_CONFIG.spawner.replicationIntervalMs,
+                spawnBag: createShuffledShapeBag(),
+              };
+              state.spawners.push(replica);
+              const replicaColor = ENEMY_COLOR_HEX[parent.factionColor];
+              spawnParticles(replica.x, replica.y, replicaColor, 28);
+              state.shockwaves.push({
+                x: replica.x,
+                y: replica.y,
+                color: replicaColor,
+                maxRadius: 100,
+                age: 0,
+                maxAge: 0.4,
+                thickness: 8,
+              });
+            }
+
             if (state.enemies.length < MEMORY_ARENA_CONFIG.spawner.livingEnemyCap) {
               for (const spawner of state.spawners) {
                 if (!spawner.factionColor || currentTime < (spawner.nextSpawnAt ?? Infinity)) continue;
@@ -10574,7 +10763,7 @@ export default function GameCanvas() {
             const raid = state.factionRaids[faction];
             const members = state.enemies.filter(enemy => !enemy.isPlayerAlly && enemy.factionColor === faction);
             const targetSpawner = raid.targetFactionColor
-              ? state.spawners.find(spawner => spawner.factionColor === raid.targetFactionColor)
+              ? state.spawners.find(spawner => !spawner.isCore && spawner.factionColor === raid.targetFactionColor)
               : undefined;
             const finishRaid = () => {
               raid.phase = 'cooldown';
@@ -10584,7 +10773,7 @@ export default function GameCanvas() {
 
             if (raid.phase === 'idle' && members.length >= MEMORY_ARENA_CONFIG.raids.armySize) {
               const possibleTargets = state.spawners.filter(spawner =>
-                spawner.factionColor && areEnemyFactionsHostile(faction, spawner.factionColor)
+                canEnemyFactionDamageSpawner(faction, spawner)
               );
               const selectedTarget = possibleTargets[Math.floor(Math.random() * possibleTargets.length)];
               if (selectedTarget?.factionColor) {
@@ -10683,14 +10872,16 @@ export default function GameCanvas() {
             const raid = isPlayerAlly ? undefined : state.factionRaids[enemy.factionColor];
             const raidIsActive = Boolean(raid && (raid.phase === 'marching' || raid.phase === 'sieging'));
             const raidTargetSpawner = raidIsActive && raid?.targetFactionColor
-              ? state.spawners.find(spawner => spawner.factionColor === raid.targetFactionColor)
+              ? state.spawners.find(spawner => !spawner.isCore && spawner.factionColor === raid.targetFactionColor)
               : undefined;
             const formationOffset = getRaidFormationOffset(enemy.id ?? `${enemy.factionColor}-${i}`);
             const raidDestination = raidTargetSpawner
-              ? {
-                  x: raidTargetSpawner.x + formationOffset.x,
-                  y: raidTargetSpawner.y + formationOffset.y,
-                }
+              ? (raid?.phase === 'sieging'
+                  ? { x: raidTargetSpawner.x, y: raidTargetSpawner.y }
+                  : {
+                      x: raidTargetSpawner.x + formationOffset.x,
+                      y: raidTargetSpawner.y + formationOffset.y,
+                    })
               : null;
             let nearestRaidCombatDistance = Infinity;
 
@@ -10699,7 +10890,7 @@ export default function GameCanvas() {
                 targetX = raidDestination.x;
                 targetY = raidDestination.y;
                 distanceToTarget = Math.hypot(targetX - enemy.x, targetY - enemy.y);
-                targetIsCombatant = false;
+                targetIsCombatant = raid?.phase === 'sieging';
 
                 if (distanceToPlayer <= MEMORY_ARENA_CONFIG.raids.engagementRange) {
                   targetX = state.player.x;
@@ -10938,6 +11129,26 @@ export default function GameCanvas() {
                         : ENEMY_COLOR_HEX[candidate.factionColor];
                       spawnParticles(candidate.x, candidate.y, defeatedColor, 18);
                       state.shockwaves.push({ x: candidate.x, y: candidate.y, color: defeatedColor, maxRadius: 55, age: 0, maxAge: 0.2, thickness: 5 });
+                    }
+                  }
+                  if (!isPlayerAlly) {
+                    const replicaTargets = [...state.spawners];
+                    for (const spawner of replicaTargets) {
+                      if (
+                        !canEnemyFactionDamageSpawner(enemy.factionColor, spawner)
+                      ) continue;
+                      if (segmentVersusCircle(
+                        previousX,
+                        previousY,
+                        enemy.x,
+                        enemy.y,
+                        spawner.x,
+                        spawner.y,
+                        enemy.radius + spawner.radius,
+                      )) {
+                        damageMemoryReplicaSpawner(spawner, MEMORY_ARENA_CONFIG.spawner.replicaHp);
+                        break;
+                      }
                     }
                   }
                 }
@@ -12674,6 +12885,32 @@ export default function GameCanvas() {
             }
           }
 
+          // Faction projectiles can damage hostile replicated spawners, but never cores.
+          if (
+            !bulletDestroyed &&
+            state.memoryMode &&
+            !bullet.isPlayer &&
+            !bullet.isPlayerAlly &&
+            bullet.factionColor
+          ) {
+            const replicaTargets = [...state.spawners];
+            for (const spawner of replicaTargets) {
+              if (
+                !canEnemyFactionDamageSpawner(bullet.factionColor, spawner)
+              ) continue;
+              const dx = spawner.x - bullet.x;
+              const dy = spawner.y - bullet.y;
+              if (dx * dx + dy * dy < (spawner.radius + bullet.radius) ** 2) {
+                damageMemoryReplicaSpawner(
+                  spawner,
+                  bullet.damage ?? MEMORY_ARENA_CONFIG.circle.bulletDamage,
+                );
+                bulletDestroyed = true;
+                break;
+              }
+            }
+          }
+
           // Check hit Spawners (Stationary targets - hit by any player bullet)
           if (!bulletDestroyed && bullet.isPlayer && !bullet.isNeutral) {
             for (let s = state.spawners.length - 1; s >= 0; s--) {
@@ -12703,7 +12940,7 @@ export default function GameCanvas() {
                 bulletDestroyed = true;
 
                 if (state.gameMode !== 'impossible' && spawner.hp <= 0) {
-                  const destroyedSpawner = { x: spawner.x, y: spawner.y, radius: spawner.radius };
+                  const destroyedSpawner = { x: spawner.x, y: spawner.y, radius: spawner.radius, isCore: spawner.isCore };
                   const spawnerColor = spawner.factionColor
                     ? ENEMY_COLOR_HEX[spawner.factionColor]
                     : (state.memoryMode ? PLAYER_COLOR_HEX : (state.hardMode ? '#ff3300' : '#ff00ff'));
@@ -12711,11 +12948,16 @@ export default function GameCanvas() {
                   state.shockwaves.push({ x: spawner.x, y: spawner.y, color: spawnerColor, maxRadius: 200, age: 0, maxAge: 0.5, thickness: 20 });
                   state.shake = 30;
                   state.spawners.splice(s, 1);
+                  const objectiveSpawnersLeft = state.memoryMode
+                    ? countRemainingCoreSpawners(state.spawners)
+                    : state.spawners.length;
                   if (state.tutorial.active) {
                     state.tutorial.active = false;
                   }
-                  triggerSpawnerPulse();
-                  handleSpawnerDestroyed(destroyedSpawner);
+                  if (!state.memoryMode || spawner.isCore) {
+                    triggerSpawnerPulse();
+                    handleSpawnerDestroyed(destroyedSpawner);
+                  }
                   // Force a broadcast immediately of the updated state
                   state.forceBroadcast = true;
 
@@ -12733,12 +12975,12 @@ export default function GameCanvas() {
                     points_awarded: pts,
                   });
 
-                  const isSinglePlayerVictory = state.spawners.length === 0 && !mpRef.current.roomId;
+                  const isSinglePlayerVictory = objectiveSpawnersLeft === 0 && !mpRef.current.roomId;
                   if (isSinglePlayerVictory) {
                     triggerEndPresentation({
                       outcome: 'victory',
                       causeCode: 'spawner_destroyed',
-                      label: 'ALL SPAWNERS DESTROYED',
+                      label: state.memoryMode ? 'ALL CORES DESTROYED' : 'ALL SPAWNERS DESTROYED',
                       impactPos: { x: spawner.x, y: spawner.y },
                       markerColor: '#00f0ff',
                       startTimestamp: performance.now(),
@@ -12749,7 +12991,7 @@ export default function GameCanvas() {
                     setUiState(prev => {
                       const newScore = prev.score + pts;
                       let newBlocks = prev.blocks + 3; // Bonus blocks
-                      uiRef.current = { ...prev, score: newScore, blocks: newBlocks, spawnersLeft: state.spawners.length };
+                      uiRef.current = { ...prev, score: newScore, blocks: newBlocks, spawnersLeft: objectiveSpawnersLeft };
                       if (isSinglePlayerVictory) {
                         uiRef.current.status = 'VICTORY';
                       }
@@ -12760,7 +13002,7 @@ export default function GameCanvas() {
                       state.multiplayerPlayers[bOwner].score = (state.multiplayerPlayers[bOwner].score || 0) + pts;
                     }
                     setUiState(prev => {
-                      uiRef.current = { ...prev, spawnersLeft: state.spawners.length };
+                      uiRef.current = { ...prev, spawnersLeft: objectiveSpawnersLeft };
                       if (isSinglePlayerVictory) {
                         uiRef.current.status = 'VICTORY';
                       }
@@ -13217,7 +13459,8 @@ export default function GameCanvas() {
         ctx.save();
 
         // Outer glow/pulse gets faster in Hard Mode as remaining spawners decrease
-        const pulse = Math.sin(worldPhaseTime / (200 / spawnerSpeedScale)) * 5;
+        const isMemoryReplica = state.memoryMode && spawner.isCore === false;
+        const pulse = Math.sin(worldPhaseTime / (200 / spawnerSpeedScale)) * (isMemoryReplica ? 2.5 : 5);
         const glowColor = spawner.factionColor
           ? ENEMY_COLOR_HEX[spawner.factionColor]
           : (state.memoryMode ? PLAYER_COLOR_HEX : (state.hardMode ? '#ff3300' : '#ff00ff'));
@@ -13226,7 +13469,7 @@ export default function GameCanvas() {
           : (state.hardMode ? 'rgba(255, 51, 0, 0.15)' : 'rgba(255, 0, 255, 0.15)');
         ctx.fillStyle = fillGlow;
         ctx.shadowColor = glowColor;
-        ctx.shadowBlur = 20;
+        ctx.shadowBlur = isMemoryReplica ? 10 : 20;
         ctx.beginPath();
         ctx.arc(spawner.x, spawner.y, spawner.radius * 1.8 + pulse, 0, Math.PI * 2);
         ctx.fill();
@@ -13236,7 +13479,7 @@ export default function GameCanvas() {
         ctx.shadowBlur = 10;
         ctx.fillStyle = isImpossibleMode ? '#AEB4BE' : (spawner.factionColor ? '#090d16' : (state.hardMode ? '#2a0500' : '#1a001a'));
         ctx.strokeStyle = isImpossibleMode ? '#AEB4BE' : glowColor;
-        ctx.lineWidth = 3;
+        ctx.lineWidth = isMemoryReplica ? 2 : 3;
         ctx.beginPath();
         const hexRot = worldPhaseTime / (1500 / spawnerSpeedScale);
         for (let i = 0; i < 6; i++) {
@@ -13254,7 +13497,7 @@ export default function GameCanvas() {
         const corePulse = Math.sin(worldPhaseTime / (150 / spawnerSpeedScale)) * 3;
         ctx.fillStyle = glowColor;
         ctx.beginPath();
-        ctx.arc(spawner.x, spawner.y, spawner.radius * 0.4 + corePulse, 0, Math.PI * 2);
+        ctx.arc(spawner.x, spawner.y, spawner.radius * (isMemoryReplica ? 0.28 : 0.4) + corePulse, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.restore();
@@ -14227,7 +14470,9 @@ export default function GameCanvas() {
         worldTargetY: number | null,
         targetRadius: number,
         showPointer: boolean,
-        alpha: number
+        alpha: number,
+        accentColorOverride?: string,
+        textColorOverride?: string,
       ) => {
         ctx.save();
         ctx.globalAlpha = alpha;
@@ -14238,7 +14483,7 @@ export default function GameCanvas() {
         const w = textW + padX * 2;
 
         const glowPulse = Math.sin(worldPhaseTime * Math.PI * 2 / 2200) * 0.5 + 0.5;
-        const accentColor = state.hardMode ? '#ff3300' : '#D946EF';
+        const accentColor = accentColorOverride ?? (state.hardMode ? '#ff3300' : '#D946EF');
 
         let tagX = canvas.width / 2;
         let tagY = 100 + h / 2;
@@ -14289,7 +14534,7 @@ export default function GameCanvas() {
         }
 
         ctx.shadowBlur = 0;
-        ctx.fillStyle = '#F3E8FF';
+        ctx.fillStyle = textColorOverride ?? '#F3E8FF';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(text, 0, 1);
@@ -14304,6 +14549,23 @@ export default function GameCanvas() {
 
         if (spawner) {
             drawObjectiveTag("DESTROY SPAWNER", spawner.x, spawner.y, spawner.radius, true, 1.0);
+        }
+      }
+
+      if (uiRef.current.status === 'PLAYING' && presentationStageRef.current === 'idle' && state.memoryMode) {
+        for (const core of state.spawners) {
+          if (!core.isCore || !core.factionColor || !isSpawnerVisible(core, state.camera, canvas.width, canvas.height)) continue;
+          const coreColor = ENEMY_COLOR_HEX[core.factionColor];
+          drawObjectiveTag(
+            "DESTROY SPAWNER",
+            core.x,
+            core.y,
+            core.radius,
+            true,
+            1,
+            coreColor,
+            coreColor,
+          );
         }
       }
 
@@ -14378,7 +14640,9 @@ export default function GameCanvas() {
         if (!isNormalMode) {
           spawnerPointerAnimRef.current = null;
         } else {
-          const livingSpawners = state.spawners.filter(s => s.hp === undefined || s.hp > 0);
+          const livingSpawners = state.spawners.filter(s => (
+            (s.hp === undefined || s.hp > 0) && (!state.memoryMode || s.isCore)
+          ));
           const canvasW = canvas.width;
           const canvasH = canvas.height;
 
@@ -16311,7 +16575,7 @@ export default function GameCanvas() {
             >
               <div>FINAL SCORE: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.score}</span></div>
               <div className="hidden sm:block w-px h-6 bg-[#00f0ff]/30"></div>
-              <div>SPAWNERS LEFT: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.spawnersLeft}/{(mpState.roomId ? (MAPS[uiState.mapId] || MAPS.medium) : (MEMORY_MAPS[uiState.mapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID])).spawners.length}</span></div>
+              <div>CORES LEFT: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.spawnersLeft}/{(MEMORY_MAPS[uiState.mapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID]).spawners.length}</span></div>
             </motion.div>
 
             <motion.div
@@ -16379,7 +16643,7 @@ export default function GameCanvas() {
               className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-8 text-xs sm:text-sm font-mono text-red-200/80 mb-4 sm:mb-6 md:mb-10 uppercase tracking-widest border-t border-b border-red-500/30 py-3 sm:py-6"
             >
               <div>FINAL SCORE: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.score}</span></div>
-              <div>SPAWNERS LEFT: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.spawnersLeft}/{(mpState.roomId ? (MAPS[uiState.mapId] || MAPS.medium) : (MEMORY_MAPS[uiState.mapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID])).spawners.length}</span></div>
+              <div>CORES LEFT: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.spawnersLeft}/{(MEMORY_MAPS[uiState.mapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID]).spawners.length}</span></div>
             </motion.div>
 
             <motion.div
@@ -16660,7 +16924,7 @@ export default function GameCanvas() {
               {bannerState.mode === 'single' ? (
                 <div className="flex flex-col items-center z-10">
                   <h1 className="text-2xl sm:text-3xl font-black text-white tracking-wide uppercase leading-tight" style={{ fontFamily: 'var(--font-display, Anton, sans-serif)', textShadow: '0 0 15px rgba(0,240,255,0.5)' }}>
-                    DESTROY ALL {uiState.spawnersLeft} SPAWNERS TO WIN
+                    DESTROY ALL {uiState.spawnersLeft} CORES TO WIN
                   </h1>
                   <p className="text-[#00f0ff]/80 font-mono text-[10px] sm:text-xs mt-3 tracking-widest uppercase py-2 border-t border-b border-[#00f0ff]/20 w-4/5 mx-auto font-black leading-relaxed">
                     SPAWNERS CREATE THE ENEMIES THAT SHOOT AT THE PLAYER

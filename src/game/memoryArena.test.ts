@@ -10,6 +10,7 @@ import {
   areEnemyFactionsHostile,
   applyPlayerDamage,
   collectAbilityPickup,
+  canEnemyFactionDamageSpawner,
   createInitialChainState,
   createEmptyAbilityOwnership,
   createInitialAbilityDropProgress,
@@ -18,6 +19,8 @@ import {
   createMemoryCoreSpawners,
   createShuffledShapeBag,
   createTriangleAiState,
+  countRemainingCoreSpawners,
+  findNearestSpawnerReplicationPosition,
   getSquareVolleyDirections,
   getRaidFormationOffset,
   getTriangleTelegraphVisual,
@@ -392,4 +395,31 @@ test('every available arena has a four-faction Memory core layout', () => {
     assert.equal(indices.length, 4);
     assert.equal(new Set(indices).size, 4);
   }
+});
+
+test('core objective counting ignores replicated spawners', () => {
+  assert.equal(countRemainingCoreSpawners([
+    { isCore: true, hp: 100 },
+    { isCore: true, hp: 0 },
+    { isCore: false, hp: 60 },
+    { hp: 60 },
+  ]), 1);
+});
+
+test('enemy factions can damage only hostile replicated spawners', () => {
+  assert.equal(canEnemyFactionDamageSpawner('red', { isCore: true, factionColor: 'blue' }), false);
+  assert.equal(canEnemyFactionDamageSpawner('red', { isCore: false, factionColor: 'red' }), false);
+  assert.equal(canEnemyFactionDamageSpawner('red', { isCore: false, factionColor: 'blue' }), true);
+});
+
+test('spawner replication chooses the nearest valid candidate ring', () => {
+  const startDistance = MEMORY_ARENA_CONFIG.spawner.replicationStartDistance;
+  const searchStep = MEMORY_ARENA_CONFIG.spawner.replicationSearchStep;
+  const position = findNearestSpawnerReplicationPosition(
+    { x: 1000, y: 1000 },
+    (x, y) => Math.hypot(x - 1000, y - 1000) >= startDistance + searchStep - 0.01,
+  );
+  assert.ok(position);
+  assert.ok(Math.abs(Math.hypot(position.x - 1000, position.y - 1000) - (startDistance + searchStep)) < 0.01);
+  assert.equal(findNearestSpawnerReplicationPosition({ x: 0, y: 0 }, () => false), null);
 });
