@@ -48,12 +48,15 @@ import {
   ABILITY_BY_FACTION,
   ENEMY_COLOR_HEX,
   ENEMY_FACTIONS,
+  FACTION_EMERGENCY_ABILITY_BY_FACTION,
   MEMORY_ARENA_CONFIG,
   MEMORY_ARENA_PALETTE,
   MEMORY_MAP_CORE_INDICES,
   PLAYER_COLOR_HEX,
   PLAYER_UPGRADE_STATS,
   advanceTriangleAi,
+  advanceFactionEmergencyState,
+  addFactionEmergencyPressure,
   applyPlayerDamage,
   areEnemyFactionsHostile,
   canEnemyFactionDamageSpawner,
@@ -63,6 +66,7 @@ import {
   createFullAbilityOwnership,
   createInitialAbilityDropProgress,
   createInitialFactionRaidStates,
+  createInitialFactionEmergencyStates,
   createInitialPlayerUpgradeRanks,
   createMemoryCoreSpawners,
   createShuffledShapeBag,
@@ -81,6 +85,7 @@ import {
   isValidAbilityDropProgress,
   isValidAbilityOwnership,
   isValidFactionRaidStates,
+  isValidFactionEmergencyStates,
   isValidPlayerUpgradeRanks,
   markTrianglePlayerHit,
   regeneratePlayerHealth,
@@ -96,6 +101,7 @@ import {
   type EnemyFactionColor,
   type EnemyShape,
   type FactionRaidStates,
+  type FactionEmergencyStates,
   type PlayerUpgradeRanks,
   type TriangleAiState,
 } from '../game/memoryArena';
@@ -230,7 +236,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 5;
+const SAVE_VERSION = 6;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -3635,6 +3641,7 @@ export default function GameCanvas() {
     chain: createInitialChainState() as ChainState,
     playerUpgradeRanks: createInitialPlayerUpgradeRanks() as PlayerUpgradeRanks,
     factionRaids: createInitialFactionRaidStates() as FactionRaidStates,
+    factionEmergencies: createInitialFactionEmergencyStates() as FactionEmergencyStates,
     tutorial: { active: false, spawnerIndex: null as number | null, enemySpawned: false, timer: 0 },
   });
 
@@ -4257,6 +4264,13 @@ export default function GameCanvas() {
       }
     }
 
+    if (state.factionEmergencies) {
+      for (const faction of ENEMY_FACTIONS) {
+        state.factionEmergencies[faction].phaseStartedAt += pauseDuration;
+        state.factionEmergencies[faction].cooldownUntil += pauseDuration;
+      }
+    }
+
     if (state.enemies) {
       for (const enemy of state.enemies) {
         enemy.lastShoot += pauseDuration;
@@ -4460,6 +4474,10 @@ export default function GameCanvas() {
       factionRaids: Object.fromEntries(ENEMY_FACTIONS.map(faction => [
         faction,
         { ...state.factionRaids[faction] },
+      ])),
+      factionEmergencies: Object.fromEntries(ENEMY_FACTIONS.map(faction => [
+        faction,
+        { ...state.factionEmergencies[faction] },
       ])),
       tutorial: { active: false, spawnerIndex: null, enemySpawned: false, timer: 0 },
     };
@@ -4672,6 +4690,9 @@ export default function GameCanvas() {
         throw new Error("INVALID SAVE FILE");
       }
       if (rawState.factionRaids !== undefined && !isValidFactionRaidStates(rawState.factionRaids)) {
+        throw new Error("INVALID SAVE FILE");
+      }
+      if (version >= 6 && !isValidFactionEmergencyStates(rawState.factionEmergencies)) {
         throw new Error("INVALID SAVE FILE");
       }
       if (!isBoundedNum(rawPlayer.maxHp, 1, 1_000_000_000) ||
@@ -5426,6 +5447,16 @@ export default function GameCanvas() {
           },
         ])) as FactionRaidStates
       : createInitialFactionRaidStates(loadNow);
+    const reconstructedFactionEmergencies: FactionEmergencyStates = isMemorySave && version >= 6
+      ? Object.fromEntries(Object.entries(rawState.factionEmergencies).map(([faction, emergency]) => [
+          faction,
+          {
+            ...(emergency as FactionEmergencyStates[EnemyFactionColor]),
+            phaseStartedAt: adjustTime((emergency as FactionEmergencyStates[EnemyFactionColor]).phaseStartedAt),
+            cooldownUntil: adjustTime((emergency as FactionEmergencyStates[EnemyFactionColor]).cooldownUntil),
+          },
+        ])) as FactionEmergencyStates
+      : createInitialFactionEmergencyStates(loadNow);
 
     let specialCooldown = 0;
     if (reconstructedDash.active) {
@@ -5536,6 +5567,7 @@ export default function GameCanvas() {
       chain: reconstructedChain,
       playerUpgradeRanks: reconstructedPlayerUpgradeRanks,
       factionRaids: reconstructedFactionRaids,
+      factionEmergencies: reconstructedFactionEmergencies,
       tutorial: { active: false, spawnerIndex: null, enemySpawned: false, timer: 0 },
     };
 
@@ -6316,6 +6348,7 @@ export default function GameCanvas() {
     }));
     state.chain = createInitialChainState();
     state.factionRaids = createInitialFactionRaidStates(resetTime);
+    state.factionEmergencies = createInitialFactionEmergencyStates(resetTime);
     if (state.memoryMode) {
       playerProfileRef.current = { ...playerProfileRef.current, colorIdx: 0 };
       setPlayerProfile(prev => ({ ...prev, colorIdx: 0 }));
@@ -6529,6 +6562,7 @@ export default function GameCanvas() {
       state.memoryMode = true;
       state.chain = createInitialChainState();
       state.factionRaids = createInitialFactionRaidStates(resetTime);
+      state.factionEmergencies = createInitialFactionEmergencyStates(resetTime);
       state.spawners = mapDef.spawners.map((s: any, index: number) => ({
         ...s,
         hp: s.hp,
@@ -9731,6 +9765,10 @@ export default function GameCanvas() {
           const color = ENEMY_COLOR_HEX[spawner.factionColor];
           spawnParticles(spawner.x, spawner.y, color, spawner.hp <= 0 ? 45 : 8);
           if (spawner.hp <= 0) {
+            state.factionEmergencies[spawner.factionColor] = addFactionEmergencyPressure(
+              state.factionEmergencies[spawner.factionColor],
+              MEMORY_ARENA_CONFIG.factionEmergency.replicaLossPressure,
+            );
             const spawnerIndex = state.spawners.indexOf(spawner);
             if (spawnerIndex >= 0) state.spawners.splice(spawnerIndex, 1);
             state.shockwaves.push({
@@ -10757,6 +10795,93 @@ export default function GameCanvas() {
 
         const isAuthoritativeMultiplayerSimulation =
           Boolean(mpRef.current.roomId && mpRef.current.isHost);
+
+        if (state.memoryMode) {
+          const emergencyConfig = MEMORY_ARENA_CONFIG.factionEmergency;
+          for (const faction of ENEMY_FACTIONS) {
+            const core = state.spawners.find(spawner => (
+              spawner.isCore && spawner.factionColor === faction && spawner.hp > 0
+            ));
+            const nearbyEnemies = core
+              ? state.enemies.filter(enemy => (
+                  Math.hypot(enemy.x - core.x, enemy.y - core.y) <= emergencyConfig.threatRadius
+                ))
+              : [];
+            const nearbyFriendlies = nearbyEnemies.filter(enemy => (
+              !enemy.isPlayerAlly && enemy.factionColor === faction
+            )).length;
+            const nearbyHostiles = nearbyEnemies.length - nearbyFriendlies;
+            const ability = FACTION_EMERGENCY_ABILITY_BY_FACTION[faction];
+            const transition = advanceFactionEmergencyState(state.factionEmergencies[faction], {
+              now: currentTime,
+              deltaSeconds: dt,
+              nearbyFriendlies,
+              nearbyHostiles,
+              coreAlive: Boolean(core),
+              abilityAvailable: Boolean(core && ability),
+            });
+            state.factionEmergencies[faction] = transition.state;
+
+            if (transition.beganTelegraph && core) {
+              state.shockwaves.push({
+                x: core.x,
+                y: core.y,
+                color: ENEMY_COLOR_HEX[faction],
+                maxRadius: emergencyConfig.redBlastRadius,
+                age: 0,
+                maxAge: emergencyConfig.telegraphMs / 1000,
+                thickness: 5,
+              });
+            }
+
+            if (!transition.detonated || !core || ability !== 'defensiveBlast') continue;
+
+            const blastRadius = emergencyConfig.redBlastRadius;
+            let defeatedEnemies = 0;
+            for (let enemyIndex = state.enemies.length - 1; enemyIndex >= 0; enemyIndex--) {
+              const enemy = state.enemies[enemyIndex];
+              const isFriendly = !enemy.isPlayerAlly && enemy.factionColor === faction;
+              if (isFriendly || Math.hypot(enemy.x - core.x, enemy.y - core.y) > blastRadius) continue;
+              state.enemies.splice(enemyIndex, 1);
+              defeatedEnemies++;
+              const defeatedColor = enemy.isPlayerAlly
+                ? PLAYER_COLOR_HEX
+                : (enemy.factionColor ? ENEMY_COLOR_HEX[enemy.factionColor] : '#ffffff');
+              spawnParticles(enemy.x, enemy.y, defeatedColor, 5);
+            }
+
+            let clearedBullets = 0;
+            for (let bulletIndex = state.bullets.length - 1; bulletIndex >= 0; bulletIndex--) {
+              const bullet = state.bullets[bulletIndex];
+              const isFriendly = !bullet.isPlayer && !bullet.isPlayerAlly && bullet.factionColor === faction;
+              if (isFriendly || Math.hypot(bullet.x - core.x, bullet.y - core.y) > blastRadius) continue;
+              state.bullets.splice(bulletIndex, 1);
+              clearedBullets++;
+            }
+
+            const blastColor = ENEMY_COLOR_HEX[faction];
+            spawnParticles(core.x, core.y, blastColor, Math.min(80, 36 + defeatedEnemies * 3));
+            state.shockwaves.push({
+              x: core.x,
+              y: core.y,
+              color: blastColor,
+              maxRadius: blastRadius,
+              age: 0,
+              maxAge: 0.55,
+              thickness: 24,
+            });
+            state.shockwaves.push({
+              x: core.x,
+              y: core.y,
+              color: '#ffffff',
+              maxRadius: blastRadius * 0.82,
+              age: 0,
+              maxAge: 0.38,
+              thickness: 8,
+            });
+            state.shake = Math.max(state.shake, Math.min(24, 14 + defeatedEnemies + clearedBullets * 0.1));
+          }
+        }
 
         if (state.memoryMode && MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled) {
           for (const faction of ENEMY_FACTIONS) {
@@ -13499,6 +13624,40 @@ export default function GameCanvas() {
         ctx.beginPath();
         ctx.arc(spawner.x, spawner.y, spawner.radius * (isMemoryReplica ? 0.28 : 0.4) + corePulse, 0, Math.PI * 2);
         ctx.fill();
+
+        if (state.memoryMode && spawner.isCore && spawner.factionColor) {
+          const emergency = state.factionEmergencies[spawner.factionColor];
+          if (emergency.phase === 'telegraph') {
+            const config = MEMORY_ARENA_CONFIG.factionEmergency;
+            const progress = Math.max(0, Math.min(1, (
+              currentTime - emergency.phaseStartedAt
+            ) / config.telegraphMs));
+            const warningPulse = 0.55 + Math.sin(worldPhaseTime * 0.035) * 0.2;
+            const outerRadius = config.redBlastRadius * (1 - progress * 0.72);
+            const innerRadius = Math.max(spawner.radius * 1.45, outerRadius - 42);
+
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = warningPulse;
+            ctx.strokeStyle = glowColor;
+            ctx.shadowColor = glowColor;
+            ctx.shadowBlur = 18 + progress * 18;
+            ctx.lineWidth = 5 + progress * 4;
+            ctx.setLineDash([14, 10]);
+            ctx.lineDashOffset = -worldPhaseTime * 0.06;
+            ctx.beginPath();
+            ctx.arc(spawner.x, spawner.y, Math.max(spawner.radius * 1.5, outerRadius), 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.globalAlpha = 0.35 + progress * 0.45;
+            ctx.lineWidth = 3 + progress * 3;
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.arc(spawner.x, spawner.y, innerRadius, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
 
         ctx.restore();
 

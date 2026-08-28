@@ -6,7 +6,9 @@ import {
   ENEMY_SHAPES,
   MEMORY_ARENA_CONFIG,
   MEMORY_MAP_CORE_INDICES,
+  advanceFactionEmergencyState,
   advanceTriangleAi,
+  addFactionEmergencyPressure,
   areEnemyFactionsHostile,
   applyPlayerDamage,
   collectAbilityPickup,
@@ -15,6 +17,7 @@ import {
   createEmptyAbilityOwnership,
   createInitialAbilityDropProgress,
   createInitialFactionRaidStates,
+  createInitialFactionEmergencyStates,
   createInitialPlayerUpgradeRanks,
   createMemoryCoreSpawners,
   createShuffledShapeBag,
@@ -29,6 +32,7 @@ import {
   derivePlayerUpgradeRanks,
   isValidChainState,
   isValidFactionRaidStates,
+  isValidFactionEmergencyStates,
   markTrianglePlayerHit,
   preserveChainOnSpawnerDestroyed,
   regeneratePlayerHealth,
@@ -228,6 +232,83 @@ test('faction raids begin idle and use stable spread-out formation positions', (
   assert.ok(Math.hypot(first.x, first.y) <= MEMORY_ARENA_CONFIG.raids.formationRadiusMax);
   assert.equal(isValidFactionRaidStates(raids), true);
   assert.equal(isValidFactionRaidStates({ ...raids, red: { ...raids.red, phase: 'retreating' } }), false);
+});
+
+test('faction emergency pressure produces one telegraphed blast and then cooldown', () => {
+  const emergencies = createInitialFactionEmergencyStates(1000);
+  const building = advanceFactionEmergencyState(emergencies.red, {
+    now: 3100,
+    deltaSeconds: 2.1,
+    nearbyFriendlies: 0,
+    nearbyHostiles: MEMORY_ARENA_CONFIG.factionEmergency.minimumNearbyHostiles,
+    coreAlive: true,
+    abilityAvailable: true,
+  });
+  assert.equal(building.beganTelegraph, true);
+  assert.equal(building.state.phase, 'telegraph');
+  assert.equal(building.state.pressure, MEMORY_ARENA_CONFIG.factionEmergency.maximumPressure);
+
+  const warning = advanceFactionEmergencyState(building.state, {
+    now: 3100 + MEMORY_ARENA_CONFIG.factionEmergency.telegraphMs - 1,
+    deltaSeconds: 0.016,
+    nearbyFriendlies: 0,
+    nearbyHostiles: 12,
+    coreAlive: true,
+    abilityAvailable: true,
+  });
+  assert.equal(warning.detonated, false);
+  assert.equal(warning.state.phase, 'telegraph');
+
+  const blast = advanceFactionEmergencyState(warning.state, {
+    now: 3100 + MEMORY_ARENA_CONFIG.factionEmergency.telegraphMs,
+    deltaSeconds: 0.016,
+    nearbyFriendlies: 0,
+    nearbyHostiles: 12,
+    coreAlive: true,
+    abilityAvailable: true,
+  });
+  assert.equal(blast.detonated, true);
+  assert.equal(blast.state.phase, 'cooldown');
+  assert.equal(blast.state.pressure, 0);
+
+  const stillCooling = advanceFactionEmergencyState(blast.state, {
+    now: blast.state.cooldownUntil - 1,
+    deltaSeconds: 10,
+    nearbyFriendlies: 0,
+    nearbyHostiles: 12,
+    coreAlive: true,
+    abilityAvailable: true,
+  });
+  assert.equal(stillCooling.detonated, false);
+  assert.equal(stillCooling.state.phase, 'cooldown');
+});
+
+test('replica losses add bounded emergency pressure while safe cores recover', () => {
+  const initial = createInitialFactionEmergencyStates(0).red;
+  const pressured = addFactionEmergencyPressure(
+    initial,
+    MEMORY_ARENA_CONFIG.factionEmergency.replicaLossPressure,
+  );
+  assert.equal(pressured.pressure, MEMORY_ARENA_CONFIG.factionEmergency.replicaLossPressure);
+
+  const clamped = addFactionEmergencyPressure(pressured, 10_000);
+  assert.equal(clamped.pressure, MEMORY_ARENA_CONFIG.factionEmergency.maximumPressure);
+
+  const recovering = advanceFactionEmergencyState(pressured, {
+    now: 1000,
+    deltaSeconds: 1,
+    nearbyFriendlies: 5,
+    nearbyHostiles: 0,
+    coreAlive: true,
+    abilityAvailable: true,
+  });
+  assert.equal(
+    recovering.state.pressure,
+    MEMORY_ARENA_CONFIG.factionEmergency.replicaLossPressure -
+      MEMORY_ARENA_CONFIG.factionEmergency.pressureDecayPerSecond,
+  );
+  assert.equal(isValidFactionEmergencyStates(createInitialFactionEmergencyStates(0)), true);
+  assert.equal(isValidFactionEmergencyStates({ red: { phase: 'idle', pressure: -1 } }), false);
 });
 
 test('enemy AI and colored core state remain serializable data', () => {

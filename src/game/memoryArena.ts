@@ -84,6 +84,17 @@ export const MEMORY_ARENA_CONFIG = {
     formationRadiusMin: 130,
     formationRadiusMax: 210,
   },
+  factionEmergency: {
+    maximumPressure: 100,
+    minimumNearbyHostiles: 4,
+    threatRadius: 420,
+    pressurePerExcessHostilePerSecond: 12,
+    pressureDecayPerSecond: 16,
+    replicaLossPressure: 30,
+    telegraphMs: 1200,
+    cooldownMs: 30000,
+    redBlastRadius: 360,
+  },
   relics: {
     enabled: false,
   },
@@ -469,12 +480,167 @@ export interface FactionRaidState {
 
 export type FactionRaidStates = Record<EnemyFactionColor, FactionRaidState>;
 
+export type FactionEmergencyPhase = 'idle' | 'telegraph' | 'cooldown';
+
+export interface FactionEmergencyState {
+  phase: FactionEmergencyPhase;
+  pressure: number;
+  phaseStartedAt: number;
+  cooldownUntil: number;
+}
+
+export type FactionEmergencyStates = Record<EnemyFactionColor, FactionEmergencyState>;
+
+export interface FactionEmergencyTransition {
+  state: FactionEmergencyState;
+  beganTelegraph: boolean;
+  detonated: boolean;
+}
+
+export const FACTION_EMERGENCY_ABILITY_BY_FACTION = {
+  red: 'defensiveBlast',
+  blue: null,
+  green: null,
+  yellow: null,
+} as const;
+
 export function createInitialFactionRaidStates(now = 0): FactionRaidStates {
   return Object.fromEntries(ENEMY_FACTIONS.map(faction => [faction, {
     phase: 'idle',
     targetFactionColor: null,
     phaseStartedAt: now,
   }])) as FactionRaidStates;
+}
+
+export function createInitialFactionEmergencyStates(now = 0): FactionEmergencyStates {
+  return Object.fromEntries(ENEMY_FACTIONS.map(faction => [faction, {
+    phase: 'idle',
+    pressure: 0,
+    phaseStartedAt: now,
+    cooldownUntil: now,
+  }])) as FactionEmergencyStates;
+}
+
+export function isValidFactionEmergencyStates(value: unknown): value is FactionEmergencyStates {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Partial<Record<EnemyFactionColor, Partial<FactionEmergencyState>>>;
+  return ENEMY_FACTIONS.every(faction => {
+    const state = candidate[faction];
+    return Boolean(
+      state &&
+      ['idle', 'telegraph', 'cooldown'].includes(state.phase ?? '') &&
+      typeof state.pressure === 'number' &&
+      Number.isFinite(state.pressure) &&
+      state.pressure >= 0 &&
+      state.pressure <= MEMORY_ARENA_CONFIG.factionEmergency.maximumPressure &&
+      typeof state.phaseStartedAt === 'number' &&
+      Number.isFinite(state.phaseStartedAt) &&
+      state.phaseStartedAt >= 0 &&
+      typeof state.cooldownUntil === 'number' &&
+      Number.isFinite(state.cooldownUntil) &&
+      state.cooldownUntil >= 0
+    );
+  });
+}
+
+export function addFactionEmergencyPressure(
+  current: FactionEmergencyState,
+  amount: number,
+): FactionEmergencyState {
+  if (current.phase !== 'idle' || amount <= 0) return current;
+  return {
+    ...current,
+    pressure: Math.min(
+      MEMORY_ARENA_CONFIG.factionEmergency.maximumPressure,
+      current.pressure + amount,
+    ),
+  };
+}
+
+export function advanceFactionEmergencyState(
+  current: FactionEmergencyState,
+  input: {
+    now: number;
+    deltaSeconds: number;
+    nearbyFriendlies: number;
+    nearbyHostiles: number;
+    coreAlive: boolean;
+    abilityAvailable: boolean;
+  },
+): FactionEmergencyTransition {
+  const config = MEMORY_ARENA_CONFIG.factionEmergency;
+  if (!input.coreAlive) {
+    return {
+      state: {
+        phase: 'idle',
+        pressure: 0,
+        phaseStartedAt: input.now,
+        cooldownUntil: input.now,
+      },
+      beganTelegraph: false,
+      detonated: false,
+    };
+  }
+
+  if (current.phase === 'telegraph') {
+    if (input.now - current.phaseStartedAt < config.telegraphMs) {
+      return { state: current, beganTelegraph: false, detonated: false };
+    }
+    return {
+      state: {
+        phase: 'cooldown',
+        pressure: 0,
+        phaseStartedAt: input.now,
+        cooldownUntil: input.now + config.cooldownMs,
+      },
+      beganTelegraph: false,
+      detonated: true,
+    };
+  }
+
+  if (current.phase === 'cooldown') {
+    if (input.now < current.cooldownUntil) {
+      return { state: current, beganTelegraph: false, detonated: false };
+    }
+    return {
+      state: {
+        phase: 'idle',
+        pressure: 0,
+        phaseStartedAt: input.now,
+        cooldownUntil: input.now,
+      },
+      beganTelegraph: false,
+      detonated: false,
+    };
+  }
+
+  const safeDeltaSeconds = Math.max(0, input.deltaSeconds);
+  const excessHostiles = input.nearbyHostiles >= config.minimumNearbyHostiles
+    ? Math.max(0, input.nearbyHostiles - input.nearbyFriendlies)
+    : 0;
+  const pressureDelta = excessHostiles > 0
+    ? excessHostiles * config.pressurePerExcessHostilePerSecond * safeDeltaSeconds
+    : -config.pressureDecayPerSecond * safeDeltaSeconds;
+  const pressure = Math.max(0, Math.min(config.maximumPressure, current.pressure + pressureDelta));
+
+  if (input.abilityAvailable && pressure >= config.maximumPressure) {
+    return {
+      state: {
+        phase: 'telegraph',
+        pressure: config.maximumPressure,
+        phaseStartedAt: input.now,
+        cooldownUntil: current.cooldownUntil,
+      },
+      beganTelegraph: true,
+      detonated: false,
+    };
+  }
+
+  return {
+    state: { ...current, pressure },
+    beganTelegraph: false,
+    detonated: false,
+  };
 }
 
 export function isValidFactionRaidStates(value: unknown): value is FactionRaidStates {
