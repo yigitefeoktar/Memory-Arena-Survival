@@ -10257,7 +10257,7 @@ export default function GameCanvas() {
           }
 
           // 2. Collide with Bouncers (state.bouncers)
-          if (uiRef.current.status === 'PLAYING' && !state.player.dash.active && !isOpeningProtectionActiveLocal(currentTime)) {
+          if (!state.memoryMode && uiRef.current.status === 'PLAYING' && !state.player.dash.active && !isOpeningProtectionActiveLocal(currentTime)) {
             for (const b of state.bouncers) {
               const pdx = state.player.x - b.x;
               const pdy = state.player.y - b.y;
@@ -10280,7 +10280,7 @@ export default function GameCanvas() {
           }
 
           // 3. Collide with Spawner Orbiting Special Obstacles (Shield, Kinetic, Singularity, Magma gates, Crystal)
-          if (uiRef.current.status === 'PLAYING' && !state.player.dash.active && !isOpeningProtectionActiveLocal(currentTime)) {
+          if (!state.memoryMode && uiRef.current.status === 'PLAYING' && !state.player.dash.active && !isOpeningProtectionActiveLocal(currentTime)) {
             for (const spawner of state.spawners) {
               if (spawner.specialType) {
                 const collision = getBulletRelicCollision(state.player.x, state.player.y, state.player.radius, spawner, worldPhaseTime);
@@ -10306,7 +10306,7 @@ export default function GameCanvas() {
           }
 
           // 4. Collide with Enemy / Neutral / Player Bullets
-          if (uiRef.current.status === 'PLAYING' && !isOpeningProtectionActiveLocal(currentTime)) {
+          if (!state.memoryMode && uiRef.current.status === 'PLAYING' && !isOpeningProtectionActiveLocal(currentTime)) {
             for (const bullet of state.bullets) {
               let bulletColor = '#ff0066';
               if (bullet.isNeutral) {
@@ -11798,7 +11798,7 @@ export default function GameCanvas() {
           }
 
           // Collision with Player
-          if (!isAuthoritativeMultiplayerSimulation && uiRef.current.status === 'PLAYING') {
+          if (!state.memoryMode && !isAuthoritativeMultiplayerSimulation && uiRef.current.status === 'PLAYING') {
             const pdx = state.player.x - b.x;
             const pdy = state.player.y - b.y;
             if (pdx * pdx + pdy * pdy < (state.player.radius + b.radius) ** 2) {
