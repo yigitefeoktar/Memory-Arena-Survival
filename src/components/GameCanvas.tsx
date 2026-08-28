@@ -81,6 +81,7 @@ import {
   derivePlayerUpgradeRanks,
   isEnemyFactionColor,
   isEnemyShape,
+  isFactionEnemyAbilityId,
   isValidChainState,
   isValidAbilityDropProgress,
   isValidAbilityOwnership,
@@ -100,6 +101,7 @@ import {
   type ChainState,
   type EnemyFactionColor,
   type EnemyShape,
+  type FactionEnemyAbilityId,
   type FactionRaidStates,
   type FactionEmergencyStates,
   type PlayerUpgradeRanks,
@@ -236,7 +238,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 6;
+const SAVE_VERSION = 7;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -1061,6 +1063,25 @@ interface MemoryEnemy {
   dashDy?: number;
   isPlayerAlly?: boolean;
   conversionPullUntil?: number;
+  conversionPullTargetX?: number;
+  conversionPullTargetY?: number;
+  factionAbilityKind?: FactionEnemyAbilityId;
+  factionAbilityActivatesAt?: number;
+  factionAbilityEndsAt?: number;
+  factionAbilityTargetX?: number;
+  factionAbilityTargetY?: number;
+}
+
+interface MemoryBlock {
+  x: number;
+  y: number;
+  size: number;
+  createdAt: number;
+  colorIdx?: number;
+  ownerId?: string;
+  factionColor?: EnemyFactionColor;
+  isFactionWall?: boolean;
+  expiresAt?: number;
 }
 
 interface MemorySpawner {
@@ -1085,6 +1106,14 @@ function areMemoryCombatantsHostile(a: MemoryEnemy, b: MemoryEnemy): boolean {
     b.factionColor &&
     areEnemyFactionsHostile(a.factionColor, b.factionColor)
   );
+}
+
+function clearMemoryEnemyFactionAbility(enemy: MemoryEnemy): void {
+  delete enemy.factionAbilityKind;
+  delete enemy.factionAbilityActivatesAt;
+  delete enemy.factionAbilityEndsAt;
+  delete enemy.factionAbilityTargetX;
+  delete enemy.factionAbilityTargetY;
 }
 
 function clamp(val: number, min: number, max: number) {
@@ -3599,7 +3628,7 @@ export default function GameCanvas() {
       buildReadyAt: number;
     }>,
     forceBroadcast: false,
-    blocks: [] as { x: number; y: number; size: number; createdAt: number, colorIdx?: number, ownerId?: string }[],
+    blocks: [] as MemoryBlock[],
     nextBlockScore: 100,
     bullets: [] as { id?: string; clientShotId?: string; x: number; y: number; dx: number; dy: number; radius: number, isPlayer: boolean, isPlayerAlly?: boolean, bounceCount: number, spawnTime: number, isNeutral: boolean, ownerId?: string, colorIdx?: number, factionColor?: EnemyFactionColor, damage?: number, targetX?: number, targetY?: number, repelMultiplied?: boolean, allowedBlockKeys?: string[], leftBlockKeys?: string[] }[],
     enemies: [] as MemoryEnemy[],
@@ -4256,6 +4285,12 @@ export default function GameCanvas() {
       if (enemy.conversionPullUntil !== undefined) {
         enemy.conversionPullUntil += pauseDuration;
       }
+      if (enemy.factionAbilityActivatesAt !== undefined) {
+        enemy.factionAbilityActivatesAt += pauseDuration;
+      }
+      if (enemy.factionAbilityEndsAt !== undefined) {
+        enemy.factionAbilityEndsAt += pauseDuration;
+      }
     }
 
     if (state.factionRaids) {
@@ -4316,6 +4351,9 @@ export default function GameCanvas() {
       for (const block of state.blocks) {
         if (block.createdAt !== undefined) {
           block.createdAt += pauseDuration;
+        }
+        if (block.expiresAt !== undefined) {
+          block.expiresAt += pauseDuration;
         }
       }
     }
@@ -5141,6 +5179,10 @@ export default function GameCanvas() {
       }
       if (!isBoundedNum(b.size, 1, 500)) throw new Error("INVALID SAVE FILE");
       if (!isValidColorIdx(b.colorIdx)) throw new Error("INVALID SAVE FILE");
+      if (b.factionColor !== undefined && !isEnemyFactionColor(b.factionColor)) throw new Error("INVALID SAVE FILE");
+      if (b.isFactionWall !== undefined && typeof b.isFactionWall !== 'boolean') throw new Error("INVALID SAVE FILE");
+      if (b.expiresAt !== undefined && !isFiniteNum(b.expiresAt)) throw new Error("INVALID SAVE FILE");
+      if (b.isFactionWall && !b.factionColor) throw new Error("INVALID SAVE FILE");
       const createdAt = adjustTime(b.createdAt);
       return {
         x: b.x,
@@ -5148,7 +5190,10 @@ export default function GameCanvas() {
         size: b.size,
         createdAt,
         colorIdx: b.colorIdx,
-        ownerId: 'local',
+        ownerId: b.isFactionWall ? `faction:${b.factionColor}` : 'local',
+        factionColor: b.factionColor,
+        isFactionWall: Boolean(b.isFactionWall),
+        expiresAt: b.expiresAt !== undefined ? adjustTime(b.expiresAt) : undefined,
       };
     });
 
@@ -5258,6 +5303,16 @@ export default function GameCanvas() {
         if (e.conversionPullUntil !== undefined && !isFiniteNum(e.conversionPullUntil)) {
           throw new Error("INVALID SAVE FILE");
         }
+        if (e.conversionPullTargetX !== undefined && !isFiniteNum(e.conversionPullTargetX)) throw new Error("INVALID SAVE FILE");
+        if (e.conversionPullTargetY !== undefined && !isFiniteNum(e.conversionPullTargetY)) throw new Error("INVALID SAVE FILE");
+        if ((e.conversionPullTargetX === undefined) !== (e.conversionPullTargetY === undefined)) throw new Error("INVALID SAVE FILE");
+        if (e.factionAbilityKind !== undefined && !isFactionEnemyAbilityId(e.factionAbilityKind)) throw new Error("INVALID SAVE FILE");
+        if (e.factionAbilityKind !== undefined && (
+          !isFiniteNum(e.factionAbilityActivatesAt) || !isFiniteNum(e.factionAbilityEndsAt)
+        )) throw new Error("INVALID SAVE FILE");
+        if (e.factionAbilityTargetX !== undefined && !isFiniteNum(e.factionAbilityTargetX)) throw new Error("INVALID SAVE FILE");
+        if (e.factionAbilityTargetY !== undefined && !isFiniteNum(e.factionAbilityTargetY)) throw new Error("INVALID SAVE FILE");
+        if ((e.factionAbilityTargetX === undefined) !== (e.factionAbilityTargetY === undefined)) throw new Error("INVALID SAVE FILE");
 
         let triangleAi: TriangleAiState | undefined;
         if (e.shape === 'triangle') {
@@ -5292,6 +5347,17 @@ export default function GameCanvas() {
           conversionPullUntil: e.conversionPullUntil !== undefined
             ? adjustTime(e.conversionPullUntil)
             : undefined,
+          conversionPullTargetX: e.conversionPullTargetX,
+          conversionPullTargetY: e.conversionPullTargetY,
+          factionAbilityKind: e.factionAbilityKind,
+          factionAbilityActivatesAt: e.factionAbilityActivatesAt !== undefined
+            ? adjustTime(e.factionAbilityActivatesAt)
+            : undefined,
+          factionAbilityEndsAt: e.factionAbilityEndsAt !== undefined
+            ? adjustTime(e.factionAbilityEndsAt)
+            : undefined,
+          factionAbilityTargetX: e.factionAbilityTargetX,
+          factionAbilityTargetY: e.factionAbilityTargetY,
         };
       }
 
@@ -10413,6 +10479,10 @@ export default function GameCanvas() {
             const block = state.blocks[b];
             let destroyed = false;
 
+            if (block.expiresAt !== undefined && currentTime >= block.expiresAt) {
+              destroyed = true;
+            }
+
             // Player touching block
             if (STATUS === 'PLAYING') {
               const gridX = Math.round(state.player.x / 40) * 40;
@@ -10439,6 +10509,7 @@ export default function GameCanvas() {
             if (!destroyed) {
               for (let e = 0; e < state.enemies.length; e++) {
                 const enemy = state.enemies[e];
+                if (block.factionColor && !enemy.isPlayerAlly && enemy.factionColor === block.factionColor) continue;
                 const edx = Math.abs(enemy.x - block.x);
                 const edy = Math.abs(enemy.y - block.y);
                 if (edx < block.size / 2 + enemy.radius && edy < block.size / 2 + enemy.radius) {
@@ -10450,7 +10521,8 @@ export default function GameCanvas() {
 
             if (destroyed) {
               const pDef = PLAYER_COLORS[block.colorIdx !== undefined ? block.colorIdx : 0] || PLAYER_COLORS[0];
-              spawnParticles(block.x, block.y, pDef.n, 20);
+              const blockColor = block.factionColor ? ENEMY_COLOR_HEX[block.factionColor] : pDef.n;
+              spawnParticles(block.x, block.y, blockColor, 20);
               state.blocks.splice(b, 1);
             }
           }
@@ -10799,87 +10871,223 @@ export default function GameCanvas() {
         if (state.memoryMode) {
           const emergencyConfig = MEMORY_ARENA_CONFIG.factionEmergency;
           for (const faction of ENEMY_FACTIONS) {
-            const core = state.spawners.find(spawner => (
-              spawner.isCore && spawner.factionColor === faction && spawner.hp > 0
-            ));
-            const nearbyEnemies = core
-              ? state.enemies.filter(enemy => (
-                  Math.hypot(enemy.x - core.x, enemy.y - core.y) <= emergencyConfig.threatRadius
-                ))
-              : [];
-            const nearbyFriendlies = nearbyEnemies.filter(enemy => (
-              !enemy.isPlayerAlly && enemy.factionColor === faction
-            )).length;
-            const nearbyHostiles = nearbyEnemies.length - nearbyFriendlies;
+            const members = state.enemies.filter(enemy => !enemy.isPlayerAlly && enemy.factionColor === faction);
+            const playerAllies = state.enemies.filter(enemy => enemy.isPlayerAlly).length;
+            const largestHostileFaction = Math.max(
+              playerAllies,
+              ...ENEMY_FACTIONS
+                .filter(otherFaction => otherFaction !== faction)
+                .map(otherFaction => state.enemies.filter(enemy => (
+                  !enemy.isPlayerAlly && enemy.factionColor === otherFaction
+                )).length),
+            );
             const ability = FACTION_EMERGENCY_ABILITY_BY_FACTION[faction];
             const transition = advanceFactionEmergencyState(state.factionEmergencies[faction], {
               now: currentTime,
               deltaSeconds: dt,
-              nearbyFriendlies,
-              nearbyHostiles,
-              coreAlive: Boolean(core),
-              abilityAvailable: Boolean(core && ability),
+              nearbyFriendlies: members.length,
+              nearbyHostiles: largestHostileFaction,
+              factionAlive: members.length > 0,
+              abilityAvailable: members.length > 0,
             });
             state.factionEmergencies[faction] = transition.state;
 
-            if (transition.beganTelegraph && core) {
-              state.shockwaves.push({
-                x: core.x,
-                y: core.y,
-                color: ENEMY_COLOR_HEX[faction],
-                maxRadius: emergencyConfig.redBlastRadius,
-                age: 0,
-                maxAge: emergencyConfig.telegraphMs / 1000,
-                thickness: 5,
+            if (transition.beganTelegraph) {
+              let yellowSlots = new Map<MemoryEnemy, { x: number; y: number }>();
+              if (ability === 'buildWall' && members.length > 0) {
+                const centerX = members.reduce((sum, enemy) => sum + enemy.x, 0) / members.length;
+                const centerY = members.reduce((sum, enemy) => sum + enemy.y, 0) / members.length;
+                const hostileCandidates = state.enemies.filter(enemy => areMemoryCombatantsHostile(members[0], enemy));
+                const closestThreat = hostileCandidates.reduce<MemoryEnemy | null>((closest, enemy) => {
+                  if (!closest) return enemy;
+                  return Math.hypot(enemy.x - centerX, enemy.y - centerY) < Math.hypot(closest.x - centerX, closest.y - centerY)
+                    ? enemy
+                    : closest;
+                }, null);
+                const threatX = closestThreat?.x ?? state.player.x;
+                const threatY = closestThreat?.y ?? state.player.y;
+                const threatDistance = Math.max(1, Math.hypot(threatX - centerX, threatY - centerY));
+                const directionX = (threatX - centerX) / threatDistance;
+                const directionY = (threatY - centerY) / threatDistance;
+                const tangentX = -directionY;
+                const tangentY = directionX;
+                const orderedMembers = [...members].sort((first, second) => (
+                  (first.x - centerX) * tangentX + (first.y - centerY) * tangentY -
+                  ((second.x - centerX) * tangentX + (second.y - centerY) * tangentY)
+                ));
+                orderedMembers.forEach((enemy, index) => {
+                  const slotOffset = (index - (orderedMembers.length - 1) / 2) * emergencyConfig.yellowWallSpacing;
+                  yellowSlots.set(enemy, {
+                    x: clamp(
+                      centerX + directionX * emergencyConfig.yellowFormationForwardOffset + tangentX * slotOffset,
+                      ENEMY_RADIUS + 50,
+                      MAP_WIDTH - ENEMY_RADIUS - 50,
+                    ),
+                    y: clamp(
+                      centerY + directionY * emergencyConfig.yellowFormationForwardOffset + tangentY * slotOffset,
+                      ENEMY_RADIUS + 50,
+                      MAP_HEIGHT - ENEMY_RADIUS - 50,
+                    ),
+                  });
+                });
+              }
+
+              for (const enemy of members) {
+                enemy.factionAbilityKind = ability;
+                enemy.factionAbilityActivatesAt = currentTime + emergencyConfig.telegraphMs;
+                enemy.factionAbilityEndsAt = enemy.factionAbilityActivatesAt + (
+                  ability === 'reflectionShield'
+                    ? emergencyConfig.blueShieldDurationMs
+                    : ability === 'conversionPulse'
+                      ? emergencyConfig.greenPullDurationMs
+                      : 0
+                );
+                const yellowSlot = yellowSlots.get(enemy);
+                enemy.factionAbilityTargetX = yellowSlot?.x;
+                enemy.factionAbilityTargetY = yellowSlot?.y;
+                spawnParticles(enemy.x, enemy.y, ENEMY_COLOR_HEX[faction], 4);
+              }
+            }
+
+            if (!transition.detonated) continue;
+            const casters = state.enemies.filter(enemy => (
+              !enemy.isPlayerAlly &&
+              enemy.factionColor === faction &&
+              enemy.factionAbilityKind === ability &&
+              currentTime >= (enemy.factionAbilityActivatesAt ?? Infinity)
+            ));
+
+            if (ability === 'damagePulse') {
+              const defeatedEnemies = new Set<MemoryEnemy>();
+              for (const target of state.enemies) {
+                if (!areMemoryCombatantsHostile(casters[0] ?? target, target)) continue;
+                if (casters.some(caster => Math.hypot(target.x - caster.x, target.y - caster.y) <= emergencyConfig.redPulseRadius)) {
+                  defeatedEnemies.add(target);
+                }
+              }
+              for (const target of defeatedEnemies) {
+                const defeatedColor = target.isPlayerAlly
+                  ? PLAYER_COLOR_HEX
+                  : (target.factionColor ? ENEMY_COLOR_HEX[target.factionColor] : '#ffffff');
+                spawnParticles(target.x, target.y, defeatedColor, 5);
+              }
+              state.enemies = state.enemies.filter(enemy => !defeatedEnemies.has(enemy));
+              state.bullets = state.bullets.filter(bullet => {
+                const isFriendly = !bullet.isPlayer && !bullet.isPlayerAlly && bullet.factionColor === faction;
+                return isFriendly || !casters.some(caster => (
+                  Math.hypot(bullet.x - caster.x, bullet.y - caster.y) <= emergencyConfig.redPulseRadius
+                ));
               });
+              for (const caster of casters) {
+                state.shockwaves.push({
+                  x: caster.x,
+                  y: caster.y,
+                  color: ENEMY_COLOR_HEX[faction],
+                  maxRadius: emergencyConfig.redPulseRadius,
+                  age: 0,
+                  maxAge: 0.34,
+                  thickness: 10,
+                });
+                clearMemoryEnemyFactionAbility(caster);
+              }
+              state.shake = Math.max(state.shake, Math.min(18, 7 + defeatedEnemies.size * 0.5));
+            } else if (ability === 'reflectionShield') {
+              for (const caster of casters) {
+                state.shockwaves.push({
+                  x: caster.x,
+                  y: caster.y,
+                  color: ENEMY_COLOR_HEX[faction],
+                  maxRadius: emergencyConfig.blueShieldRadius,
+                  age: 0,
+                  maxAge: 0.3,
+                  thickness: 7,
+                });
+              }
+            } else if (ability === 'conversionPulse') {
+              const claimedTargets = new Set<MemoryEnemy>();
+              for (const caster of casters) {
+                let closestTarget: MemoryEnemy | null = null;
+                let closestDistance: number = emergencyConfig.greenConversionRadius;
+                for (const candidate of state.enemies) {
+                  if (claimedTargets.has(candidate) || !areMemoryCombatantsHostile(caster, candidate)) continue;
+                  const distance = Math.hypot(candidate.x - caster.x, candidate.y - caster.y);
+                  if (distance <= closestDistance) {
+                    closestDistance = distance;
+                    closestTarget = candidate;
+                  }
+                }
+                if (closestTarget) {
+                  claimedTargets.add(closestTarget);
+                  closestTarget.isPlayerAlly = false;
+                  closestTarget.factionColor = 'green';
+                  closestTarget.conversionPullUntil = currentTime + emergencyConfig.greenPullDurationMs;
+                  closestTarget.conversionPullTargetX = caster.x;
+                  closestTarget.conversionPullTargetY = caster.y;
+                  closestTarget.lastShoot = currentTime;
+                  closestTarget.dashDx = 0;
+                  closestTarget.dashDy = 0;
+                  clearMemoryEnemyFactionAbility(closestTarget);
+                  if (closestTarget.shape === 'triangle') {
+                    closestTarget.triangleAi = createTriangleAiState(currentTime);
+                  }
+                  spawnParticles(closestTarget.x, closestTarget.y, ENEMY_COLOR_HEX.green, 8);
+                }
+              }
+              for (const bullet of state.bullets) {
+                const isGreen = !bullet.isPlayer && !bullet.isPlayerAlly && bullet.factionColor === 'green';
+                if (isGreen || !casters.some(caster => (
+                  Math.hypot(bullet.x - caster.x, bullet.y - caster.y) <= emergencyConfig.greenConversionRadius
+                ))) continue;
+                bullet.isPlayer = false;
+                bullet.isPlayerAlly = false;
+                bullet.isNeutral = false;
+                bullet.ownerId = undefined;
+                bullet.colorIdx = undefined;
+                bullet.factionColor = 'green';
+              }
+              for (const caster of casters) {
+                state.shockwaves.push({
+                  x: caster.x,
+                  y: caster.y,
+                  color: ENEMY_COLOR_HEX.green,
+                  maxRadius: emergencyConfig.greenConversionRadius,
+                  age: 0,
+                  maxAge: 0.45,
+                  thickness: 7,
+                });
+              }
+            } else if (ability === 'buildWall') {
+              for (const caster of casters) {
+                const targetX = caster.factionAbilityTargetX ?? caster.x;
+                const targetY = caster.factionAbilityTargetY ?? caster.y;
+                const gridX = Math.round(targetX / emergencyConfig.yellowWallSpacing) * emergencyConfig.yellowWallSpacing;
+                const gridY = Math.round(targetY / emergencyConfig.yellowWallSpacing) * emergencyConfig.yellowWallSpacing;
+                const halfSize = emergencyConfig.yellowWallSegmentSize / 2;
+                const blockedByWall = activeWalls.some(wall => (
+                  gridX + halfSize > wall.x && gridX - halfSize < wall.x + wall.w &&
+                  gridY + halfSize > wall.y && gridY - halfSize < wall.y + wall.h
+                ));
+                const blockedBySpawner = state.spawners.some(spawner => (
+                  Math.hypot(gridX - spawner.x, gridY - spawner.y) < spawner.radius + halfSize + 8
+                ));
+                const blockedByPlayer = Math.hypot(gridX - state.player.x, gridY - state.player.y) < state.player.radius + halfSize + 12;
+                const occupied = state.blocks.some(block => block.x === gridX && block.y === gridY);
+                if (!blockedByWall && !blockedBySpawner && !blockedByPlayer && !occupied) {
+                  state.blocks.push({
+                    x: gridX,
+                    y: gridY,
+                    size: emergencyConfig.yellowWallSegmentSize,
+                    createdAt: currentTime,
+                    ownerId: 'faction:yellow',
+                    factionColor: 'yellow',
+                    isFactionWall: true,
+                    expiresAt: currentTime + emergencyConfig.yellowWallDurationMs,
+                  });
+                  spawnParticles(gridX, gridY, ENEMY_COLOR_HEX.yellow, 8);
+                }
+                clearMemoryEnemyFactionAbility(caster);
+              }
             }
-
-            if (!transition.detonated || !core || ability !== 'defensiveBlast') continue;
-
-            const blastRadius = emergencyConfig.redBlastRadius;
-            let defeatedEnemies = 0;
-            for (let enemyIndex = state.enemies.length - 1; enemyIndex >= 0; enemyIndex--) {
-              const enemy = state.enemies[enemyIndex];
-              const isFriendly = !enemy.isPlayerAlly && enemy.factionColor === faction;
-              if (isFriendly || Math.hypot(enemy.x - core.x, enemy.y - core.y) > blastRadius) continue;
-              state.enemies.splice(enemyIndex, 1);
-              defeatedEnemies++;
-              const defeatedColor = enemy.isPlayerAlly
-                ? PLAYER_COLOR_HEX
-                : (enemy.factionColor ? ENEMY_COLOR_HEX[enemy.factionColor] : '#ffffff');
-              spawnParticles(enemy.x, enemy.y, defeatedColor, 5);
-            }
-
-            let clearedBullets = 0;
-            for (let bulletIndex = state.bullets.length - 1; bulletIndex >= 0; bulletIndex--) {
-              const bullet = state.bullets[bulletIndex];
-              const isFriendly = !bullet.isPlayer && !bullet.isPlayerAlly && bullet.factionColor === faction;
-              if (isFriendly || Math.hypot(bullet.x - core.x, bullet.y - core.y) > blastRadius) continue;
-              state.bullets.splice(bulletIndex, 1);
-              clearedBullets++;
-            }
-
-            const blastColor = ENEMY_COLOR_HEX[faction];
-            spawnParticles(core.x, core.y, blastColor, Math.min(80, 36 + defeatedEnemies * 3));
-            state.shockwaves.push({
-              x: core.x,
-              y: core.y,
-              color: blastColor,
-              maxRadius: blastRadius,
-              age: 0,
-              maxAge: 0.55,
-              thickness: 24,
-            });
-            state.shockwaves.push({
-              x: core.x,
-              y: core.y,
-              color: '#ffffff',
-              maxRadius: blastRadius * 0.82,
-              age: 0,
-              maxAge: 0.38,
-              thickness: 8,
-            });
-            state.shake = Math.max(state.shake, Math.min(24, 14 + defeatedEnemies + clearedBullets * 0.1));
           }
         }
 
@@ -10963,6 +11171,16 @@ export default function GameCanvas() {
           }
         }
 
+        const activeBlueShieldsForEnemyMovement = state.memoryMode
+          ? state.enemies.filter(enemy => (
+              !enemy.isPlayerAlly &&
+              enemy.factionColor === 'blue' &&
+              enemy.factionAbilityKind === 'reflectionShield' &&
+              currentTime >= (enemy.factionAbilityActivatesAt ?? Infinity) &&
+              currentTime < (enemy.factionAbilityEndsAt ?? 0)
+            ))
+          : [];
+
         // 3. Update Enemies
         const enemiesDefeatedByFactions = new Set<MemoryEnemy>();
         for (let i = state.enemies.length - 1; i >= 0; i--) {
@@ -10976,18 +11194,56 @@ export default function GameCanvas() {
             const distanceToPlayer = Math.hypot(dxToPlayer, dyToPlayer);
             const isPlayerAlly = Boolean(enemy.isPlayerAlly);
 
-            if (isPlayerAlly && currentTime < (enemy.conversionPullUntil ?? 0)) {
-              const stopDistance = state.player.radius + enemy.radius + 32;
-              if (distanceToPlayer > stopDistance) {
-                const pullStep = Math.min(distanceToPlayer - stopDistance, CONVERSION_PULL_SPEED * dt);
-                const pullX = enemy.x + (dxToPlayer / distanceToPlayer) * pullStep;
-                const pullY = enemy.y + (dyToPlayer / distanceToPlayer) * pullStep;
+            if (enemy.factionAbilityKind && currentTime > (enemy.factionAbilityEndsAt ?? 0)) {
+              clearMemoryEnemyFactionAbility(enemy);
+            }
+
+            if (
+              enemy.factionAbilityKind === 'buildWall' &&
+              currentTime < (enemy.factionAbilityActivatesAt ?? 0) &&
+              enemy.factionAbilityTargetX !== undefined &&
+              enemy.factionAbilityTargetY !== undefined
+            ) {
+              const formationDx = enemy.factionAbilityTargetX - enemy.x;
+              const formationDy = enemy.factionAbilityTargetY - enemy.y;
+              const formationDistance = Math.hypot(formationDx, formationDy);
+              if (formationDistance > 3) {
+                const movement = Math.min(
+                  formationDistance,
+                  MEMORY_ARENA_CONFIG.factionEmergency.yellowFormationSpeed * dt,
+                );
+                const desiredX = enemy.x + formationDx / formationDistance * movement;
+                const desiredY = enemy.y + formationDy / formationDistance * movement;
+                const resolved = resolveWallCollisions(desiredX, desiredY, enemy.radius, activeWalls, enemy.x, enemy.y);
+                enemy.x = resolved.x;
+                enemy.y = resolved.y;
+                enemy.angle = Math.atan2(formationDy, formationDx);
+              }
+              continue;
+            }
+
+            const conversionPullActive = currentTime < (enemy.conversionPullUntil ?? 0);
+            const pullTargetX = isPlayerAlly ? state.player.x : enemy.conversionPullTargetX;
+            const pullTargetY = isPlayerAlly ? state.player.y : enemy.conversionPullTargetY;
+            if (conversionPullActive && pullTargetX !== undefined && pullTargetY !== undefined) {
+              const pullDx = pullTargetX - enemy.x;
+              const pullDy = pullTargetY - enemy.y;
+              const pullDistance = Math.hypot(pullDx, pullDy);
+              const stopDistance = enemy.radius + (isPlayerAlly ? state.player.radius + 32 : 28);
+              if (pullDistance > stopDistance) {
+                const pullStep = Math.min(pullDistance - stopDistance, CONVERSION_PULL_SPEED * dt);
+                const pullX = enemy.x + (pullDx / pullDistance) * pullStep;
+                const pullY = enemy.y + (pullDy / pullDistance) * pullStep;
                 const resolved = resolveWallCollisions(pullX, pullY, enemy.radius, activeWalls, enemy.x, enemy.y);
                 enemy.x = resolved.x;
                 enemy.y = resolved.y;
-                enemy.angle = Math.atan2(dyToPlayer, dxToPlayer);
+                enemy.angle = Math.atan2(pullDy, pullDx);
               }
               continue;
+            }
+            if (!conversionPullActive && !isPlayerAlly) {
+              delete enemy.conversionPullTargetX;
+              delete enemy.conversionPullTargetY;
             }
 
             let targetX = isPlayerAlly ? enemy.x : state.player.x;
@@ -11215,9 +11471,44 @@ export default function GameCanvas() {
                 enemy.x = resolved.x;
                 enemy.y = resolved.y;
                 const travelled = Math.hypot(enemy.x - previousX, enemy.y - previousY);
-                const collidedWithWall = Math.abs(resolved.x - desiredX) > 0.1 || Math.abs(resolved.y - desiredY) > 0.1;
+                let collidedWithWall = Math.abs(resolved.x - desiredX) > 0.1 || Math.abs(resolved.y - desiredY) > 0.1;
+                let deflectedByBlueShield = false;
+                if (enemy.factionColor !== 'blue' || enemy.isPlayerAlly) {
+                  let shieldHit: { shield: MemoryEnemy; t: number; x: number; y: number } | null = null;
+                  for (const shield of activeBlueShieldsForEnemyMovement) {
+                    if (!areMemoryCombatantsHostile(enemy, shield)) continue;
+                    const hit = segmentVersusCircle(
+                      previousX,
+                      previousY,
+                      enemy.x,
+                      enemy.y,
+                      shield.x,
+                      shield.y,
+                      enemy.radius + MEMORY_ARENA_CONFIG.factionEmergency.blueShieldRadius,
+                    );
+                    if (hit && (!shieldHit || hit.t < shieldHit.t)) {
+                      shieldHit = { shield, ...hit };
+                    }
+                  }
+                  if (shieldHit) {
+                    enemy.x = shieldHit.x;
+                    enemy.y = shieldHit.y;
+                    let normalX = enemy.x - shieldHit.shield.x;
+                    let normalY = enemy.y - shieldHit.shield.y;
+                    const normalLength = Math.max(1, Math.hypot(normalX, normalY));
+                    normalX /= normalLength;
+                    normalY /= normalLength;
+                    enemy.kbvx = normalX * 650;
+                    enemy.kbvy = normalY * 650;
+                    enemy.moveDx = normalX;
+                    enemy.moveDy = normalY;
+                    collidedWithWall = true;
+                    deflectedByBlueShield = true;
+                    spawnParticles(enemy.x, enemy.y, ENEMY_COLOR_HEX.blue, 12);
+                  }
+                }
 
-                if (!isPlayerAlly && !triangleAi.hitPlayer && segmentVersusCircle(
+                if (!deflectedByBlueShield && !isPlayerAlly && !triangleAi.hitPlayer && segmentVersusCircle(
                   previousX,
                   previousY,
                   enemy.x,
@@ -11230,7 +11521,7 @@ export default function GameCanvas() {
                   triangleAi = markTrianglePlayerHit(triangleAi);
                 }
 
-                if (MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled) {
+                if (!deflectedByBlueShield && MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled) {
                   for (const candidate of state.enemies) {
                     if (
                       candidate === enemy ||
@@ -12297,6 +12588,15 @@ export default function GameCanvas() {
         if (mpRef.current.roomId && mpRef.current.isHost) {
           hostBulletSimulationTickRef.current += 1;
         }
+        const activeBlueShieldEnemies = state.memoryMode
+          ? state.enemies.filter(enemy => (
+              !enemy.isPlayerAlly &&
+              enemy.factionColor === 'blue' &&
+              enemy.factionAbilityKind === 'reflectionShield' &&
+              currentTime >= (enemy.factionAbilityActivatesAt ?? Infinity) &&
+              currentTime < (enemy.factionAbilityEndsAt ?? 0)
+            ))
+          : [];
         for (let i = state.bullets.length - 1; i >= 0; i--) {
           const bullet = state.bullets[i];
           const isAuthoritativeMultiplayerBullet =
@@ -12465,6 +12765,12 @@ export default function GameCanvas() {
                 data: { wall, index },
               })),
               ...state.blocks.flatMap((block, index) => {
+                if (
+                  block.factionColor &&
+                  !bullet.isPlayer &&
+                  !bullet.isPlayerAlly &&
+                  bullet.factionColor === block.factionColor
+                ) return [];
                 if (allowedBuildKeys.has(`${block.x}_${block.y}`)) return [];
                 return [{
                   id: `build:${index}:${block.x}:${block.y}`,
@@ -12744,6 +13050,60 @@ export default function GameCanvas() {
             continue;
           }
 
+          const bulletIsBlue = !bullet.isPlayer && !bullet.isPlayerAlly && bullet.factionColor === 'blue';
+          if (!bulletIsBlue && activeBlueShieldEnemies.length > 0) {
+            let shieldHit: { enemy: MemoryEnemy; t: number; x: number; y: number } | null = null;
+            for (const shieldEnemy of activeBlueShieldEnemies) {
+              const combinedRadius = MEMORY_ARENA_CONFIG.factionEmergency.blueShieldRadius + bullet.radius;
+              if (
+                shieldEnemy.x < Math.min(bulletBeforeX, bullet.x) - combinedRadius ||
+                shieldEnemy.x > Math.max(bulletBeforeX, bullet.x) + combinedRadius ||
+                shieldEnemy.y < Math.min(bulletBeforeY, bullet.y) - combinedRadius ||
+                shieldEnemy.y > Math.max(bulletBeforeY, bullet.y) + combinedRadius
+              ) continue;
+              const hit = segmentVersusCircle(
+                bulletBeforeX,
+                bulletBeforeY,
+                bullet.x,
+                bullet.y,
+                shieldEnemy.x,
+                shieldEnemy.y,
+                combinedRadius,
+              );
+              if (hit && (!shieldHit || hit.t < shieldHit.t)) {
+                shieldHit = { enemy: shieldEnemy, ...hit };
+              }
+            }
+            if (shieldHit) {
+              let normalX = shieldHit.x - shieldHit.enemy.x;
+              let normalY = shieldHit.y - shieldHit.enemy.y;
+              const normalLength = Math.hypot(normalX, normalY);
+              if (normalLength > 0.001) {
+                normalX /= normalLength;
+                normalY /= normalLength;
+              } else {
+                const velocityLength = Math.max(1, Math.hypot(bullet.dx, bullet.dy));
+                normalX = -bullet.dx / velocityLength;
+                normalY = -bullet.dy / velocityLength;
+              }
+              const dot = bullet.dx * normalX + bullet.dy * normalY;
+              if (dot < 0) {
+                bullet.dx -= 2 * dot * normalX;
+                bullet.dy -= 2 * dot * normalY;
+              }
+              bullet.x = shieldHit.x + normalX * 2;
+              bullet.y = shieldHit.y + normalY * 2;
+              bullet.isPlayer = false;
+              bullet.isPlayerAlly = false;
+              bullet.isNeutral = false;
+              bullet.ownerId = undefined;
+              bullet.colorIdx = undefined;
+              bullet.factionColor = 'blue';
+              bullet.bounceCount++;
+              spawnParticles(bullet.x, bullet.y, ENEMY_COLOR_HEX.blue, 7);
+            }
+          }
+
           // Special Relic Collisions
           if (!isAuthoritativeMultiplayerBullet) {
             for (const spawner of state.spawners) {
@@ -12779,6 +13139,13 @@ export default function GameCanvas() {
              for (let b = state.blocks.length - 1; b >= 0; b--) {
                const block = state.blocks[b];
 
+               if (
+                 block.factionColor &&
+                 !bullet.isPlayer &&
+                 !bullet.isPlayerAlly &&
+                 bullet.factionColor === block.factionColor
+               ) continue;
+
                // Skip collision if this block is currently part of the allowed connected area
                const blockKey = `${block.x}_${block.y}`;
                if (bullet.allowedBlockKeys && bullet.allowedBlockKeys.includes(blockKey)) {
@@ -12793,7 +13160,8 @@ export default function GameCanvas() {
 
                 if (bdx * bdx + bdy * bdy < bullet.radius * bullet.radius) {
                   const pDef = PLAYER_COLORS[block.colorIdx !== undefined ? block.colorIdx : 0] || PLAYER_COLORS[0];
-                  spawnParticles(closestX, closestY, pDef.n, 5);
+                  const blockColor = block.factionColor ? ENEMY_COLOR_HEX[block.factionColor] : pDef.n;
+                  spawnParticles(closestX, closestY, blockColor, 5);
 
                   if (!bulletRicochetEnabled) {
                     bulletDestroyed = true;
@@ -13625,40 +13993,6 @@ export default function GameCanvas() {
         ctx.arc(spawner.x, spawner.y, spawner.radius * (isMemoryReplica ? 0.28 : 0.4) + corePulse, 0, Math.PI * 2);
         ctx.fill();
 
-        if (state.memoryMode && spawner.isCore && spawner.factionColor) {
-          const emergency = state.factionEmergencies[spawner.factionColor];
-          if (emergency.phase === 'telegraph') {
-            const config = MEMORY_ARENA_CONFIG.factionEmergency;
-            const progress = Math.max(0, Math.min(1, (
-              currentTime - emergency.phaseStartedAt
-            ) / config.telegraphMs));
-            const warningPulse = 0.55 + Math.sin(worldPhaseTime * 0.035) * 0.2;
-            const outerRadius = config.redBlastRadius * (1 - progress * 0.72);
-            const innerRadius = Math.max(spawner.radius * 1.45, outerRadius - 42);
-
-            ctx.save();
-            ctx.globalCompositeOperation = 'lighter';
-            ctx.globalAlpha = warningPulse;
-            ctx.strokeStyle = glowColor;
-            ctx.shadowColor = glowColor;
-            ctx.shadowBlur = 18 + progress * 18;
-            ctx.lineWidth = 5 + progress * 4;
-            ctx.setLineDash([14, 10]);
-            ctx.lineDashOffset = -worldPhaseTime * 0.06;
-            ctx.beginPath();
-            ctx.arc(spawner.x, spawner.y, Math.max(spawner.radius * 1.5, outerRadius), 0, Math.PI * 2);
-            ctx.stroke();
-
-            ctx.globalAlpha = 0.35 + progress * 0.45;
-            ctx.lineWidth = 3 + progress * 3;
-            ctx.setLineDash([]);
-            ctx.beginPath();
-            ctx.arc(spawner.x, spawner.y, innerRadius, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.restore();
-          }
-        }
-
         ctx.restore();
 
         if (state.gameMode !== 'impossible') {
@@ -13775,6 +14109,55 @@ export default function GameCanvas() {
           const telegraphVisual = enemy.shape === 'triangle' && enemy.triangleAi?.phase === 'telegraph'
             ? getTriangleTelegraphVisual(currentTime - enemy.triangleAi.phaseStartedAt)
             : null;
+          const factionAbilityWarning = Boolean(
+            enemy.factionAbilityKind && currentTime < (enemy.factionAbilityActivatesAt ?? 0),
+          );
+          const factionAbilityActive = Boolean(
+            enemy.factionAbilityKind &&
+            currentTime >= (enemy.factionAbilityActivatesAt ?? Infinity) &&
+            currentTime < (enemy.factionAbilityEndsAt ?? 0),
+          );
+
+          if (factionAbilityWarning) {
+            const warningProgress = Math.max(0, Math.min(1, (
+              currentTime - ((enemy.factionAbilityActivatesAt ?? currentTime) - MEMORY_ARENA_CONFIG.factionEmergency.telegraphMs)
+            ) / MEMORY_ARENA_CONFIG.factionEmergency.telegraphMs));
+            const warningRadius = enemy.radius + 34 * (1 - warningProgress) + 7;
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = 0.45 + warningProgress * 0.4;
+            ctx.strokeStyle = enemyColor;
+            ctx.shadowColor = enemyColor;
+            ctx.shadowBlur = 12 + warningProgress * 14;
+            ctx.lineWidth = 2.5 + warningProgress * 2;
+            ctx.setLineDash([7, 6]);
+            ctx.lineDashOffset = -currentTime * 0.04;
+            ctx.beginPath();
+            ctx.arc(enemy.x, enemy.y, warningRadius, 0, Math.PI * 2);
+            ctx.stroke();
+
+            if (
+              enemy.factionAbilityKind === 'buildWall' &&
+              enemy.factionAbilityTargetX !== undefined &&
+              enemy.factionAbilityTargetY !== undefined
+            ) {
+              const segmentSize = MEMORY_ARENA_CONFIG.factionEmergency.yellowWallSegmentSize;
+              ctx.globalAlpha = 0.35 + warningProgress * 0.25;
+              ctx.setLineDash([4, 5]);
+              ctx.beginPath();
+              ctx.moveTo(enemy.x, enemy.y);
+              ctx.lineTo(enemy.factionAbilityTargetX, enemy.factionAbilityTargetY);
+              ctx.stroke();
+              ctx.setLineDash([]);
+              ctx.strokeRect(
+                enemy.factionAbilityTargetX - segmentSize / 2,
+                enemy.factionAbilityTargetY - segmentSize / 2,
+                segmentSize,
+                segmentSize,
+              );
+            }
+            ctx.restore();
+          }
 
           if (telegraphVisual) {
             ctx.save();
@@ -13821,6 +14204,43 @@ export default function GameCanvas() {
           ctx.fill();
 
           ctx.restore();
+
+          if (factionAbilityActive && enemy.factionAbilityKind === 'reflectionShield') {
+            const shieldRadius = MEMORY_ARENA_CONFIG.factionEmergency.blueShieldRadius;
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.fillStyle = MEMORY_ARENA_PALETTE.factions.blue.glow;
+            ctx.strokeStyle = enemyColor;
+            ctx.shadowColor = enemyColor;
+            ctx.shadowBlur = 15;
+            ctx.lineWidth = 2.5;
+            ctx.globalAlpha = 0.58 + Math.sin(currentTime * 0.012) * 0.12;
+            ctx.beginPath();
+            ctx.arc(enemy.x, enemy.y, shieldRadius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+          } else if (factionAbilityActive && enemy.factionAbilityKind === 'conversionPulse') {
+            const activeProgress = Math.max(0, Math.min(1, (
+              currentTime - (enemy.factionAbilityActivatesAt ?? currentTime)
+            ) / MEMORY_ARENA_CONFIG.factionEmergency.greenPullDurationMs));
+            ctx.save();
+            ctx.globalAlpha = (1 - activeProgress) * 0.5;
+            ctx.strokeStyle = enemyColor;
+            ctx.shadowColor = enemyColor;
+            ctx.shadowBlur = 12;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(
+              enemy.x,
+              enemy.y,
+              enemy.radius + activeProgress * (MEMORY_ARENA_CONFIG.factionEmergency.greenConversionRadius - enemy.radius),
+              0,
+              Math.PI * 2,
+            );
+            ctx.stroke();
+            ctx.restore();
+          }
           continue;
         }
 
@@ -14087,8 +14507,10 @@ export default function GameCanvas() {
         }
 
         const pDef = PLAYER_COLORS[block.colorIdx !== undefined ? block.colorIdx : 0] || PLAYER_COLORS[0];
-        const blockColor = pDef.n;
-        const blockGlow = pDef.g || 'rgba(255, 204, 0, 0.2)';
+        const blockColor = block.factionColor ? ENEMY_COLOR_HEX[block.factionColor] : pDef.n;
+        const blockGlow = block.factionColor
+          ? MEMORY_ARENA_PALETTE.factions[block.factionColor].glow
+          : (pDef.g || 'rgba(255, 204, 0, 0.2)');
 
         ctx.fillStyle = blockGlow;
         ctx.shadowColor = blockColor;

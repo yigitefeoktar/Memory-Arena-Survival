@@ -87,13 +87,21 @@ export const MEMORY_ARENA_CONFIG = {
   factionEmergency: {
     maximumPressure: 100,
     minimumNearbyHostiles: 4,
-    threatRadius: 420,
     pressurePerExcessHostilePerSecond: 12,
     pressureDecayPerSecond: 16,
     replicaLossPressure: 30,
     telegraphMs: 1200,
     cooldownMs: 30000,
-    redBlastRadius: 360,
+    redPulseRadius: 125,
+    blueShieldRadius: 42,
+    blueShieldDurationMs: 3500,
+    greenConversionRadius: 180,
+    greenPullDurationMs: 700,
+    yellowFormationSpeed: 240,
+    yellowFormationForwardOffset: 110,
+    yellowWallSegmentSize: 36,
+    yellowWallSpacing: 40,
+    yellowWallDurationMs: 10000,
   },
   relics: {
     enabled: false,
@@ -497,12 +505,23 @@ export interface FactionEmergencyTransition {
   detonated: boolean;
 }
 
-export const FACTION_EMERGENCY_ABILITY_BY_FACTION = {
-  red: 'defensiveBlast',
-  blue: null,
-  green: null,
-  yellow: null,
-} as const;
+export type FactionEnemyAbilityId = 'damagePulse' | 'reflectionShield' | 'conversionPulse' | 'buildWall';
+
+export const FACTION_EMERGENCY_ABILITY_BY_FACTION: Record<EnemyFactionColor, FactionEnemyAbilityId> = {
+  red: 'damagePulse',
+  blue: 'reflectionShield',
+  green: 'conversionPulse',
+  yellow: 'buildWall',
+};
+
+export function isFactionEnemyAbilityId(value: unknown): value is FactionEnemyAbilityId {
+  return typeof value === 'string' && [
+    'damagePulse',
+    'reflectionShield',
+    'conversionPulse',
+    'buildWall',
+  ].includes(value);
+}
 
 export function createInitialFactionRaidStates(now = 0): FactionRaidStates {
   return Object.fromEntries(ENEMY_FACTIONS.map(faction => [faction, {
@@ -564,12 +583,12 @@ export function advanceFactionEmergencyState(
     deltaSeconds: number;
     nearbyFriendlies: number;
     nearbyHostiles: number;
-    coreAlive: boolean;
+    factionAlive: boolean;
     abilityAvailable: boolean;
   },
 ): FactionEmergencyTransition {
   const config = MEMORY_ARENA_CONFIG.factionEmergency;
-  if (!input.coreAlive) {
+  if (!input.factionAlive) {
     return {
       state: {
         phase: 'idle',

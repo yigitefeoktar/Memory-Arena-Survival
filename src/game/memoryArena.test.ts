@@ -4,6 +4,7 @@ import {
   ABILITY_BY_FACTION,
   ENEMY_FACTIONS,
   ENEMY_SHAPES,
+  FACTION_EMERGENCY_ABILITY_BY_FACTION,
   MEMORY_ARENA_CONFIG,
   MEMORY_MAP_CORE_INDICES,
   advanceFactionEmergencyState,
@@ -49,6 +50,15 @@ test('ability colours map to the four existing tools', () => {
     blue: 'special',
     green: 'convert',
     yellow: 'build',
+  });
+});
+
+test('each enemy faction owns a weaker version of its matching player ability', () => {
+  assert.deepEqual(FACTION_EMERGENCY_ABILITY_BY_FACTION, {
+    red: 'damagePulse',
+    blue: 'reflectionShield',
+    green: 'conversionPulse',
+    yellow: 'buildWall',
   });
 });
 
@@ -234,14 +244,14 @@ test('faction raids begin idle and use stable spread-out formation positions', (
   assert.equal(isValidFactionRaidStates({ ...raids, red: { ...raids.red, phase: 'retreating' } }), false);
 });
 
-test('faction emergency pressure produces one telegraphed blast and then cooldown', () => {
+test('faction emergency pressure produces one telegraphed activation and then cooldown', () => {
   const emergencies = createInitialFactionEmergencyStates(1000);
   const building = advanceFactionEmergencyState(emergencies.red, {
     now: 3100,
     deltaSeconds: 2.1,
     nearbyFriendlies: 0,
     nearbyHostiles: MEMORY_ARENA_CONFIG.factionEmergency.minimumNearbyHostiles,
-    coreAlive: true,
+    factionAlive: true,
     abilityAvailable: true,
   });
   assert.equal(building.beganTelegraph, true);
@@ -253,7 +263,7 @@ test('faction emergency pressure produces one telegraphed blast and then cooldow
     deltaSeconds: 0.016,
     nearbyFriendlies: 0,
     nearbyHostiles: 12,
-    coreAlive: true,
+    factionAlive: true,
     abilityAvailable: true,
   });
   assert.equal(warning.detonated, false);
@@ -264,7 +274,7 @@ test('faction emergency pressure produces one telegraphed blast and then cooldow
     deltaSeconds: 0.016,
     nearbyFriendlies: 0,
     nearbyHostiles: 12,
-    coreAlive: true,
+    factionAlive: true,
     abilityAvailable: true,
   });
   assert.equal(blast.detonated, true);
@@ -276,7 +286,7 @@ test('faction emergency pressure produces one telegraphed blast and then cooldow
     deltaSeconds: 10,
     nearbyFriendlies: 0,
     nearbyHostiles: 12,
-    coreAlive: true,
+    factionAlive: true,
     abilityAvailable: true,
   });
   assert.equal(stillCooling.detonated, false);
@@ -299,7 +309,7 @@ test('replica losses add bounded emergency pressure while safe cores recover', (
     deltaSeconds: 1,
     nearbyFriendlies: 5,
     nearbyHostiles: 0,
-    coreAlive: true,
+    factionAlive: true,
     abilityAvailable: true,
   });
   assert.equal(
