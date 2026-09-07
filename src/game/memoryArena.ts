@@ -73,6 +73,10 @@ export const MEMORY_ARENA_CONFIG = {
     bulletRicochetEnabled: false,
     enemyFactionCombatEnabled: true,
   },
+  navigation: {
+    wallFollowOutwardWeight: 0.28,
+    pathClearanceInset: 0.5,
+  },
   raids: {
     armySize: 6,
     preparationMs: 2000,
@@ -167,6 +171,55 @@ export const MEMORY_ARENA_CONFIG = {
     recoveryMs: 4000,
   },
 } as const;
+
+export interface MovementVector {
+  x: number;
+  y: number;
+}
+
+/**
+ * Picks a stable direction along a wall while keeping a small outward component.
+ * The outward component prevents units from repeatedly scraping into the wall,
+ * while the target score makes them take the shorter side around an obstacle.
+ */
+export function getWallFollowDirection(
+  collisionNormals: readonly MovementVector[],
+  targetDirection: MovementVector,
+  tieBreaker = 1,
+): MovementVector {
+  let normalX = 0;
+  let normalY = 0;
+  for (const normal of collisionNormals) {
+    normalX += normal.x;
+    normalY += normal.y;
+  }
+
+  const normalLength = Math.hypot(normalX, normalY);
+  if (normalLength <= 0.0001) {
+    const targetLength = Math.hypot(targetDirection.x, targetDirection.y);
+    return targetLength > 0.0001
+      ? { x: targetDirection.x / targetLength, y: targetDirection.y / targetLength }
+      : { x: tieBreaker >= 0 ? 1 : -1, y: 0 };
+  }
+  normalX /= normalLength;
+  normalY /= normalLength;
+
+  const targetLength = Math.hypot(targetDirection.x, targetDirection.y);
+  const targetX = targetLength > 0.0001 ? targetDirection.x / targetLength : 0;
+  const targetY = targetLength > 0.0001 ? targetDirection.y / targetLength : 0;
+  const clockwise = { x: -normalY, y: normalX };
+  const counterClockwise = { x: normalY, y: -normalX };
+  const clockwiseScore = clockwise.x * targetX + clockwise.y * targetY;
+  const counterClockwiseScore = counterClockwise.x * targetX + counterClockwise.y * targetY;
+  const tangent = Math.abs(clockwiseScore - counterClockwiseScore) < 0.02
+    ? (tieBreaker >= 0 ? clockwise : counterClockwise)
+    : (clockwiseScore > counterClockwiseScore ? clockwise : counterClockwise);
+  const outwardWeight = MEMORY_ARENA_CONFIG.navigation.wallFollowOutwardWeight;
+  const steerX = tangent.x + normalX * outwardWeight;
+  const steerY = tangent.y + normalY * outwardWeight;
+  const steerLength = Math.max(0.0001, Math.hypot(steerX, steerY));
+  return { x: steerX / steerLength, y: steerY / steerLength };
+}
 
 export const PLAYER_UPGRADE_STATS = ['fireRate', 'maxHp', 'regeneration', 'cooldown'] as const;
 export type PlayerUpgradeStat = (typeof PLAYER_UPGRADE_STATS)[number];

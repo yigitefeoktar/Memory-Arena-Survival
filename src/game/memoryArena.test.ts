@@ -29,6 +29,7 @@ import {
   getRaidFormationOffset,
   getTriangleTelegraphVisual,
   getPlayerLevelStats,
+  getWallFollowDirection,
   grantPlayerLevelUpgrade,
   derivePlayerUpgradeRanks,
   isValidChainState,
@@ -43,6 +44,24 @@ import {
   type ColoredCoreSpawnerState,
   type EnemyAiState,
 } from './memoryArena';
+
+test('wall following chooses the route toward the target and keeps outward clearance', () => {
+  const direction = getWallFollowDirection(
+    [{ x: -1, y: 0 }],
+    { x: 1, y: -0.5 },
+  );
+
+  assert.ok(direction.y < 0, 'should follow the wall upward toward the target');
+  assert.ok(direction.x < 0, 'should keep a small outward component away from the wall');
+  assert.ok(Math.abs(Math.hypot(direction.x, direction.y) - 1) < 0.0001);
+});
+
+test('wall following splits equally good routes using the stable tie breaker', () => {
+  const clockwise = getWallFollowDirection([{ x: -1, y: 0 }], { x: 1, y: 0 }, 1);
+  const counterClockwise = getWallFollowDirection([{ x: -1, y: 0 }], { x: 1, y: 0 }, -1);
+  assert.ok(clockwise.y < 0);
+  assert.ok(counterClockwise.y > 0);
+});
 
 test('ability colours map to the four existing tools', () => {
   assert.deepEqual(ABILITY_BY_FACTION, {

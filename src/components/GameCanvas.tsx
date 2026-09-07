@@ -78,6 +78,7 @@ import {
   getTriangleTelegraphVisual,
   getPlayerLevelStats,
   grantPlayerLevelUpgrade,
+  getWallFollowDirection,
   derivePlayerUpgradeRanks,
   isEnemyFactionColor,
   isEnemyShape,
@@ -1070,6 +1071,10 @@ interface MemoryEnemy {
   factionAbilityEndsAt?: number;
   factionAbilityTargetX?: number;
   factionAbilityTargetY?: number;
+  wallFollowDx?: number;
+  wallFollowDy?: number;
+  wallFollowTargetX?: number;
+  wallFollowTargetY?: number;
 }
 
 interface MemoryBlock {
@@ -11208,16 +11213,15 @@ export default function GameCanvas() {
               const formationDy = enemy.factionAbilityTargetY - enemy.y;
               const formationDistance = Math.hypot(formationDx, formationDy);
               if (formationDistance > 3) {
-                const movement = Math.min(
-                  formationDistance,
-                  MEMORY_ARENA_CONFIG.factionEmergency.yellowFormationSpeed * dt,
+                const movement = moveMemoryEnemyTowards(
+                  enemy,
+                  enemy.factionAbilityTargetX,
+                  enemy.factionAbilityTargetY,
+                  MEMORY_ARENA_CONFIG.factionEmergency.yellowFormationSpeed,
+                  dt,
+                  activeWalls,
                 );
-                const desiredX = enemy.x + formationDx / formationDistance * movement;
-                const desiredY = enemy.y + formationDy / formationDistance * movement;
-                const resolved = resolveWallCollisions(desiredX, desiredY, enemy.radius, activeWalls, enemy.x, enemy.y);
-                enemy.x = resolved.x;
-                enemy.y = resolved.y;
-                enemy.angle = Math.atan2(formationDy, formationDx);
+                enemy.angle = Math.atan2(movement.dy, movement.dx);
               }
               continue;
             }
@@ -11231,13 +11235,15 @@ export default function GameCanvas() {
               const pullDistance = Math.hypot(pullDx, pullDy);
               const stopDistance = enemy.radius + (isPlayerAlly ? state.player.radius + 32 : 28);
               if (pullDistance > stopDistance) {
-                const pullStep = Math.min(pullDistance - stopDistance, CONVERSION_PULL_SPEED * dt);
-                const pullX = enemy.x + (pullDx / pullDistance) * pullStep;
-                const pullY = enemy.y + (pullDy / pullDistance) * pullStep;
-                const resolved = resolveWallCollisions(pullX, pullY, enemy.radius, activeWalls, enemy.x, enemy.y);
-                enemy.x = resolved.x;
-                enemy.y = resolved.y;
-                enemy.angle = Math.atan2(pullDy, pullDx);
+                const movement = moveMemoryEnemyTowards(
+                  enemy,
+                  pullTargetX,
+                  pullTargetY,
+                  Math.min(CONVERSION_PULL_SPEED, (pullDistance - stopDistance) / Math.max(dt, 0.0001)),
+                  dt,
+                  activeWalls,
+                );
+                enemy.angle = Math.atan2(movement.dy, movement.dx);
               }
               continue;
             }
@@ -11309,14 +11315,15 @@ export default function GameCanvas() {
             const unitToTargetY = distanceToTarget > 0 ? dyToTarget / distanceToTarget : 0;
 
             if (enemy.shape === 'circle') {
-              const previousX = enemy.x;
-              const previousY = enemy.y;
-              const desiredX = enemy.x + unitToTargetX * enemy.speed * dt;
-              const desiredY = enemy.y + unitToTargetY * enemy.speed * dt;
-              const resolved = resolveWallCollisions(desiredX, desiredY, enemy.radius, activeWalls, previousX, previousY);
-              enemy.x = resolved.x;
-              enemy.y = resolved.y;
-              enemy.angle = Math.atan2(unitToTargetY, unitToTargetX);
+              const movement = moveMemoryEnemyTowards(
+                enemy,
+                targetX,
+                targetY,
+                enemy.speed,
+                dt,
+                activeWalls,
+              );
+              enemy.angle = Math.atan2(movement.dy, movement.dx);
 
               if (
                 targetIsCombatant &&
@@ -11345,27 +11352,36 @@ export default function GameCanvas() {
             } else if (enemy.shape === 'square') {
               enemy.angle = (enemy.angle ?? 0) + MEMORY_ARENA_CONFIG.square.rotationRadiansPerSecond * dt;
               if (raidDestination) {
-                const distanceToRaidDestination = Math.hypot(raidDestination.x - enemy.x, raidDestination.y - enemy.y);
-                enemy.moveDx = distanceToRaidDestination > 8 ? (raidDestination.x - enemy.x) / distanceToRaidDestination : 0;
-                enemy.moveDy = distanceToRaidDestination > 8 ? (raidDestination.y - enemy.y) / distanceToRaidDestination : 0;
+                const movement = moveMemoryEnemyTowards(
+                  enemy,
+                  raidDestination.x,
+                  raidDestination.y,
+                  enemy.speed,
+                  dt,
+                  activeWalls,
+                );
+                enemy.moveDx = movement.dx;
+                enemy.moveDy = movement.dy;
               } else if (currentTime >= (enemy.nextTurnAt ?? 0)) {
                 const moveAngle = Math.random() * Math.PI * 2;
                 enemy.moveDx = Math.cos(moveAngle);
                 enemy.moveDy = Math.sin(moveAngle);
                 enemy.nextTurnAt = currentTime + MEMORY_ARENA_CONFIG.square.minTurnIntervalMs + Math.random() * (MEMORY_ARENA_CONFIG.square.maxTurnIntervalMs - MEMORY_ARENA_CONFIG.square.minTurnIntervalMs);
               }
-              const previousX = enemy.x;
-              const previousY = enemy.y;
-              const desiredX = enemy.x + (enemy.moveDx ?? 1) * enemy.speed * dt;
-              const desiredY = enemy.y + (enemy.moveDy ?? 0) * enemy.speed * dt;
-              const resolved = resolveWallCollisions(desiredX, desiredY, enemy.radius, activeWalls, previousX, previousY);
-              enemy.x = resolved.x;
-              enemy.y = resolved.y;
-              if (Math.abs(resolved.x - desiredX) > 0.1 || Math.abs(resolved.y - desiredY) > 0.1) {
-                const moveAngle = Math.random() * Math.PI * 2;
-                enemy.moveDx = Math.cos(moveAngle);
-                enemy.moveDy = Math.sin(moveAngle);
-                enemy.nextTurnAt = currentTime + MEMORY_ARENA_CONFIG.square.minTurnIntervalMs;
+              if (!raidDestination) {
+                const movement = moveMemoryEnemyInDirection(
+                  enemy,
+                  enemy.moveDx ?? 1,
+                  enemy.moveDy ?? 0,
+                  enemy.speed,
+                  dt,
+                  activeWalls,
+                );
+                enemy.moveDx = movement.dx;
+                enemy.moveDy = movement.dy;
+                if (movement.collided) {
+                  enemy.nextTurnAt = Math.max(enemy.nextTurnAt ?? 0, currentTime + 900);
+                }
               }
 
               if (currentTime - enemy.lastShoot >= MEMORY_ARENA_CONFIG.square.fireIntervalMs) {
@@ -11445,22 +11461,37 @@ export default function GameCanvas() {
 
               if (triangleAi.phase === 'wander') {
                 if (raidDestination) {
-                  const distanceToRaidDestination = Math.hypot(raidDestination.x - enemy.x, raidDestination.y - enemy.y);
-                  enemy.moveDx = distanceToRaidDestination > 8 ? (raidDestination.x - enemy.x) / distanceToRaidDestination : 0;
-                  enemy.moveDy = distanceToRaidDestination > 8 ? (raidDestination.y - enemy.y) / distanceToRaidDestination : 0;
+                  const movement = moveMemoryEnemyTowards(
+                    enemy,
+                    raidDestination.x,
+                    raidDestination.y,
+                    enemy.speed,
+                    dt,
+                    activeWalls,
+                  );
+                  enemy.moveDx = movement.dx;
+                  enemy.moveDy = movement.dy;
                 } else if (currentTime >= (enemy.nextTurnAt ?? 0)) {
                   const moveAngle = Math.random() * Math.PI * 2;
                   enemy.moveDx = Math.cos(moveAngle);
                   enemy.moveDy = Math.sin(moveAngle);
                   enemy.nextTurnAt = currentTime + MEMORY_ARENA_CONFIG.square.minTurnIntervalMs + Math.random() * 2000;
                 }
-                const previousX = enemy.x;
-                const previousY = enemy.y;
-                const desiredX = enemy.x + (enemy.moveDx ?? 1) * enemy.speed * dt;
-                const desiredY = enemy.y + (enemy.moveDy ?? 0) * enemy.speed * dt;
-                const resolved = resolveWallCollisions(desiredX, desiredY, enemy.radius, activeWalls, previousX, previousY);
-                enemy.x = resolved.x;
-                enemy.y = resolved.y;
+                if (!raidDestination) {
+                  const movement = moveMemoryEnemyInDirection(
+                    enemy,
+                    enemy.moveDx ?? 1,
+                    enemy.moveDy ?? 0,
+                    enemy.speed,
+                    dt,
+                    activeWalls,
+                  );
+                  enemy.moveDx = movement.dx;
+                  enemy.moveDy = movement.dy;
+                  if (movement.collided) {
+                    enemy.nextTurnAt = Math.max(enemy.nextTurnAt ?? 0, currentTime + 900);
+                  }
+                }
                 enemy.angle = Math.atan2(enemy.moveDy ?? 0, enemy.moveDx ?? 1);
               } else if (triangleAi.phase === 'dash') {
                 const previousX = enemy.x;
@@ -17534,4 +17565,146 @@ export default function GameCanvas() {
       <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleLoadMatch} />
     </div>
   );
+}
+
+function isMemoryEnemyPathBlocked(
+  x: number,
+  y: number,
+  targetX: number,
+  targetY: number,
+  radius: number,
+  walls: { x: number; y: number; w: number; h: number }[],
+): boolean {
+  const clearance = Math.max(0, radius - MEMORY_ARENA_CONFIG.navigation.pathClearanceInset);
+  return walls.some(wall => lineIntersectsRect(
+    x,
+    y,
+    targetX,
+    targetY,
+    wall.x - clearance,
+    wall.y - clearance,
+    wall.w + clearance * 2,
+    wall.h + clearance * 2,
+  ));
+}
+
+function getMemoryEnemyTieBreaker(enemy: MemoryEnemy): number {
+  const id = enemy.id ?? `${Math.round(enemy.x)}:${Math.round(enemy.y)}`;
+  let hash = 0;
+  for (let index = 0; index < id.length; index++) {
+    hash = ((hash * 31) + id.charCodeAt(index)) | 0;
+  }
+  return (hash & 1) === 0 ? 1 : -1;
+}
+
+function clearMemoryEnemyWallFollow(enemy: MemoryEnemy): void {
+  delete enemy.wallFollowDx;
+  delete enemy.wallFollowDy;
+  delete enemy.wallFollowTargetX;
+  delete enemy.wallFollowTargetY;
+}
+
+function moveMemoryEnemyTowards(
+  enemy: MemoryEnemy,
+  targetX: number,
+  targetY: number,
+  speed: number,
+  dt: number,
+  walls: { x: number; y: number; w: number; h: number }[],
+): { dx: number; dy: number; collided: boolean } {
+  const targetDx = targetX - enemy.x;
+  const targetDy = targetY - enemy.y;
+  const targetDistance = Math.hypot(targetDx, targetDy);
+  const directDx = targetDistance > 0.0001 ? targetDx / targetDistance : 0;
+  const directDy = targetDistance > 0.0001 ? targetDy / targetDistance : 0;
+  const directPathBlocked = targetDistance > 0.0001 && isMemoryEnemyPathBlocked(
+    enemy.x,
+    enemy.y,
+    targetX,
+    targetY,
+    enemy.radius,
+    walls,
+  );
+
+  const followTargetShift = enemy.wallFollowTargetX === undefined || enemy.wallFollowTargetY === undefined
+    ? 0
+    : Math.hypot(targetX - enemy.wallFollowTargetX, targetY - enemy.wallFollowTargetY);
+  if (followTargetShift > 160) clearMemoryEnemyWallFollow(enemy);
+
+  if (!directPathBlocked) clearMemoryEnemyWallFollow(enemy);
+  let moveDx = directPathBlocked && enemy.wallFollowDx !== undefined
+    ? enemy.wallFollowDx
+    : directDx;
+  let moveDy = directPathBlocked && enemy.wallFollowDy !== undefined
+    ? enemy.wallFollowDy
+    : directDy;
+  const previousX = enemy.x;
+  const previousY = enemy.y;
+  const step = Math.min(targetDistance, speed * dt);
+  let desiredX = previousX + moveDx * step;
+  let desiredY = previousY + moveDy * step;
+  let resolved = resolveWallCollisions(desiredX, desiredY, enemy.radius, walls, previousX, previousY);
+  let collided = resolved.collided;
+
+  if (resolved.collided && resolved.normals.length > 0) {
+    const wallFollow = getWallFollowDirection(
+      resolved.normals.map(normal => ({ x: normal.nx, y: normal.ny })),
+      { x: directDx, y: directDy },
+      getMemoryEnemyTieBreaker(enemy),
+    );
+    enemy.wallFollowDx = wallFollow.x;
+    enemy.wallFollowDy = wallFollow.y;
+    enemy.wallFollowTargetX = targetX;
+    enemy.wallFollowTargetY = targetY;
+    moveDx = wallFollow.x;
+    moveDy = wallFollow.y;
+
+    // Use the remaining frame to begin sliding instead of pausing at impact.
+    desiredX = resolved.x + moveDx * step;
+    desiredY = resolved.y + moveDy * step;
+    resolved = resolveWallCollisions(desiredX, desiredY, enemy.radius, walls, resolved.x, resolved.y);
+    collided = collided || resolved.collided;
+  }
+
+  enemy.x = resolved.x;
+  enemy.y = resolved.y;
+  return { dx: moveDx, dy: moveDy, collided };
+}
+
+function moveMemoryEnemyInDirection(
+  enemy: MemoryEnemy,
+  directionX: number,
+  directionY: number,
+  speed: number,
+  dt: number,
+  walls: { x: number; y: number; w: number; h: number }[],
+): { dx: number; dy: number; collided: boolean } {
+  const directionLength = Math.hypot(directionX, directionY);
+  let moveDx = directionLength > 0.0001 ? directionX / directionLength : 0;
+  let moveDy = directionLength > 0.0001 ? directionY / directionLength : 0;
+  const previousX = enemy.x;
+  const previousY = enemy.y;
+  const step = speed * dt;
+  let desiredX = previousX + moveDx * step;
+  let desiredY = previousY + moveDy * step;
+  let resolved = resolveWallCollisions(desiredX, desiredY, enemy.radius, walls, previousX, previousY);
+  let collided = resolved.collided;
+
+  if (resolved.collided && resolved.normals.length > 0) {
+    const wallFollow = getWallFollowDirection(
+      resolved.normals.map(normal => ({ x: normal.nx, y: normal.ny })),
+      { x: moveDx, y: moveDy },
+      getMemoryEnemyTieBreaker(enemy),
+    );
+    moveDx = wallFollow.x;
+    moveDy = wallFollow.y;
+    desiredX = resolved.x + moveDx * step;
+    desiredY = resolved.y + moveDy * step;
+    resolved = resolveWallCollisions(desiredX, desiredY, enemy.radius, walls, resolved.x, resolved.y);
+    collided = collided || resolved.collided;
+  }
+
+  enemy.x = resolved.x;
+  enemy.y = resolved.y;
+  return { dx: moveDx, dy: moveDy, collided };
 }
