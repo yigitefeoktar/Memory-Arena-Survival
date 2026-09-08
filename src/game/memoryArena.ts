@@ -77,6 +77,21 @@ export const MEMORY_ARENA_CONFIG = {
     wallFollowOutwardWeight: 0.28,
     pathClearanceInset: 0.5,
   },
+  threat: {
+    millisecondsPerTimeTier: 60000,
+    playerLevelsPerTier: 3,
+    spawnIntervalMultiplierPerTier: 0.92,
+    minimumSpawnIntervalMs: 3000,
+    replicationIntervalMultiplierPerTier: 0.9,
+    minimumReplicationIntervalMs: 12000,
+    armySizePerTwoTiers: 1,
+    maximumArmySize: 14,
+    factionAbilityCooldownReductionMsPerTier: 1000,
+    minimumFactionAbilityCooldownMs: 15000,
+    movementMultiplierPerTier: 0.025,
+    maximumMovementMultiplier: 1.3,
+    fullVisualIntensityTier: 12,
+  },
   raids: {
     armySize: 6,
     preparationMs: 2000,
@@ -175,6 +190,60 @@ export const MEMORY_ARENA_CONFIG = {
 export interface MovementVector {
   x: number;
   y: number;
+}
+
+export interface MemoryThreatStats {
+  tier: number;
+  timeTier: number;
+  levelTier: number;
+  spawnIntervalMs: number;
+  replicationIntervalMs: number;
+  armySize: number;
+  factionAbilityCooldownMs: number;
+  enemyMovementMultiplier: number;
+  visualIntensity: number;
+}
+
+export function getMemoryThreatStats(elapsedRunMs: number, playerLevel: number): MemoryThreatStats {
+  const config = MEMORY_ARENA_CONFIG.threat;
+  const safeElapsedMs = Math.max(0, Number.isFinite(elapsedRunMs) ? elapsedRunMs : 0);
+  const safeLevel = Math.max(1, Number.isFinite(playerLevel) ? Math.floor(playerLevel) : 1);
+  const timeTier = Math.floor(safeElapsedMs / config.millisecondsPerTimeTier);
+  const levelTier = Math.floor((safeLevel - 1) / config.playerLevelsPerTier);
+  const tier = timeTier + levelTier;
+  return {
+    tier,
+    timeTier,
+    levelTier,
+    spawnIntervalMs: Math.max(
+      config.minimumSpawnIntervalMs,
+      Math.round(MEMORY_ARENA_CONFIG.spawner.spawnIntervalMs * Math.pow(
+        config.spawnIntervalMultiplierPerTier,
+        tier,
+      )),
+    ),
+    replicationIntervalMs: Math.max(
+      config.minimumReplicationIntervalMs,
+      Math.round(MEMORY_ARENA_CONFIG.spawner.replicationIntervalMs * Math.pow(
+        config.replicationIntervalMultiplierPerTier,
+        tier,
+      )),
+    ),
+    armySize: Math.min(
+      config.maximumArmySize,
+      MEMORY_ARENA_CONFIG.raids.armySize + Math.floor(tier / 2) * config.armySizePerTwoTiers,
+    ),
+    factionAbilityCooldownMs: Math.max(
+      config.minimumFactionAbilityCooldownMs,
+      MEMORY_ARENA_CONFIG.factionEmergency.cooldownMs -
+        tier * config.factionAbilityCooldownReductionMsPerTier,
+    ),
+    enemyMovementMultiplier: Math.min(
+      config.maximumMovementMultiplier,
+      1 + tier * config.movementMultiplierPerTier,
+    ),
+    visualIntensity: Math.min(1, tier / config.fullVisualIntensityTier),
+  };
 }
 
 /**
@@ -638,6 +707,7 @@ export function advanceFactionEmergencyState(
     nearbyHostiles: number;
     factionAlive: boolean;
     abilityAvailable: boolean;
+    cooldownMs?: number;
   },
 ): FactionEmergencyTransition {
   const config = MEMORY_ARENA_CONFIG.factionEmergency;
@@ -663,7 +733,7 @@ export function advanceFactionEmergencyState(
         phase: 'cooldown',
         pressure: 0,
         phaseStartedAt: input.now,
-        cooldownUntil: input.now + config.cooldownMs,
+        cooldownUntil: input.now + Math.max(0, input.cooldownMs ?? config.cooldownMs),
       },
       beganTelegraph: false,
       detonated: true,

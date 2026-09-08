@@ -29,6 +29,7 @@ import {
   getRaidFormationOffset,
   getTriangleTelegraphVisual,
   getPlayerLevelStats,
+  getMemoryThreatStats,
   getWallFollowDirection,
   grantPlayerLevelUpgrade,
   derivePlayerUpgradeRanks,
@@ -44,6 +45,35 @@ import {
   type ColoredCoreSpawnerState,
   type EnemyAiState,
 } from './memoryArena';
+
+test('memory threat combines elapsed time and player level', () => {
+  const opening = getMemoryThreatStats(0, 1);
+  assert.equal(opening.tier, 0);
+  assert.equal(opening.spawnIntervalMs, MEMORY_ARENA_CONFIG.spawner.spawnIntervalMs);
+  assert.equal(opening.replicationIntervalMs, MEMORY_ARENA_CONFIG.spawner.replicationIntervalMs);
+  assert.equal(opening.armySize, MEMORY_ARENA_CONFIG.raids.armySize);
+  assert.equal(opening.enemyMovementMultiplier, 1);
+
+  const escalated = getMemoryThreatStats(120000, 7);
+  assert.equal(escalated.timeTier, 2);
+  assert.equal(escalated.levelTier, 2);
+  assert.equal(escalated.tier, 4);
+  assert.ok(escalated.spawnIntervalMs < opening.spawnIntervalMs);
+  assert.ok(escalated.replicationIntervalMs < opening.replicationIntervalMs);
+  assert.equal(escalated.armySize, 8);
+  assert.equal(escalated.factionAbilityCooldownMs, 26000);
+  assert.equal(escalated.enemyMovementMultiplier, 1.1);
+});
+
+test('memory threat keeps every high-pressure stat within its gameplay cap', () => {
+  const maximum = getMemoryThreatStats(10_000_000, 1000);
+  assert.equal(maximum.spawnIntervalMs, MEMORY_ARENA_CONFIG.threat.minimumSpawnIntervalMs);
+  assert.equal(maximum.replicationIntervalMs, MEMORY_ARENA_CONFIG.threat.minimumReplicationIntervalMs);
+  assert.equal(maximum.armySize, MEMORY_ARENA_CONFIG.threat.maximumArmySize);
+  assert.equal(maximum.factionAbilityCooldownMs, MEMORY_ARENA_CONFIG.threat.minimumFactionAbilityCooldownMs);
+  assert.equal(maximum.enemyMovementMultiplier, MEMORY_ARENA_CONFIG.threat.maximumMovementMultiplier);
+  assert.equal(maximum.visualIntensity, 1);
+});
 
 test('wall following chooses the route toward the target and keeps outward clearance', () => {
   const direction = getWallFollowDirection(
@@ -295,10 +325,12 @@ test('faction emergency pressure produces one telegraphed activation and then co
     nearbyHostiles: 12,
     factionAlive: true,
     abilityAvailable: true,
+    cooldownMs: 17000,
   });
   assert.equal(blast.detonated, true);
   assert.equal(blast.state.phase, 'cooldown');
   assert.equal(blast.state.pressure, 0);
+  assert.equal(blast.state.cooldownUntil, 3100 + MEMORY_ARENA_CONFIG.factionEmergency.telegraphMs + 17000);
 
   const stillCooling = advanceFactionEmergencyState(blast.state, {
     now: blast.state.cooldownUntil - 1,

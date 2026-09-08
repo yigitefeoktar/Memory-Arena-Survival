@@ -77,6 +77,7 @@ import {
   getRaidFormationOffset,
   getTriangleTelegraphVisual,
   getPlayerLevelStats,
+  getMemoryThreatStats,
   grantPlayerLevelUpgrade,
   getWallFollowDirection,
   derivePlayerUpgradeRanks,
@@ -239,7 +240,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 7;
+const SAVE_VERSION = 8;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -3672,6 +3673,7 @@ export default function GameCanvas() {
     gameMode: 'normal' as GameMode,
     hardMode: false,
     memoryMode: false,
+    memoryRunElapsedMs: 0,
     chain: createInitialChainState() as ChainState,
     playerUpgradeRanks: createInitialPlayerUpgradeRanks() as PlayerUpgradeRanks,
     factionRaids: createInitialFactionRaidStates() as FactionRaidStates,
@@ -4509,6 +4511,7 @@ export default function GameCanvas() {
       gameMode: state.gameMode,
       hardMode: state.hardMode,
       memoryMode: state.memoryMode,
+      memoryRunElapsedMs: state.memoryRunElapsedMs,
       chain: {
         ...state.chain,
         target: state.chain.target ? { ...state.chain.target } : null,
@@ -5584,6 +5587,14 @@ export default function GameCanvas() {
     const camH = canvasRef.current?.height || containerSize.height || 800;
 
     const lastEnemySpawnTime = adjustTime(rawState.lastEnemySpawn);
+    const reconstructedMemoryRunElapsedMs = isMemorySave && version >= 8
+      ? (() => {
+          if (!isBoundedNum(rawState.memoryRunElapsedMs, 0, 1_000_000_000_000)) {
+            throw new Error("INVALID SAVE FILE");
+          }
+          return rawState.memoryRunElapsedMs;
+        })()
+      : 0;
 
     const cleanState = {
       player: reconstructedPlayer,
@@ -5635,6 +5646,7 @@ export default function GameCanvas() {
       gameMode: cleanGameMode,
       hardMode: cleanGameMode !== 'normal',
       memoryMode: isMemorySave,
+      memoryRunElapsedMs: reconstructedMemoryRunElapsedMs,
       chain: reconstructedChain,
       playerUpgradeRanks: reconstructedPlayerUpgradeRanks,
       factionRaids: reconstructedFactionRaids,
@@ -6360,6 +6372,7 @@ export default function GameCanvas() {
     state.gameMode = selectedGameMode;
     state.hardMode = isHardMode;
     state.memoryMode = !isMultiplayer;
+    state.memoryRunElapsedMs = 0;
     state.nextEntityId = 1;
 
     state.tutorial = {
@@ -6631,6 +6644,7 @@ export default function GameCanvas() {
       const mapDef = MEMORY_MAPS[selectedMapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID];
       const resetTime = performance.now();
       state.memoryMode = true;
+      state.memoryRunElapsedMs = 0;
       state.chain = createInitialChainState();
       state.factionRaids = createInitialFactionRaidStates(resetTime);
       state.factionEmergencies = createInitialFactionEmergencyStates(resetTime);
@@ -9705,6 +9719,11 @@ export default function GameCanvas() {
       }
 
       if (shouldRunUpdates) {
+        if (state.memoryMode && STATUS === 'PLAYING') {
+          state.memoryRunElapsedMs += dt * 1000;
+        }
+        const memoryThreat = getMemoryThreatStats(state.memoryRunElapsedMs, state.chain.level);
+
         // Track blocks each player has been inside during the last 1 second to prevent bullet self-elimination
         if (!state.player.recentBlocks) {
           state.player.recentBlocks = [];
@@ -10601,7 +10620,7 @@ export default function GameCanvas() {
             const replicationParents = [...state.spawners] as MemorySpawner[];
             for (const parent of replicationParents) {
               if (!parent.factionColor || currentTime < (parent.nextReplicationAt ?? Infinity)) continue;
-              parent.nextReplicationAt = currentTime + MEMORY_ARENA_CONFIG.spawner.replicationIntervalMs;
+              parent.nextReplicationAt = currentTime + memoryThreat.replicationIntervalMs;
               if (state.spawners.length >= MEMORY_ARENA_CONFIG.spawner.maximumLivingSpawners) continue;
 
               const replicaRadius = MEMORY_ARENA_CONFIG.spawner.replicaRadius;
@@ -10651,8 +10670,8 @@ export default function GameCanvas() {
                 maxHp: MEMORY_ARENA_CONFIG.spawner.replicaHp,
                 factionColor: parent.factionColor,
                 isCore: false,
-                nextSpawnAt: currentTime + MEMORY_ARENA_CONFIG.spawner.spawnIntervalMs,
-                nextReplicationAt: currentTime + MEMORY_ARENA_CONFIG.spawner.replicationIntervalMs,
+                nextSpawnAt: currentTime + memoryThreat.spawnIntervalMs,
+                nextReplicationAt: currentTime + memoryThreat.replicationIntervalMs,
                 spawnBag: createShuffledShapeBag(),
               };
               state.spawners.push(replica);
@@ -10674,7 +10693,7 @@ export default function GameCanvas() {
                 if (!spawner.factionColor || currentTime < (spawner.nextSpawnAt ?? Infinity)) continue;
                 const taken = takeShapeFromBag(spawner.spawnBag ?? []);
                 spawner.spawnBag = taken.remaining;
-                spawner.nextSpawnAt = currentTime + MEMORY_ARENA_CONFIG.spawner.spawnIntervalMs;
+                spawner.nextSpawnAt = currentTime + memoryThreat.spawnIntervalMs;
 
                 let spawnX = spawner.x;
                 let spawnY = spawner.y;
@@ -10894,6 +10913,7 @@ export default function GameCanvas() {
               nearbyHostiles: largestHostileFaction,
               factionAlive: members.length > 0,
               abilityAvailable: members.length > 0,
+              cooldownMs: memoryThreat.factionAbilityCooldownMs,
             });
             state.factionEmergencies[faction] = transition.state;
 
@@ -11109,7 +11129,7 @@ export default function GameCanvas() {
               raid.phaseStartedAt = currentTime;
             };
 
-            if (raid.phase === 'idle' && members.length >= MEMORY_ARENA_CONFIG.raids.armySize) {
+            if (raid.phase === 'idle' && members.length >= memoryThreat.armySize) {
               const possibleTargets = state.spawners.filter(spawner =>
                 canEnemyFactionDamageSpawner(faction, spawner)
               );
@@ -11319,7 +11339,7 @@ export default function GameCanvas() {
                 enemy,
                 targetX,
                 targetY,
-                enemy.speed,
+                enemy.speed * memoryThreat.enemyMovementMultiplier,
                 dt,
                 activeWalls,
               );
@@ -11356,7 +11376,7 @@ export default function GameCanvas() {
                   enemy,
                   raidDestination.x,
                   raidDestination.y,
-                  enemy.speed,
+                  enemy.speed * memoryThreat.enemyMovementMultiplier,
                   dt,
                   activeWalls,
                 );
@@ -11373,7 +11393,7 @@ export default function GameCanvas() {
                   enemy,
                   enemy.moveDx ?? 1,
                   enemy.moveDy ?? 0,
-                  enemy.speed,
+                  enemy.speed * memoryThreat.enemyMovementMultiplier,
                   dt,
                   activeWalls,
                 );
@@ -11465,7 +11485,7 @@ export default function GameCanvas() {
                     enemy,
                     raidDestination.x,
                     raidDestination.y,
-                    enemy.speed,
+                    enemy.speed * memoryThreat.enemyMovementMultiplier,
                     dt,
                     activeWalls,
                   );
@@ -11482,7 +11502,7 @@ export default function GameCanvas() {
                     enemy,
                     enemy.moveDx ?? 1,
                     enemy.moveDy ?? 0,
-                    enemy.speed,
+                    enemy.speed * memoryThreat.enemyMovementMultiplier,
                     dt,
                     activeWalls,
                   );
@@ -13825,6 +13845,16 @@ export default function GameCanvas() {
       }
 
       // Draw Spawners
+      const renderMapDefinition = state.memoryMode
+        ? (MEMORY_MAPS[uiRef.current.mapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID])
+        : (MAPS[uiRef.current.mapId] || MAPS.medium);
+      const initialSpawners = renderMapDefinition.spawners.length;
+      const spawnerSpeedScale = state.hardMode ? (initialSpawners / Math.max(1, state.spawners.length)) : 1;
+      const threatVisual = state.memoryMode
+        ? getMemoryThreatStats(state.memoryRunElapsedMs, state.chain.level)
+        : null;
+      const threatVisualIntensity = threatVisual?.visualIntensity ?? 0;
+      const threatPulseSpeed = 1 + threatVisualIntensity * 0.9;
       for (const spawner of state.spawners) {
         if (
           spawner.x + spawner.radius < state.camera.x ||
@@ -13974,17 +14004,12 @@ export default function GameCanvas() {
           ctx.restore();
         }
 
-        const renderMapDefinition = state.memoryMode
-          ? (MEMORY_MAPS[uiRef.current.mapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID])
-          : (MAPS[uiRef.current.mapId] || MAPS.medium);
-        const initialSpawners = renderMapDefinition.spawners.length;
-        const spawnerSpeedScale = state.hardMode ? (initialSpawners / state.spawners.length) : 1;
-
         ctx.save();
 
         // Outer glow/pulse gets faster in Hard Mode as remaining spawners decrease
         const isMemoryReplica = state.memoryMode && spawner.isCore === false;
-        const pulse = Math.sin(worldPhaseTime / (200 / spawnerSpeedScale)) * (isMemoryReplica ? 2.5 : 5);
+        const pulse = Math.sin(worldPhaseTime / (200 / (spawnerSpeedScale * threatPulseSpeed))) *
+          (isMemoryReplica ? 2.5 : 5) * (1 + threatVisualIntensity * 0.65);
         const glowColor = spawner.factionColor
           ? ENEMY_COLOR_HEX[spawner.factionColor]
           : (state.memoryMode ? PLAYER_COLOR_HEX : (state.hardMode ? '#ff3300' : '#ff00ff'));
@@ -13993,10 +14018,30 @@ export default function GameCanvas() {
           : (state.hardMode ? 'rgba(255, 51, 0, 0.15)' : 'rgba(255, 0, 255, 0.15)');
         ctx.fillStyle = fillGlow;
         ctx.shadowColor = glowColor;
-        ctx.shadowBlur = isMemoryReplica ? 10 : 20;
+        ctx.shadowBlur = (isMemoryReplica ? 10 : 20) + threatVisualIntensity * (isMemoryReplica ? 8 : 16);
         ctx.beginPath();
         ctx.arc(spawner.x, spawner.y, spawner.radius * 1.8 + pulse, 0, Math.PI * 2);
         ctx.fill();
+
+        if (threatVisual && threatVisual.tier > 0) {
+          const markerCount = Math.min(3, 1 + Math.floor(threatVisualIntensity * 3));
+          ctx.save();
+          ctx.translate(spawner.x, spawner.y);
+          ctx.rotate(worldPhaseTime * 0.00035 * threatPulseSpeed);
+          ctx.strokeStyle = glowColor;
+          ctx.globalAlpha = 0.28 + threatVisualIntensity * 0.32;
+          ctx.lineWidth = 1.5 + threatVisualIntensity;
+          ctx.shadowColor = glowColor;
+          ctx.shadowBlur = 8 + threatVisualIntensity * 10;
+          for (let marker = 0; marker < markerCount; marker++) {
+            const markerRadius = spawner.radius * 1.28 + marker * 7;
+            const offset = marker * (Math.PI * 2 / markerCount);
+            ctx.beginPath();
+            ctx.arc(0, 0, markerRadius, offset, offset + 0.42 + threatVisualIntensity * 0.28);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
 
         // Hexagon shape
         const isImpossibleMode = state.gameMode === 'impossible';
@@ -14018,7 +14063,8 @@ export default function GameCanvas() {
         ctx.stroke();
 
         // Inner core
-        const corePulse = Math.sin(worldPhaseTime / (150 / spawnerSpeedScale)) * 3;
+        const corePulse = Math.sin(worldPhaseTime / (150 / (spawnerSpeedScale * threatPulseSpeed))) *
+          3 * (1 + threatVisualIntensity * 0.35);
         ctx.fillStyle = glowColor;
         ctx.beginPath();
         ctx.arc(spawner.x, spawner.y, spawner.radius * (isMemoryReplica ? 0.28 : 0.4) + corePulse, 0, Math.PI * 2);
