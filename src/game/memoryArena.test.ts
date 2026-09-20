@@ -30,6 +30,7 @@ import {
   getTriangleTelegraphVisual,
   getPlayerLevelStats,
   getMemoryThreatStats,
+  getMissingEnemyCombinations,
   getWallFollowDirection,
   grantPlayerLevelUpgrade,
   derivePlayerUpgradeRanks,
@@ -45,6 +46,19 @@ import {
   type ColoredCoreSpawnerState,
   type EnemyAiState,
 } from './memoryArena';
+
+test('missing enemy combinations cover every hostile colour and shape', () => {
+  const all = getMissingEnemyCombinations([]);
+  assert.equal(all.length, ENEMY_FACTIONS.length * ENEMY_SHAPES.length);
+  assert.equal(new Set(all.map(enemy => `${enemy.color}:${enemy.shape}`)).size, all.length);
+  assert.deepEqual(getMissingEnemyCombinations([
+    { factionColor: 'red', shape: 'circle' },
+    { factionColor: 'blue', shape: 'square', isPlayerAlly: true },
+  ]).filter(enemy => enemy.color === 'red' && enemy.shape === 'circle'), []);
+  assert.ok(getMissingEnemyCombinations([
+    { factionColor: 'blue', shape: 'square', isPlayerAlly: true },
+  ]).some(enemy => enemy.color === 'blue' && enemy.shape === 'square'));
+});
 
 test('memory threat combines elapsed time and player level', () => {
   const opening = getMemoryThreatStats(0, 1);

@@ -78,6 +78,7 @@ import {
   getTriangleTelegraphVisual,
   getPlayerLevelStats,
   getMemoryThreatStats,
+  getMissingEnemyCombinations,
   grantPlayerLevelUpgrade,
   getWallFollowDirection,
   derivePlayerUpgradeRanks,
@@ -468,7 +469,7 @@ const MAPS: Record<string, MapDefinition> = {
   fortress: {
     name: "Fortress",
     difficulty: "HARD",
-    description: "Begin outside the main gate. Breach the fortress to reach its heavily guarded spawners.",
+    description: "Begin outside the main gate and fight through the heavily guarded fortress.",
     walls: [
       ...BASE_WALLS,
       { x: 800, y: 800, w: 600, h: 100 },
@@ -640,7 +641,7 @@ const MAPS: Record<string, MapDefinition> = {
   gladiator_pit: {
     name: "Relic Sanctum",
     difficulty: "HARD",
-    description: "An asymmetric battleground with five specialized chambers. Each spawner is protected by a powerful cosmic relic—from kinetic deflectors to thermal magma gates.",
+    description: "An asymmetric battleground with five specialized chambers and varied defensive layouts.",
     walls: [
       ...BASE_WALLS,
       // Sector 1 (Top-Left, Shield Generator)
@@ -686,7 +687,7 @@ const MAPS: Record<string, MapDefinition> = {
   sector_control: {
     name: "Sector Control",
     difficulty: "HARD",
-    description: "Divided into 4 quadrants. Each room's spawner is fortified with a unique defensive layout and cosmic relic—from kinetic deflectors to rotating magma gates.",
+    description: "Divided into four quadrants, each with a distinct defensive layout.",
     walls: [
       ...BASE_WALLS,
       { x: 50, y: 1450, w: 1200, h: 100 },
@@ -724,7 +725,7 @@ const MAPS: Record<string, MapDefinition> = {
   hellfire_ring: {
     name: "Hellfire Ring",
     difficulty: "EXPERT",
-    description: "A tight central bunker surrounded by an active outer ring of hostile spawners.",
+    description: "A tight central bunker surrounded by an exposed outer ring.",
     walls: [
       ...BASE_WALLS,
       // Central bunker
@@ -832,7 +833,7 @@ const MAPS: Record<string, MapDefinition> = {
   labyrinth: {
     name: "Serpentine Labyrinth",
     difficulty: "HARD",
-    description: "Begin near one end of a winding maze and fight toward the crystal-protected spawner at its far end.",
+    description: "Begin near one end of a winding maze and fight through to its far end.",
     walls: (() => {
       const walls: { x: number; y: number; w: number; h: number }[] = [...BASE_WALLS];
       const CELL_SIZE = 360;
@@ -2801,7 +2802,7 @@ export default function GameCanvas() {
     return true;
   }, []);
 
-  const [uiState, setUiState] = useState<{ status: 'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER' | 'VICTORY' | 'LOBBY'; score: number; deviceType: 'desktop' | 'mobile'; activeTool: 'weapon' | 'special' | 'build'; blocks: number; spawnersLeft: number; mapId: string; hardMode: boolean; gameMode: GameMode; hp: number; maxHp: number; level: number; chainProgress: number; ownedAbilities: AbilityOwnership; buttonCounters: { damage: number; special: number; build: number; convert: number } }>({ status: 'MENU', score: 0, deviceType: 'desktop', activeTool: 'special', blocks: 50, spawnersLeft: 4, mapId: MEMORY_DEFAULT_MAP_ID, hardMode: false, gameMode: 'normal', hp: MEMORY_ARENA_CONFIG.player.maxHp, maxHp: MEMORY_ARENA_CONFIG.player.maxHp, level: 1, chainProgress: 0, ownedAbilities: createEmptyAbilityOwnership(), buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 } });
+  const [uiState, setUiState] = useState<{ status: 'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER' | 'VICTORY' | 'LOBBY'; score: number; deviceType: 'desktop' | 'mobile'; activeTool: 'weapon' | 'special' | 'build'; blocks: number; spawnersLeft: number; mapId: string; hardMode: boolean; gameMode: GameMode; hp: number; maxHp: number; level: number; chainProgress: number; ownedAbilities: AbilityOwnership; buttonCounters: { damage: number; special: number; build: number; convert: number } }>({ status: 'MENU', score: 0, deviceType: 'desktop', activeTool: 'special', blocks: 50, spawnersLeft: 0, mapId: MEMORY_DEFAULT_MAP_ID, hardMode: false, gameMode: 'normal', hp: MEMORY_ARENA_CONFIG.player.maxHp, maxHp: MEMORY_ARENA_CONFIG.player.maxHp, level: 1, chainProgress: 0, ownedAbilities: createEmptyAbilityOwnership(), buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 } });
   const uiRef = useRef(uiState);
   uiRef.current = uiState;
 
@@ -2908,7 +2909,7 @@ export default function GameCanvas() {
         triggerEndPresentation({
           outcome: 'victory',
           causeCode: 'spawner_destroyed',
-          label: 'ALL SPAWNERS DESTROYED',
+          label: 'ARENA CLEARED',
           impactPos: null,
           markerColor: '#00f0ff',
           startTimestamp: performance.now(),
@@ -3642,13 +3643,7 @@ export default function GameCanvas() {
     zones: [] as { x: number; y: number; innerRadius: number; outerRadius: number; duration: number; spawnTime: number; ownerId: string; colorIdx?: number, type?: 'repel' }[],
     nextEntityId: 1,
     bouncerCapacity: 2,
-    spawners: [
-      { x: 800, y: 800, radius: 40, hp: 100, maxHp: 100, specialType: undefined as string | undefined },
-      { x: 2200, y: 800, radius: 40, hp: 100, maxHp: 100, specialType: undefined as string | undefined },
-      { x: 800, y: 2200, radius: 40, hp: 100, maxHp: 100, specialType: undefined as string | undefined },
-      { x: 2400, y: 2400, radius: 40, hp: 100, maxHp: 100, specialType: undefined as string | undefined },
-      { x: 1500, y: 600, radius: 40, hp: 100, maxHp: 100, specialType: undefined as string | undefined }
-    ] as MemorySpawner[],
+    spawners: [] as MemorySpawner[],
     keys: { w: false, a: false, s: false, d: false },
     mouse: { x: 0, y: 0, worldX: 0, worldY: 0, down: false, justDown: false, rightDown: false, rightJustDown: false },
     touches: {
@@ -5566,7 +5561,7 @@ export default function GameCanvas() {
       deviceType: isMobileRef.current ? ('mobile' as const) : ('desktop' as const),
       activeTool: rawUi.activeTool === 'build' ? ('build' as const) : ('special' as const),
       blocks: rawUi.blocks !== undefined ? rawUi.blocks : 50,
-      spawnersLeft: spawnersLeftCount,
+      spawnersLeft: 0,
       mapId: mapId,
       hardMode: cleanGameMode !== 'normal',
       gameMode: cleanGameMode,
@@ -5615,7 +5610,7 @@ export default function GameCanvas() {
       zones: reconstructedZones,
       nextEntityId: rawState.nextEntityId !== undefined ? rawState.nextEntityId : 1,
       bouncerCapacity: rawState.bouncerCapacity !== undefined ? rawState.bouncerCapacity : 2,
-      spawners: reconstructedSpawners,
+      spawners: [] as MemorySpawner[],
       keys: { w: false, a: false, s: false, d: false },
       mouse: { x: 0, y: 0, worldX: 0, worldY: 0, down: false, justDown: false, rightDown: false, rightJustDown: false },
       touches: {
@@ -6376,7 +6371,7 @@ export default function GameCanvas() {
     state.nextEntityId = 1;
 
     state.tutorial = {
-      active: !isMultiplayer && !state.memoryMode,
+      active: false,
       spawnerIndex: tutIdx,
       enemySpawned: false,
       timer: 0
@@ -6419,17 +6414,7 @@ export default function GameCanvas() {
     }
     state.bouncerCapacity = 2;
     const resetTime = performance.now();
-    state.spawners = mapDef.spawners.map((s: any, index: number) => ({
-      ...s,
-      hp: selectedGameMode === 'impossible' ? (s.maxHp ?? s.hp ?? 100) : s.hp,
-      nextSpawnAt: state.memoryMode
-        ? resetTime + MEMORY_ARENA_CONFIG.spawner.spawnStaggerMs * (index + 1)
-        : undefined,
-      nextReplicationAt: state.memoryMode
-        ? resetTime + MEMORY_ARENA_CONFIG.spawner.replicationIntervalMs + MEMORY_ARENA_CONFIG.spawner.replicationStaggerMs * index
-        : undefined,
-      spawnBag: state.memoryMode ? createShuffledShapeBag() : undefined,
-    }));
+    state.spawners = [];
     state.chain = createInitialChainState();
     state.factionRaids = createInitialFactionRaidStates(resetTime);
     state.factionEmergencies = createInitialFactionEmergencyStates(resetTime);
@@ -6454,9 +6439,7 @@ export default function GameCanvas() {
     releaseAllInputs();
 
     const uiHardMode = isMultiplayer ? (selectedGameMode !== 'normal') : isHardMode;
-    const objectiveSpawnersLeft = state.memoryMode
-      ? countRemainingCoreSpawners(state.spawners)
-      : state.spawners.length;
+    const objectiveSpawnersLeft = 0;
     const newUi = { status: 'PLAYING' as const, score: 0, deviceType: dType, activeTool: 'special' as const, blocks: 50, spawnersLeft: objectiveSpawnersLeft, mapId: selectedMapId, hardMode: uiHardMode, gameMode: selectedGameMode, hp: state.player.hp, maxHp: state.player.maxHp, level: state.chain.level, chainProgress: state.chain.progress, ownedAbilities: { ...state.abilityOwnership }, buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 } };
     uiRef.current = newUi;
     setUiState(newUi);
@@ -6648,13 +6631,7 @@ export default function GameCanvas() {
       state.chain = createInitialChainState();
       state.factionRaids = createInitialFactionRaidStates(resetTime);
       state.factionEmergencies = createInitialFactionEmergencyStates(resetTime);
-      state.spawners = mapDef.spawners.map((s: any, index: number) => ({
-        ...s,
-        hp: s.hp,
-        nextSpawnAt: resetTime + MEMORY_ARENA_CONFIG.spawner.spawnStaggerMs * (index + 1),
-        nextReplicationAt: resetTime + MEMORY_ARENA_CONFIG.spawner.replicationIntervalMs + MEMORY_ARENA_CONFIG.spawner.replicationStaggerMs * index,
-        spawnBag: createShuffledShapeBag(),
-      }));
+      state.spawners = [];
       state.nextEntityId = 1;
       state.bouncerCapacity = 2;
 
@@ -6721,7 +6698,7 @@ export default function GameCanvas() {
         deviceType: dType,
         activeTool: 'special' as const,
         blocks: 50,
-        spawnersLeft: countRemainingCoreSpawners(state.spawners),
+        spawnersLeft: 0,
         mapId: selectedMapId,
         hardMode: isHardMode,
         gameMode: selectedGameMode,
@@ -6810,10 +6787,6 @@ export default function GameCanvas() {
           state.finalRunnerId = remainingPlayer.id;
           state.finalRunDeadline = currentTime + 20000;
         }
-      } else if (state.gameMode !== 'impossible' && state.spawners.length === 0) {
-        state.matchPhase = 'FINAL_RUN';
-        state.finalRunnerId = null;
-        state.finalRunDeadline = currentTime + 20000;
       }
     }
 
@@ -8547,15 +8520,10 @@ export default function GameCanvas() {
           ? (mappedMultiplayerPlayers[myId].score || 0)
           : uiRef.current.score;
 
-        if (state.spawnersLeft === 0 && !mpRef.current.roomId) {
-          uiRef.current.status = 'VICTORY';
+        if (uiRef.current.score !== targetScore || uiRef.current.blocks !== state.blocksLeft) {
           uiRef.current.score = targetScore;
-          setUiState(prev => ({ ...prev, status: 'VICTORY', score: targetScore, spawnersLeft: 0 }));
-        } else if (uiRef.current.score !== targetScore || uiRef.current.spawnersLeft !== state.spawnersLeft || uiRef.current.blocks !== state.blocksLeft) {
-          uiRef.current.score = targetScore;
-          uiRef.current.spawnersLeft = state.spawnersLeft;
           uiRef.current.blocks = state.blocksLeft;
-          setUiState(prev => ({ ...prev, score: targetScore, spawnersLeft: state.spawnersLeft, blocks: state.blocksLeft }));
+          setUiState(prev => ({ ...prev, score: targetScore, blocks: state.blocksLeft }));
         }
       }
       setMpTick(t => t + 1);
@@ -10551,342 +10519,39 @@ export default function GameCanvas() {
             }
           }
 
-        // 2. Spawn Enemies
-        if (state.spawners.length > 0) {
-          // Emit ambient floating relic particles (only for spawners with active obstacles)
-          for (const spawner of state.spawners) {
-            if (spawner.specialType && Math.random() < 0.15) {
-              let pColor = '#ff00ff';
-              let vx = (Math.random() - 0.5) * 50;
-              let vy = (Math.random() - 0.5) * 50;
-              let maxLife = Math.random() * 1.5 + 0.5;
-              let radius = Math.random() * 2 + 1;
-
-              if (spawner.specialType === 'shield') {
-                pColor = '#00f0ff';
-                const angle = Math.random() * Math.PI * 2;
-                vx = Math.cos(angle) * 30;
-                vy = Math.sin(angle) * 30;
-              } else if (spawner.specialType === 'kinetic') {
-                pColor = '#ffcc00';
-                const angle = Math.random() * Math.PI * 2;
-                vx = Math.cos(angle) * 120;
-                vy = Math.sin(angle) * 120;
-              } else if (spawner.specialType === 'singularity') {
-                pColor = '#b500ff';
-                const angle = Math.random() * Math.PI * 2;
-                const spawnRadius = 80 + Math.random() * 20;
-                const px = spawner.x + Math.cos(angle) * spawnRadius;
-                const py = spawner.y + Math.sin(angle) * spawnRadius;
-                state.particles.push({
-                  x: px,
-                  y: py,
-                  vx: -Math.cos(angle) * 60,
-                  vy: -Math.sin(angle) * 60,
-                  life: 0,
-                  maxLife: 1.2,
-                  color: pColor,
-                  radius: Math.random() * 2.5 + 0.5
-                });
-                continue;
-              } else if (spawner.specialType === 'magma_gates') {
-                pColor = '#ff5500';
-                vy = -Math.random() * 40 - 20;
-                vx = (Math.random() - 0.5) * 20;
-              } else if (spawner.specialType === 'crystal') {
-                pColor = '#00ffaa';
-                vx = (Math.random() - 0.5) * 15;
-                vy = (Math.random() - 0.5) * 15;
-                radius = Math.random() * 3 + 1.5;
-              } else {
-                continue; // Do not emit for default or unknown spawner types
-              }
-
-              state.particles.push({
-                x: spawner.x + (Math.random() - 0.5) * 50,
-                y: spawner.y + (Math.random() - 0.5) * 50,
-                vx,
-                vy,
-                life: 0,
-                maxLife,
-                color: pColor,
-                radius
-              });
-            }
-          }
-
-
-          if (state.memoryMode) {
-            const replicationParents = [...state.spawners] as MemorySpawner[];
-            for (const parent of replicationParents) {
-              if (!parent.factionColor || currentTime < (parent.nextReplicationAt ?? Infinity)) continue;
-              parent.nextReplicationAt = currentTime + memoryThreat.replicationIntervalMs;
-              if (state.spawners.length >= MEMORY_ARENA_CONFIG.spawner.maximumLivingSpawners) continue;
-
-              const replicaRadius = MEMORY_ARENA_CONFIG.spawner.replicaRadius;
-              const angleOffset = ((parent.x * 0.017 + parent.y * 0.031) % (Math.PI * 2));
-              const replicaPosition = findNearestSpawnerReplicationPosition(
-                { x: parent.x, y: parent.y },
-                (candidateX, candidateY) => {
-                  if (
-                    candidateX < replicaRadius + MEMORY_ARENA_CONFIG.spawner.replicationPlacementPadding ||
-                    candidateX > MAP_WIDTH - replicaRadius - MEMORY_ARENA_CONFIG.spawner.replicationPlacementPadding ||
-                    candidateY < replicaRadius + MEMORY_ARENA_CONFIG.spawner.replicationPlacementPadding ||
-                    candidateY > MAP_HEIGHT - replicaRadius - MEMORY_ARENA_CONFIG.spawner.replicationPlacementPadding
-                  ) return false;
-                  if (activeWalls.some(wall => circleOverlapsWall(
-                    candidateX,
-                    candidateY,
-                    replicaRadius + MEMORY_ARENA_CONFIG.spawner.replicationPlacementPadding,
-                    wall,
-                  ))) return false;
-                  if (state.spawners.some(other => (
-                    Math.hypot(candidateX - other.x, candidateY - other.y) <
-                    MEMORY_ARENA_CONFIG.spawner.replicationStartDistance
-                  ))) return false;
-                  if (Math.hypot(candidateX - state.player.x, candidateY - state.player.y) <
-                      replicaRadius + state.player.radius + MEMORY_ARENA_CONFIG.spawner.replicationPlayerClearance) return false;
-                  return !state.blocks.some(block => {
-                    const halfSize = block.size / 2;
-                    const closestX = Math.max(block.x - halfSize, Math.min(candidateX, block.x + halfSize));
-                    const closestY = Math.max(block.y - halfSize, Math.min(candidateY, block.y + halfSize));
-                    return Math.hypot(candidateX - closestX, candidateY - closestY) <
-                      replicaRadius + MEMORY_ARENA_CONFIG.spawner.replicationPlacementPadding;
-                  });
-                },
-                angleOffset,
-              );
-
-              if (!replicaPosition) {
-                parent.nextReplicationAt = currentTime + MEMORY_ARENA_CONFIG.spawner.replicationRetryMs;
-                continue;
-              }
-
-              const replica: MemorySpawner = {
-                x: replicaPosition.x,
-                y: replicaPosition.y,
-                radius: replicaRadius,
-                hp: MEMORY_ARENA_CONFIG.spawner.replicaHp,
-                maxHp: MEMORY_ARENA_CONFIG.spawner.replicaHp,
-                factionColor: parent.factionColor,
-                isCore: false,
-                nextSpawnAt: currentTime + memoryThreat.spawnIntervalMs,
-                nextReplicationAt: currentTime + memoryThreat.replicationIntervalMs,
-                spawnBag: createShuffledShapeBag(),
-              };
-              state.spawners.push(replica);
-              const replicaColor = ENEMY_COLOR_HEX[parent.factionColor];
-              spawnParticles(replica.x, replica.y, replicaColor, 28);
-              state.shockwaves.push({
-                x: replica.x,
-                y: replica.y,
-                color: replicaColor,
-                maxRadius: 100,
-                age: 0,
-                maxAge: 0.4,
-                thickness: 8,
-              });
-            }
-
-            if (state.enemies.length < MEMORY_ARENA_CONFIG.spawner.livingEnemyCap) {
-              for (const spawner of state.spawners) {
-                if (!spawner.factionColor || currentTime < (spawner.nextSpawnAt ?? Infinity)) continue;
-                const taken = takeShapeFromBag(spawner.spawnBag ?? []);
-                spawner.spawnBag = taken.remaining;
-                spawner.nextSpawnAt = currentTime + memoryThreat.spawnIntervalMs;
-
-                let spawnX = spawner.x;
-                let spawnY = spawner.y;
-                let foundSpawn = false;
-                for (let attempt = 0; attempt < 24; attempt++) {
-                  const angle = Math.random() * Math.PI * 2;
-                  const distance = spawner.radius + ENEMY_RADIUS + 16 + Math.random() * 50;
-                  const candidateX = spawner.x + Math.cos(angle) * distance;
-                  const candidateY = spawner.y + Math.sin(angle) * distance;
-                  const blockedByWall = activeWalls.some(wall => circleOverlapsWall(candidateX, candidateY, ENEMY_RADIUS, wall));
-                  const blockedBySpawner = state.spawners.some(other => (
-                    Math.hypot(candidateX - other.x, candidateY - other.y) < other.radius + ENEMY_RADIUS + 6
-                  ));
-                  if (!blockedByWall && !blockedBySpawner) {
-                    spawnX = candidateX;
-                    spawnY = candidateY;
-                    foundSpawn = true;
-                    break;
-                  }
-                }
-
-                if (!foundSpawn) continue;
-                const moveAngle = Math.random() * Math.PI * 2;
-                const spawnedEnemy: MemoryEnemy = {
-                  id: 'me_' + state.nextEntityId++,
-                  x: spawnX,
-                  y: spawnY,
-                  radius: ENEMY_RADIUS,
-                  lastShoot: currentTime + Math.random() * 600,
-                  speed: ENEMY_SPEED + Math.random() * 20,
-                  shape: taken.shape,
-                  factionColor: spawner.factionColor,
-                  angle: moveAngle,
-                  moveDx: Math.cos(moveAngle),
-                  moveDy: Math.sin(moveAngle),
-                  nextTurnAt: currentTime + MEMORY_ARENA_CONFIG.square.minTurnIntervalMs + Math.random() * (MEMORY_ARENA_CONFIG.square.maxTurnIntervalMs - MEMORY_ARENA_CONFIG.square.minTurnIntervalMs),
-                  triangleAi: taken.shape === 'triangle' ? createTriangleAiState(currentTime) : undefined,
-                  dashDx: 0,
-                  dashDy: 0,
-                  kbvx: 0,
-                  kbvy: 0,
-                  processedZoneKbs: [],
-                };
-                state.enemies.push(spawnedEnemy);
-                spawnParticles(spawner.x, spawner.y, ENEMY_COLOR_HEX[spawner.factionColor], 10);
-                if (state.enemies.length >= MEMORY_ARENA_CONFIG.spawner.livingEnemyCap) break;
-              }
-            }
-          } else {
-          const mapDef = MAPS[uiRef.current.mapId] || MAPS.medium;
-          const initialSpawners = mapDef.spawners.length;
-
-          // Tutorial opening enemy
-          if (state.tutorial.active && !state.tutorial.enemySpawned && state.tutorial.spawnerIndex !== null && !mpRef.current.roomId) {
-            state.tutorial.timer += dt * 1000;
-            if (state.tutorial.timer > 1500) {
-              const tutSpawnerDef = mapDef.spawners[state.tutorial.spawnerIndex];
-              const tutSpawner = state.spawners.find(s => s.x === tutSpawnerDef.x && s.y === tutSpawnerDef.y);
-              if (tutSpawner) {
-                let foundSpawn = false;
-                let spawnX = 0;
-                let spawnY = 0;
-
-                const isPosBlocked = (tx: number, ty: number) => {
-                  // check walls
-                  for (const wall of activeWalls) {
-                    if (tx > wall.x - ENEMY_RADIUS && tx < wall.x + wall.w + ENEMY_RADIUS &&
-                        ty > wall.y - ENEMY_RADIUS && ty < wall.y + wall.h + ENEMY_RADIUS) {
-                      return true;
-                    }
-                  }
-                  // check other spawners
-                  for (const sp of state.spawners) {
-                    const dx = tx - sp.x;
-                    const dy = ty - sp.y;
-                    if (Math.sqrt(dx*dx + dy*dy) < (sp.radius + ENEMY_RADIUS + 5)) {
-                      return true;
-                    }
-                  }
-                  // check arena boundary
-                  const border = ENEMY_RADIUS + 10;
-                  if (tx < border || tx > MAP_WIDTH - border || ty < border || ty > MAP_HEIGHT - border) {
-                    return true;
-                  }
-                  return false;
-                };
-
-                // 1. Retry with up to 100 random angles/distances
-                for (let i = 0; i < 100; i++) {
-                  const angle = Math.random() * Math.PI * 2;
-                  const spawnDist = tutSpawner.radius + ENEMY_RADIUS + 10 + Math.random() * 80;
-                  const tx = tutSpawner.x + Math.cos(angle) * spawnDist;
-                  const ty = tutSpawner.y + Math.sin(angle) * spawnDist;
-                  if (!isPosBlocked(tx, ty)) {
-                    spawnX = tx;
-                    spawnY = ty;
-                    foundSpawn = true;
-                    break;
-                  }
-                }
-
-                // 2. If random attempts fail, perform a deterministic grid search around that spawner to guarantee the enemy is successfully created.
-                if (!foundSpawn) {
-                  const step = 10;
-                  const maxSearchDist = tutSpawner.radius + ENEMY_RADIUS + 150;
-                  outerLoop:
-                  for (let d = tutSpawner.radius + ENEMY_RADIUS + 10; d <= maxSearchDist; d += step) {
-                    for (let angleDeg = 0; angleDeg < 360; angleDeg += 10) {
-                      const angle = (angleDeg * Math.PI) / 180;
-                      const tx = tutSpawner.x + Math.cos(angle) * d;
-                      const ty = tutSpawner.y + Math.sin(angle) * d;
-                      if (!isPosBlocked(tx, ty)) {
-                        spawnX = tx;
-                        spawnY = ty;
-                        foundSpawn = true;
-                        break outerLoop;
-                      }
-                    }
-                  }
-                }
-
-                if (foundSpawn) {
-                  state.enemies.push({
-                    id: 'e_' + state.nextEntityId++,
-                    x: spawnX, y: spawnY,
-                    radius: ENEMY_RADIUS,
-                    lastShoot: currentTime,
-                    speed: ENEMY_SPEED
-                  });
-                  const spawnedEnemy = state.enemies[state.enemies.length - 1];
-                  trackAuthoritativeWorldEvent('enemy_spawned', {
-                    enemy_id: spawnedEnemy.id,
-                    enemy_x: spawnedEnemy.x,
-                    enemy_y: spawnedEnemy.y,
-                    spawner_x: tutSpawner.x,
-                    spawner_y: tutSpawner.y,
-                    spawn_type: 'tutorial',
-                    enemies_alive: state.enemies.length,
-                  });
-                  spawnParticles(tutSpawner.x, tutSpawner.y, state.hardMode ? '#ff3300' : '#ff00ff', 10);
-                  state.tutorial.enemySpawned = true;
-                } else {
-                  // Throttle retry to 250ms from now
-                  state.tutorial.timer = 1250;
-                }
-              } else {
-                // Spawner does not exist, deactivate tutorial to avoid infinite checks
-                state.tutorial.active = false;
-              }
-            }
-          }
-
-          let effectiveRate = state.enemySpawnRate;
-          if (state.hardMode) {
-            // Hard Mode: Total spawn rate does not diminish when spawners are destroyed.
-            // Spawning interval remains constant relative to initial (distributes across survivors).
-            effectiveRate = state.enemySpawnRate;
-          } else {
-            // Normal Mode: Spawning slows down as spawners are destroyed
-            const currentSpawnersCount = Math.max(1, state.spawners.length);
-            effectiveRate = state.enemySpawnRate * (initialSpawners / currentSpawnersCount);
-          }
-
-          if (currentTime - state.lastEnemySpawn > effectiveRate) {
-            state.lastEnemySpawn = currentTime;
-            state.enemySpawnRate = Math.max(800, state.enemySpawnRate * 0.95); // Speeds up slightly over time
-
-            const spawner = state.spawners[Math.floor(Math.random() * state.spawners.length)];
-            const angle = Math.random() * Math.PI * 2;
-            const spawnDist = spawner.radius + ENEMY_RADIUS + 10;
-            const spawnX = spawner.x + Math.cos(angle) * spawnDist;
-            const spawnY = spawner.y + Math.sin(angle) * spawnDist;
-
-            state.enemies.push({
-              id: 'e_' + state.nextEntityId++,
-              x: spawnX,
-              y: spawnY,
-              radius: ENEMY_RADIUS,
-              speed: ENEMY_SPEED + Math.random() * 20,
-              lastShoot: currentTime + Math.random() * 1000,
-            });
-            const spawnedEnemy = state.enemies[state.enemies.length - 1];
-            trackAuthoritativeWorldEvent('enemy_spawned', {
-              enemy_id: spawnedEnemy.id,
-              enemy_x: spawnedEnemy.x,
-              enemy_y: spawnedEnemy.y,
-              spawner_x: spawner.x,
-              spawner_y: spawner.y,
-              spawn_type: 'regular',
-              enemies_alive: state.enemies.length,
-            });
-          }
-          }
+        // Maintain one autonomous hostile for every colour and shape combination.
+        // The host owns this roster in multiplayer; guests receive it in snapshots.
+        for (const identity of STATUS === 'PLAYING' ? getMissingEnemyCombinations(state.enemies) : []) {
+          const avoidPositions = [
+            { x: state.player.x, y: state.player.y },
+            ...(Object.values(state.multiplayerPlayers) as Array<{ x: number; y: number }>).map(player => ({ x: player.x, y: player.y })),
+            ...state.enemies.map(enemy => ({ x: enemy.x, y: enemy.y })),
+          ];
+          const spawn = getSafeSpawn(activeWalls, ENEMY_RADIUS + 12, avoidPositions, ENEMY_RADIUS * 2 + 8)
+            ?? getSafeSpawn(activeWalls, ENEMY_RADIUS + 2, avoidPositions, ENEMY_RADIUS + 2)
+            ?? getSafeSpawn(activeWalls, ENEMY_RADIUS + 2, avoidPositions.slice(0, 1), ENEMY_RADIUS + 2);
+          if (!spawn) continue;
+          const moveAngle = Math.random() * Math.PI * 2;
+          state.enemies.push({
+            id: 'me_' + state.nextEntityId++,
+            x: spawn.x,
+            y: spawn.y,
+            radius: ENEMY_RADIUS,
+            lastShoot: currentTime + Math.random() * 600,
+            speed: ENEMY_SPEED + Math.random() * 20,
+            shape: identity.shape,
+            factionColor: identity.color,
+            angle: moveAngle,
+            moveDx: Math.cos(moveAngle),
+            moveDy: Math.sin(moveAngle),
+            nextTurnAt: currentTime + MEMORY_ARENA_CONFIG.square.minTurnIntervalMs + Math.random() * (MEMORY_ARENA_CONFIG.square.maxTurnIntervalMs - MEMORY_ARENA_CONFIG.square.minTurnIntervalMs),
+            triangleAi: identity.shape === 'triangle' ? createTriangleAiState(currentTime) : undefined,
+            dashDx: 0,
+            dashDy: 0,
+            kbvx: 0,
+            kbvy: 0,
+            processedZoneKbs: [],
+          });
         }
 
         const isAuthoritativeMultiplayerSimulation =
@@ -13429,136 +13094,6 @@ export default function GameCanvas() {
             }
           }
 
-          // Faction projectiles can damage hostile replicated spawners, but never cores.
-          if (
-            !bulletDestroyed &&
-            state.memoryMode &&
-            !bullet.isPlayer &&
-            !bullet.isPlayerAlly &&
-            bullet.factionColor
-          ) {
-            const replicaTargets = [...state.spawners];
-            for (const spawner of replicaTargets) {
-              if (
-                !canEnemyFactionDamageSpawner(bullet.factionColor, spawner)
-              ) continue;
-              const dx = spawner.x - bullet.x;
-              const dy = spawner.y - bullet.y;
-              if (dx * dx + dy * dy < (spawner.radius + bullet.radius) ** 2) {
-                damageMemoryReplicaSpawner(
-                  spawner,
-                  bullet.damage ?? MEMORY_ARENA_CONFIG.circle.bulletDamage,
-                );
-                bulletDestroyed = true;
-                break;
-              }
-            }
-          }
-
-          // Check hit Spawners (Stationary targets - hit by any player bullet)
-          if (!bulletDestroyed && bullet.isPlayer && !bullet.isNeutral) {
-            for (let s = state.spawners.length - 1; s >= 0; s--) {
-              const spawner = state.spawners[s];
-              const dx = spawner.x - bullet.x;
-              const dy = spawner.y - bullet.y;
-              const hitThisSpawner = isAuthoritativeMultiplayerBullet
-                ? authoritativeTargetHit?.type === 'spawner' && authoritativeTargetHit.index === s
-                : dx * dx + dy * dy < (spawner.radius + bullet.radius) ** 2;
-              if (hitThisSpawner) {
-                const bulletOwner = bullet.ownerId || 'local';
-                const engagementKey = `${bulletOwner}:${uiRef.current.mapId}:${spawner.x}:${spawner.y}`;
-                if (!analyticsSpawnerEngagementsRef.current.has(engagementKey)) {
-                  analyticsSpawnerEngagementsRef.current.add(engagementKey);
-                  trackGameplayForOwner(bulletOwner, 'spawner_engaged', {
-                    spawner_x: spawner.x,
-                    spawner_y: spawner.y,
-                    spawners_remaining: state.spawners.length,
-                    bullet_id: bullet.id,
-                    bullet_bounce_count: bullet.bounceCount,
-                  });
-                }
-                if (state.gameMode !== 'impossible') {
-                  spawner.hp -= state.memoryMode ? MEMORY_ARENA_CONFIG.spawner.playerBulletDamage : 20;
-                }
-                spawnParticles(bullet.x, bullet.y, '#ffffff', 10);
-                bulletDestroyed = true;
-
-                if (state.gameMode !== 'impossible' && spawner.hp <= 0) {
-                  const destroyedSpawner = { x: spawner.x, y: spawner.y, radius: spawner.radius, isCore: spawner.isCore };
-                  const spawnerColor = spawner.factionColor
-                    ? ENEMY_COLOR_HEX[spawner.factionColor]
-                    : (state.memoryMode ? PLAYER_COLOR_HEX : (state.hardMode ? '#ff3300' : '#ff00ff'));
-                  spawnParticles(spawner.x, spawner.y, spawnerColor, 100);
-                  state.shockwaves.push({ x: spawner.x, y: spawner.y, color: spawnerColor, maxRadius: 200, age: 0, maxAge: 0.5, thickness: 20 });
-                  state.shake = 30;
-                  state.spawners.splice(s, 1);
-                  const objectiveSpawnersLeft = state.memoryMode
-                    ? countRemainingCoreSpawners(state.spawners)
-                    : state.spawners.length;
-                  if (state.tutorial.active) {
-                    state.tutorial.active = false;
-                  }
-                  if (!state.memoryMode || spawner.isCore) {
-                    triggerSpawnerPulse();
-                    handleSpawnerDestroyed(destroyedSpawner);
-                  }
-                  // Force a broadcast immediately of the updated state
-                  state.forceBroadcast = true;
-
-                  let pts = 0;
-                  if (bullet.isPlayer && !bullet.isNeutral) pts = 1000;
-
-                  const bOwner = bullet.ownerId || 'local';
-                  const hostId = socketRef.current?.id || 'local';
-                  trackGameplayForOwner(bOwner, 'spawner_destroyed', {
-                    spawner_x: spawner.x,
-                    spawner_y: spawner.y,
-                    spawners_remaining: state.spawners.length,
-                    bullet_id: bullet.id,
-                    bullet_bounce_count: bullet.bounceCount,
-                    points_awarded: pts,
-                  });
-
-                  const isSinglePlayerVictory = objectiveSpawnersLeft === 0 && !mpRef.current.roomId;
-                  if (isSinglePlayerVictory) {
-                    triggerEndPresentation({
-                      outcome: 'victory',
-                      causeCode: 'spawner_destroyed',
-                      label: state.memoryMode ? 'ALL CORES DESTROYED' : 'ALL SPAWNERS DESTROYED',
-                      impactPos: { x: spawner.x, y: spawner.y },
-                      markerColor: '#00f0ff',
-                      startTimestamp: performance.now(),
-                    });
-                  }
-
-                  if (bOwner === hostId || bOwner === 'local') {
-                    setUiState(prev => {
-                      const newScore = prev.score + pts;
-                      let newBlocks = prev.blocks + 3; // Bonus blocks
-                      uiRef.current = { ...prev, score: newScore, blocks: newBlocks, spawnersLeft: objectiveSpawnersLeft };
-                      if (isSinglePlayerVictory) {
-                        uiRef.current.status = 'VICTORY';
-                      }
-                      return uiRef.current;
-                    });
-                  } else {
-                    if (state.multiplayerPlayers[bOwner]) {
-                      state.multiplayerPlayers[bOwner].score = (state.multiplayerPlayers[bOwner].score || 0) + pts;
-                    }
-                    setUiState(prev => {
-                      uiRef.current = { ...prev, spawnersLeft: objectiveSpawnersLeft };
-                      if (isSinglePlayerVictory) {
-                        uiRef.current.status = 'VICTORY';
-                      }
-                      return uiRef.current;
-                    });
-                  }
-                }
-                break;
-              }
-            }
-          }
-
           // Check hit Player/Remote Players
           if (!bulletDestroyed) {
             if (isAuthoritativeMultiplayerBullet) {
@@ -13844,264 +13379,6 @@ export default function GameCanvas() {
         ctx.restore();
       }
 
-      // Draw Spawners
-      const renderMapDefinition = state.memoryMode
-        ? (MEMORY_MAPS[uiRef.current.mapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID])
-        : (MAPS[uiRef.current.mapId] || MAPS.medium);
-      const initialSpawners = renderMapDefinition.spawners.length;
-      const spawnerSpeedScale = state.hardMode ? (initialSpawners / Math.max(1, state.spawners.length)) : 1;
-      const threatVisual = state.memoryMode
-        ? getMemoryThreatStats(state.memoryRunElapsedMs, state.chain.level)
-        : null;
-      const threatVisualIntensity = threatVisual?.visualIntensity ?? 0;
-      const threatPulseSpeed = 1 + threatVisualIntensity * 0.9;
-      for (const spawner of state.spawners) {
-        if (
-          spawner.x + spawner.radius < state.camera.x ||
-          spawner.x - spawner.radius > state.camera.x + state.camera.width ||
-          spawner.y + spawner.radius < state.camera.y ||
-          spawner.y - spawner.radius > state.camera.y + state.camera.height
-        ) continue;
-
-        // Draw Special Relic effects next to spawners
-        if (spawner.specialType === 'shield') {
-          ctx.save();
-          ctx.translate(spawner.x, spawner.y);
-          ctx.rotate(-worldPhaseTime * 0.001);
-          ctx.strokeStyle = '#00f0ff';
-          ctx.shadowColor = '#00f0ff';
-          ctx.shadowBlur = 15;
-          ctx.lineWidth = 2;
-          for (let i = 0; i < 5; i++) {
-            const angle = (i * Math.PI * 2) / 5;
-            const nx = Math.cos(angle) * 95;
-            const ny = Math.sin(angle) * 95;
-            ctx.fillStyle = '#051d2e';
-            ctx.beginPath();
-            ctx.arc(nx, ny, 12, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
-            ctx.fillStyle = '#00f0ff';
-            ctx.beginPath();
-            ctx.arc(nx, ny, 5, 0, Math.PI * 2);
-            ctx.fill();
-          }
-          ctx.restore();
-        } else if (spawner.specialType === 'kinetic') {
-          ctx.save();
-          ctx.translate(spawner.x, spawner.y);
-          ctx.rotate(worldPhaseTime * 0.0015);
-          ctx.strokeStyle = '#ffcc00';
-          ctx.shadowColor = '#ffcc00';
-          ctx.shadowBlur = 15;
-          ctx.lineWidth = 2.5;
-          for (let i = 0; i < 4; i++) {
-            const angle = (i * Math.PI) / 2;
-            ctx.beginPath();
-            ctx.moveTo(Math.cos(angle) * 50, Math.sin(angle) * 50);
-            ctx.lineTo(Math.cos(angle + 0.2) * 85, Math.sin(angle + 0.2) * 85);
-            ctx.lineTo(Math.cos(angle) * 95, Math.sin(angle) * 95);
-            ctx.lineTo(Math.cos(angle - 0.2) * 85, Math.sin(angle - 0.2) * 85);
-            ctx.closePath();
-            ctx.fillStyle = 'rgba(255, 204, 0, 0.15)';
-            ctx.fill();
-            ctx.stroke();
-          }
-          ctx.restore();
-        } else if (spawner.specialType === 'singularity') {
-          ctx.save();
-          ctx.translate(spawner.x, spawner.y);
-          ctx.rotate(worldPhaseTime * 0.002);
-          for (let arm = 0; arm < 3; arm++) {
-            const startA = (arm * Math.PI * 2) / 3;
-            ctx.beginPath();
-            ctx.strokeStyle = '#b500ff';
-            ctx.shadowColor = '#b500ff';
-            ctx.shadowBlur = 10;
-            ctx.lineWidth = 3;
-            for (let r = 35; r < 90; r += 5) {
-              const theta = startA + (r - 35) * 0.05;
-              const rx = Math.cos(theta) * r;
-              const ry = Math.sin(theta) * r;
-              if (r === 35) ctx.moveTo(rx, ry);
-              else ctx.lineTo(rx, ry);
-            }
-            ctx.stroke();
-          }
-          ctx.fillStyle = '#05000a';
-          ctx.strokeStyle = '#e100ff';
-          ctx.lineWidth = 2;
-          ctx.shadowColor = '#e100ff';
-          ctx.shadowBlur = 15;
-          ctx.beginPath();
-          ctx.arc(0, 0, 20 + Math.sin(worldPhaseTime * 0.01) * 3, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-          ctx.restore();
-        } else if (spawner.specialType === 'magma_gates') {
-          ctx.save();
-          ctx.translate(spawner.x, spawner.y);
-
-          const orbitAngle = worldPhaseTime * 0.0008;
-          ctx.rotate(orbitAngle);
-
-          const rects = [
-            { angle: 0.2, distance: 75, w: 22, h: 45 },
-            { angle: 1.2, distance: 95, w: 35, h: 20 },
-            { angle: 2.2, distance: 80, w: 18, h: 32 },
-            { angle: 3.3, distance: 100, w: 40, h: 15 },
-            { angle: 4.4, distance: 70, w: 25, h: 38 },
-            { angle: 5.5, distance: 90, w: 20, h: 28 },
-          ];
-
-          for (const r of rects) {
-            ctx.save();
-            const cx = Math.cos(r.angle) * r.distance;
-            const cy = Math.sin(r.angle) * r.distance;
-            ctx.translate(cx, cy);
-
-            // Draw translucent orange glowing rectangle with parallel orientation
-            ctx.fillStyle = 'rgba(255, 85, 0, 0.18)';
-            ctx.strokeStyle = '#ff5500';
-            ctx.shadowColor = '#ff5500';
-            ctx.shadowBlur = 10;
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.rect(-r.w / 2, -r.h / 2, r.w, r.h);
-            ctx.fill();
-            ctx.stroke();
-
-            ctx.restore();
-          }
-          ctx.restore();
-        } else if (spawner.specialType === 'crystal') {
-          ctx.save();
-          ctx.translate(spawner.x, spawner.y);
-          ctx.rotate(worldPhaseTime * 0.0006);
-          ctx.strokeStyle = '#00ffaa';
-          ctx.shadowColor = '#00ffaa';
-          ctx.shadowBlur = 15;
-          ctx.lineWidth = 2;
-          for (let i = 0; i < 6; i++) {
-            const angle = (i * Math.PI) / 3;
-            ctx.beginPath();
-            const cos = Math.cos(angle);
-            const sin = Math.sin(angle);
-            ctx.moveTo(cos * 45, sin * 45);
-            ctx.lineTo(Math.cos(angle - 0.1) * 70, Math.sin(angle - 0.1) * 70);
-            ctx.lineTo(cos * 85, sin * 85);
-            ctx.lineTo(Math.cos(angle + 0.1) * 70, Math.sin(angle + 0.1) * 70);
-            ctx.closePath();
-            ctx.fillStyle = 'rgba(0, 255, 170, 0.12)';
-            ctx.fill();
-            ctx.stroke();
-          }
-          ctx.fillStyle = '#011c14';
-          ctx.beginPath();
-          ctx.arc(0, 0, 22, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-          ctx.restore();
-        }
-
-        ctx.save();
-
-        // Outer glow/pulse gets faster in Hard Mode as remaining spawners decrease
-        const isMemoryReplica = state.memoryMode && spawner.isCore === false;
-        const pulse = Math.sin(worldPhaseTime / (200 / (spawnerSpeedScale * threatPulseSpeed))) *
-          (isMemoryReplica ? 2.5 : 5) * (1 + threatVisualIntensity * 0.65);
-        const glowColor = spawner.factionColor
-          ? ENEMY_COLOR_HEX[spawner.factionColor]
-          : (state.memoryMode ? PLAYER_COLOR_HEX : (state.hardMode ? '#ff3300' : '#ff00ff'));
-        const fillGlow = spawner.factionColor || state.memoryMode
-          ? `${glowColor}2a`
-          : (state.hardMode ? 'rgba(255, 51, 0, 0.15)' : 'rgba(255, 0, 255, 0.15)');
-        ctx.fillStyle = fillGlow;
-        ctx.shadowColor = glowColor;
-        ctx.shadowBlur = (isMemoryReplica ? 10 : 20) + threatVisualIntensity * (isMemoryReplica ? 8 : 16);
-        ctx.beginPath();
-        ctx.arc(spawner.x, spawner.y, spawner.radius * 1.8 + pulse, 0, Math.PI * 2);
-        ctx.fill();
-
-        if (threatVisual && threatVisual.tier > 0) {
-          const markerCount = Math.min(3, 1 + Math.floor(threatVisualIntensity * 3));
-          ctx.save();
-          ctx.translate(spawner.x, spawner.y);
-          ctx.rotate(worldPhaseTime * 0.00035 * threatPulseSpeed);
-          ctx.strokeStyle = glowColor;
-          ctx.globalAlpha = 0.28 + threatVisualIntensity * 0.32;
-          ctx.lineWidth = 1.5 + threatVisualIntensity;
-          ctx.shadowColor = glowColor;
-          ctx.shadowBlur = 8 + threatVisualIntensity * 10;
-          for (let marker = 0; marker < markerCount; marker++) {
-            const markerRadius = spawner.radius * 1.28 + marker * 7;
-            const offset = marker * (Math.PI * 2 / markerCount);
-            ctx.beginPath();
-            ctx.arc(0, 0, markerRadius, offset, offset + 0.42 + threatVisualIntensity * 0.28);
-            ctx.stroke();
-          }
-          ctx.restore();
-        }
-
-        // Hexagon shape
-        const isImpossibleMode = state.gameMode === 'impossible';
-        ctx.shadowBlur = 10;
-        ctx.fillStyle = isImpossibleMode ? '#AEB4BE' : (spawner.factionColor ? '#090d16' : (state.hardMode ? '#2a0500' : '#1a001a'));
-        ctx.strokeStyle = isImpossibleMode ? '#AEB4BE' : glowColor;
-        ctx.lineWidth = isMemoryReplica ? 2 : 3;
-        ctx.beginPath();
-        const hexRot = worldPhaseTime / (1500 / spawnerSpeedScale);
-        for (let i = 0; i < 6; i++) {
-          const hexAngle = (i * Math.PI) / 3 + hexRot;
-          const px = spawner.x + Math.cos(hexAngle) * spawner.radius;
-          const py = spawner.y + Math.sin(hexAngle) * spawner.radius;
-          if (i === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
-        }
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-
-        // Inner core
-        const corePulse = Math.sin(worldPhaseTime / (150 / (spawnerSpeedScale * threatPulseSpeed))) *
-          3 * (1 + threatVisualIntensity * 0.35);
-        ctx.fillStyle = glowColor;
-        ctx.beginPath();
-        ctx.arc(spawner.x, spawner.y, spawner.radius * (isMemoryReplica ? 0.28 : 0.4) + corePulse, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.restore();
-
-        if (state.gameMode !== 'impossible') {
-          // Draw HP bar
-          const hpPercent = Math.max(0, spawner.hp / spawner.maxHp);
-          const hpColor = spawner.factionColor
-            ? ENEMY_COLOR_HEX[spawner.factionColor]
-            : (state.memoryMode ? PLAYER_COLOR_HEX : (state.hardMode ? '#ff3300' : '#ff0050'));
-          const barW = 60;
-          const barH = 6;
-          const barX = spawner.x - barW / 2;
-          const barY = spawner.y - spawner.radius - 20;
-
-          // Background
-          ctx.fillStyle = `${hpColor}33`;
-          ctx.fillRect(barX, barY, barW, barH);
-
-          // Fill
-          ctx.fillStyle = hpColor;
-          ctx.save();
-          ctx.shadowColor = hpColor;
-          ctx.shadowBlur = 5;
-          ctx.fillRect(barX, barY, barW * hpPercent, barH);
-          ctx.restore();
-
-          // Border
-          ctx.strokeStyle = hpColor;
-          ctx.lineWidth = 1;
-          ctx.strokeRect(barX, barY, barW, barH);
-        }
-      }
-
       // Draw Bouncers
       for (const b of state.bouncers) {
         if (
@@ -14168,7 +13445,7 @@ export default function GameCanvas() {
           enemy.y - enemy.radius > state.camera.y + state.camera.height
         ) continue;
 
-        if (state.memoryMode && enemy.shape && enemy.factionColor) {
+        if (enemy.shape && enemy.factionColor) {
           const enemyPalette = MEMORY_ARENA_PALETTE.factions[enemy.factionColor];
           const enemyColor = enemy.isPlayerAlly ? PLAYER_COLOR_HEX : enemyPalette.bright;
           const enemyBody = enemy.isPlayerAlly ? MEMORY_ARENA_PALETTE.player.allyBody : enemyPalette.body;
@@ -15200,33 +14477,6 @@ export default function GameCanvas() {
         ctx.restore();
       };
 
-      if (uiRef.current.status === 'PLAYING' && presentationStageRef.current === 'idle' && state.tutorial.active && state.tutorial.spawnerIndex !== null) {
-        const mapDef = MAPS[uiRef.current.mapId] || MAPS.medium;
-        const tutDef = mapDef.spawners[state.tutorial.spawnerIndex];
-        const spawner = state.spawners.find(s => s.x === tutDef.x && s.y === tutDef.y);
-
-        if (spawner) {
-            drawObjectiveTag("DESTROY SPAWNER", spawner.x, spawner.y, spawner.radius, true, 1.0);
-        }
-      }
-
-      if (uiRef.current.status === 'PLAYING' && presentationStageRef.current === 'idle' && state.memoryMode) {
-        for (const core of state.spawners) {
-          if (!core.isCore || !core.factionColor || !isSpawnerVisible(core, state.camera, canvas.width, canvas.height)) continue;
-          const coreColor = ENEMY_COLOR_HEX[core.factionColor];
-          drawObjectiveTag(
-            "DESTROY SPAWNER",
-            core.x,
-            core.y,
-            core.radius,
-            true,
-            1,
-            coreColor,
-            coreColor,
-          );
-        }
-      }
-
 
 
 
@@ -15288,123 +14538,6 @@ export default function GameCanvas() {
             ctx.shadowBlur = 0;
             ctx.stroke();
             ctx.restore();
-          }
-        }
-      }
-
-      // Draw closest spawner direction indicator if no living spawners are visible (Normal mode only)
-      const isNormalMode = state.gameMode ? state.gameMode === 'normal' : !uiRef.current.hardMode;
-      if (uiRef.current.status === 'PLAYING') {
-        if (!isNormalMode) {
-          spawnerPointerAnimRef.current = null;
-        } else {
-          const livingSpawners = state.spawners.filter(s => (
-            (s.hp === undefined || s.hp > 0) && (!state.memoryMode || s.isCore)
-          ));
-          const canvasW = canvas.width;
-          const canvasH = canvas.height;
-
-          if (livingSpawners.length === 0) {
-            spawnerPointerAnimRef.current = null;
-          } else {
-            const isAnyVisible = livingSpawners.some(s => isSpawnerVisible(s, state.camera, canvasW, canvasH));
-            if (isAnyVisible) {
-              spawnerPointerAnimRef.current = null;
-            } else {
-              const anim = spawnerPointerAnimRef.current;
-              const now = currentTime;
-
-              let drawX: number | null = null;
-              let drawY: number | null = null;
-              let drawAngle: number | null = null;
-              let pointerSpawner: { factionColor?: EnemyFactionColor } | null = null;
-
-              if (anim) {
-                const elapsed = now - anim.startTime;
-                if (elapsed < anim.duration) {
-                  const t = Math.max(0, Math.min(1, elapsed / anim.duration));
-                  const p = 1 - (1 - t) * (1 - t);
-
-                  const targetSpawner = livingSpawners.find(
-                    s => Math.abs(s.x - anim.targetWorldX) < 5 && Math.abs(s.y - anim.targetWorldY) < 5
-                  ) || getClosestSpawner(livingSpawners, state.player);
-
-                  if (targetSpawner) {
-                    pointerSpawner = targetSpawner as MemorySpawner;
-                    const startScreenX = anim.startWorldX - state.camera.x;
-                    const startScreenY = anim.startWorldY - state.camera.y;
-
-                    const targetScreenX = targetSpawner.x - state.camera.x;
-                    const targetScreenY = targetSpawner.y - state.camera.y;
-
-                    const edgePos = calculateEdgePointerPosition(
-                      targetScreenX,
-                      targetScreenY,
-                      canvasW,
-                      canvasH,
-                      pointerSafeRectRef.current
-                    );
-
-                    drawX = startScreenX + (edgePos.x - startScreenX) * p;
-                    drawY = startScreenY + (edgePos.y - startScreenY) * p;
-
-                    const dx = targetScreenX - drawX;
-                    const dy = targetScreenY - drawY;
-                    drawAngle = Math.atan2(dy, dx);
-                  } else {
-                    spawnerPointerAnimRef.current = null;
-                  }
-                } else {
-                  spawnerPointerAnimRef.current = null;
-                }
-              }
-
-              if (drawX === null || drawY === null || drawAngle === null) {
-                const closest = getClosestSpawner(livingSpawners, state.player);
-                if (closest) {
-                  pointerSpawner = closest as MemorySpawner;
-                  const targetScreenX = closest.x - state.camera.x;
-                  const targetScreenY = closest.y - state.camera.y;
-                  const edgePos = calculateEdgePointerPosition(
-                    targetScreenX,
-                    targetScreenY,
-                    canvasW,
-                    canvasH,
-                    pointerSafeRectRef.current
-                  );
-                  drawX = edgePos.x;
-                  drawY = edgePos.y;
-                  drawAngle = edgePos.angle;
-                }
-              }
-
-              if (drawX !== null && drawY !== null && drawAngle !== null) {
-                const spawnerColor = pointerSpawner?.factionColor
-                  ? ENEMY_COLOR_HEX[pointerSpawner.factionColor]
-                  : (state.memoryMode ? PLAYER_COLOR_HEX : (state.hardMode ? '#ff3300' : '#ff00ff'));
-                ctx.save();
-                ctx.translate(drawX, drawY);
-                ctx.rotate(drawAngle);
-
-                ctx.shadowColor = spawnerColor;
-                ctx.shadowBlur = 8;
-                ctx.fillStyle = spawnerColor;
-
-                const size = 12;
-                ctx.beginPath();
-                ctx.moveTo(size, 0);
-                ctx.lineTo(-size / 2, -size / 1.5);
-                ctx.lineTo(-size / 2, size / 1.5);
-                ctx.closePath();
-                ctx.fill();
-
-                ctx.strokeStyle = '#020205';
-                ctx.lineWidth = 2;
-                ctx.shadowBlur = 0;
-                ctx.stroke();
-                ctx.restore();
-              }
-            }
           }
         }
       }
@@ -15805,19 +14938,6 @@ export default function GameCanvas() {
                                      />
                                    ))}
 
-                                   {/* Render Spawners */}
-                                   {selMap.spawners.map((s, i) => (
-                                     <circle
-                                       key={`spawner-${i}`}
-                                       cx={s.x}
-                                       cy={s.y}
-                                       r={s.radius}
-                                       fill={s.factionColor ? ENEMY_COLOR_HEX[s.factionColor] : '#ff00ff'}
-                                       stroke="rgba(255, 255, 255, 0.5)"
-                                       strokeWidth="8"
-                                     />
-                                   ))}
-
                                    {/* Render Spawn Point */}
                                    {selMap.spawnPoint && (
                                      <g transform={`translate(${selMap.spawnPoint.x}, ${selMap.spawnPoint.y})`} pointerEvents="none" aria-hidden="true">
@@ -16025,19 +15145,6 @@ export default function GameCanvas() {
                                        fill="rgba(0, 240, 255, 0.25)"
                                        stroke="#00f0ff"
                                        strokeWidth="15"
-                                     />
-                                   ))}
-
-                                   {/* Render Spawners */}
-                                   {selMap.spawners.map((s, i) => (
-                                     <circle
-                                       key={`spawner-${i}`}
-                                       cx={s.x}
-                                       cy={s.y}
-                                       r={s.radius}
-                                       fill={s.factionColor ? ENEMY_COLOR_HEX[s.factionColor] : '#ff00ff'}
-                                       stroke="rgba(255, 255, 255, 0.5)"
-                                       strokeWidth="8"
                                      />
                                    ))}
 
@@ -16387,19 +15494,6 @@ export default function GameCanvas() {
                                         fill="rgba(255, 204, 0, 0.25)"
                                         stroke="#ffcc00"
                                         strokeWidth="15"
-                                      />
-                                    ))}
-
-                                    {/* Spawners */}
-                                    {currentMap.spawners.map((s, i) => (
-                                      <circle
-                                        key={`spawner-${i}`}
-                                        cx={s.x}
-                                        cy={s.y}
-                                        r={s.radius}
-                                        fill={s.factionColor ? ENEMY_COLOR_HEX[s.factionColor] : '#ff00ff'}
-                                        stroke="rgba(255, 255, 255, 0.5)"
-                                        strokeWidth="8"
                                       />
                                     ))}
 
@@ -16753,27 +15847,6 @@ export default function GameCanvas() {
                         </div>
                       </div>
 
-                      <motion.div
-                          key={pulseSpawnerCounter ? `memory-spawner-pulse-${pulseKey}` : 'memory-spawner-idle'}
-                          animate={pulseSpawnerCounter ? { scale: [1, 1.12, 1], filter: ['brightness(1)', 'brightness(1.8)', 'brightness(1)'] } : { scale: 1, filter: 'brightness(1)' }}
-                          transition={{ duration: 0.55, ease: 'easeOut' }}
-                          className="w-[66px] shrink-0 sm:w-[82px]"
-                          aria-label={`${uiState.spawnersLeft} cores remaining`}
-                        >
-                        <div
-                          className="flex h-full w-full -skew-x-12 items-center justify-center border-2 text-[#F5F7FF] backdrop-blur-sm"
-                          style={{
-                            borderColor: '#CBD5E1',
-                            background: 'linear-gradient(rgba(71, 85, 105, 0.72), rgba(71, 85, 105, 0.72)), rgba(6, 8, 14, 0.90)',
-                            boxShadow: '0 0 5px rgba(148, 163, 184, 0.22), 0 0 12px rgba(148, 163, 184, 0.08)',
-                          }}
-                        >
-                          <span className="skew-x-12 whitespace-nowrap">
-                            <span className="text-[7px] font-black tracking-[0.08em] text-white/75">CORES</span>
-                            <span className="ml-1.5 text-base font-black tabular-nums text-white">{uiState.spawnersLeft}</span>
-                          </span>
-                        </div>
-                      </motion.div>
                     </div>
                     {chainFeedback === 'level' && (
                       <motion.div
@@ -16845,17 +15918,17 @@ export default function GameCanvas() {
                       className={`flex flex-col items-start justify-center gap-0 sm:gap-1 pl-4 sm:pl-6 border-l-2 h-full sm:w-[160px] ${!mpState.roomId ? 'border-[#00f0ff]/30' : (uiState.hardMode ? 'border-[#ff3300]/30' : 'border-[#ff00ff]/30')}`}
                     >
                        <div className={`hidden sm:block text-[11px] tracking-[0.3em] font-bold whitespace-nowrap ${!mpState.roomId ? 'text-[#00f0ff]' : (uiState.hardMode ? 'text-[#ff3300]' : 'text-[#ff00ff]')}`}>
-                         {mpState.roomId ? 'LEADERBOARD // RANK' : (uiState.hardMode ? 'TARGET // SPAWNERS (HARD)' : 'TARGET // SPAWNERS')}
+                          LEADERBOARD // RANK
                        </div>
                        <div className={`sm:hidden text-[9px] tracking-widest font-bold whitespace-nowrap ${!mpState.roomId ? 'text-[#00f0ff]' : (uiState.hardMode ? 'text-[#ff3300]' : 'text-[#ff00ff]')}`}>
-                         {mpState.roomId ? 'RANK' : (uiState.hardMode ? 'TARGET (HARD)' : 'TARGET')}
+                          RANK
                        </div>
                        <div className="text-white font-black text-2xl sm:text-[43px] tracking-tighter leading-none mt-1"
                             style={{
                               fontFamily: 'var(--font-display, Anton, sans-serif)',
                               textShadow: `0 0 15px ${!mpState.roomId ? '#00f0ff' : (uiState.hardMode ? '#ff3300' : '#ff00ff')}`
                             }}>
-                         {mpState.roomId ? `#${getPlayerRank()}` : uiState.spawnersLeft}
+                          {`#${getPlayerRank()}`}
                        </div>
                     </motion.div>
                   </div>
@@ -17232,8 +16305,6 @@ export default function GameCanvas() {
               className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-8 text-xs sm:text-sm font-mono text-[#00f0ff]/80 mb-4 sm:mb-6 md:mb-10 uppercase tracking-widest border-t border-b border-[#00f0ff]/30 py-3 sm:py-6"
             >
               <div>FINAL SCORE: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.score}</span></div>
-              <div className="hidden sm:block w-px h-6 bg-[#00f0ff]/30"></div>
-              <div>CORES LEFT: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.spawnersLeft}/{(MEMORY_MAPS[uiState.mapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID]).spawners.length}</span></div>
             </motion.div>
 
             <motion.div
@@ -17301,7 +16372,6 @@ export default function GameCanvas() {
               className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-8 text-xs sm:text-sm font-mono text-red-200/80 mb-4 sm:mb-6 md:mb-10 uppercase tracking-widest border-t border-b border-red-500/30 py-3 sm:py-6"
             >
               <div>FINAL SCORE: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.score}</span></div>
-              <div>CORES LEFT: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.spawnersLeft}/{(MEMORY_MAPS[uiState.mapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID]).spawners.length}</span></div>
             </motion.div>
 
             <motion.div
@@ -17582,10 +16652,10 @@ export default function GameCanvas() {
               {bannerState.mode === 'single' ? (
                 <div className="flex flex-col items-center z-10">
                   <h1 className="text-2xl sm:text-3xl font-black text-white tracking-wide uppercase leading-tight" style={{ fontFamily: 'var(--font-display, Anton, sans-serif)', textShadow: '0 0 15px rgba(0,240,255,0.5)' }}>
-                    DESTROY ALL {uiState.spawnersLeft} CORES TO WIN
+                    SURVIVE AND BUILD YOUR SCORE
                   </h1>
                   <p className="text-[#00f0ff]/80 font-mono text-[10px] sm:text-xs mt-3 tracking-widest uppercase py-2 border-t border-b border-[#00f0ff]/20 w-4/5 mx-auto font-black leading-relaxed">
-                    SPAWNERS CREATE THE ENEMIES THAT SHOOT AT THE PLAYER
+                    EVERY ENEMY COLOUR AND SHAPE STAYS IN PLAY
                   </p>
                 </div>
               ) : (
@@ -17594,7 +16664,7 @@ export default function GameCanvas() {
                     GET THE HIGHEST SCORE TO WIN
                   </h1>
                   <p className="text-[#ffcc00]/85 font-mono text-[10px] sm:text-xs mt-3 tracking-widest uppercase py-2 border-t border-b border-[#ffcc00]/20 w-4/5 mx-auto font-black leading-relaxed">
-                    DESTROY SPAWNERS AND DEFEAT OPPONENTS TO EARN POINTS
+                    DEFEAT ENEMIES AND OPPONENTS TO EARN POINTS
                   </p>
                 </div>
               )}

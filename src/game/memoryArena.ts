@@ -491,6 +491,15 @@ export interface EnemyIdentity {
   color: EnemyFactionColor;
 }
 
+export function getMissingEnemyCombinations(
+  enemies: readonly { shape?: EnemyShape; factionColor?: EnemyFactionColor; isPlayerAlly?: boolean }[],
+): EnemyIdentity[] {
+  const present = new Set(enemies.filter(enemy => !enemy.isPlayerAlly).map(enemy => `${enemy.factionColor}:${enemy.shape}`));
+  return ENEMY_FACTIONS.flatMap(color => ENEMY_SHAPES
+    .filter(shape => !present.has(`${color}:${shape}`))
+    .map(shape => ({ shape, color })));
+}
+
 export interface EnemyAiState {
   orientation: number;
   movementDirection: Vector2;
