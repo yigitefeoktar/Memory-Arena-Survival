@@ -244,7 +244,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 8;
+const SAVE_VERSION = 9;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -4702,13 +4702,21 @@ export default function GameCanvas() {
     const rawState = data.state;
 
     const isMemorySave = rawState.memoryMode === true;
-    const normalizedRawChain = isMemorySave && version < 4 && isObject(rawState.chain)
+    const identityNormalizedRawChain = isMemorySave && version < 4 && isObject(rawState.chain)
       ? {
           ...rawState.chain,
           matchingShape: rawState.chain.target?.shape ?? null,
           matchingColor: rawState.chain.target?.color ?? null,
         }
       : rawState.chain;
+    const normalizedRawChain = isMemorySave && version < 9 && isObject(identityNormalizedRawChain) &&
+      typeof identityNormalizedRawChain.progress === 'number' &&
+      identityNormalizedRawChain.progress >= MEMORY_ARENA_CONFIG.chain.requiredKills
+      ? {
+          ...identityNormalizedRawChain,
+          progress: MEMORY_ARENA_CONFIG.chain.requiredKills - 1,
+        }
+      : identityNormalizedRawChain;
     if (typeof rawUi.mapId !== 'string' || !(isMemorySave ? MEMORY_MAPS[rawUi.mapId] : MAPS[rawUi.mapId])) {
       throw new Error("UNKNOWN MAP");
     }
@@ -14843,7 +14851,7 @@ export default function GameCanvas() {
                     MEMORY <br/> <span className="text-[#00f0ff]">ARENA</span>
                   </h1>
                   <p className="text-[#00f0ff]/80 font-mono mb-3 sm:mb-6 whitespace-pre-wrap leading-snug sm:leading-relaxed text-[9px] sm:text-xs uppercase tracking-widest border-t border-b border-[#00f0ff]/30 py-2 sm:py-3 shrink-0">
-                    Remember the enemy.{"\n"}Build a four-kill chain to level up.
+                    Remember the enemy.{"\n"}Build a three-kill chain with the same shape or color.
                     {"\n\n"}
                     Desktop: WASD + Mouse.{"\n"}Mobile: Dual Joysticks.
                   </p>
@@ -15933,9 +15941,9 @@ export default function GameCanvas() {
                           boxShadow: '0 0 5px rgba(139, 92, 246, 0.24), 0 0 12px rgba(139, 92, 246, 0.08)',
                         }}
                       >
-                        <div className="flex h-full skew-x-12 items-center gap-2 px-3" aria-label={`Chain progress ${uiState.chainProgress} of 4`}>
-                          <div className="grid min-w-0 flex-1 grid-cols-4 gap-1.5">
-                            {[0, 1, 2, 3].map(index => {
+                        <div className="flex h-full skew-x-12 items-center gap-2 px-3" aria-label={`Chain progress ${uiState.chainProgress} of ${MEMORY_ARENA_CONFIG.chain.requiredKills}`}>
+                          <div className="grid min-w-0 flex-1 grid-cols-3 gap-1.5">
+                            {Array.from({ length: MEMORY_ARENA_CONFIG.chain.requiredKills }, (_, index) => {
                               const isComplete = index < uiState.chainProgress;
                               return (
                                 <motion.span
@@ -15947,7 +15955,7 @@ export default function GameCanvas() {
                               );
                             })}
                           </div>
-                          <span className="text-[9px] font-black tabular-nums">{uiState.chainProgress}<span className="opacity-45">/4</span></span>
+                          <span className="text-[9px] font-black tabular-nums">{uiState.chainProgress}<span className="opacity-45">/{MEMORY_ARENA_CONFIG.chain.requiredKills}</span></span>
                         </div>
                       </div>
 

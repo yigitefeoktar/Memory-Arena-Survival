@@ -73,6 +73,9 @@ export const MEMORY_ARENA_CONFIG = {
     bulletRicochetEnabled: false,
     enemyFactionCombatEnabled: false,
   },
+  chain: {
+    requiredKills: 3,
+  },
   population: {
     openingHostiles: 24,
     targetHostiles: 36,
@@ -907,7 +910,7 @@ export function registerPlayerEnemyKill(current: ChainState, killed: EnemyIdenti
   }
 
   const nextProgress = current.progress + 1;
-  if (nextProgress >= 4) {
+  if (nextProgress >= MEMORY_ARENA_CONFIG.chain.requiredKills) {
     return {
       result: 'completed',
       state: {
@@ -1116,7 +1119,7 @@ export function isValidChainState(value: unknown): value is ChainState {
   const matchingColorValid = candidate.matchingColor === null || isEnemyFactionColor(candidate.matchingColor);
   const progressValid = Number.isInteger(candidate.progress) &&
     (candidate.progress as number) >= 0 &&
-    (candidate.progress as number) <= 3;
+    (candidate.progress as number) < MEMORY_ARENA_CONFIG.chain.requiredKills;
   const targetAndTraitsAgree = candidate.progress === 0
     ? candidate.target === null && candidate.matchingShape === null && candidate.matchingColor === null
     : Boolean(

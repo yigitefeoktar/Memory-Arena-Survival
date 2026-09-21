@@ -243,7 +243,6 @@ const redSquare = { shape: 'square', color: 'red' } as const;
 const redTriangle = { shape: 'triangle', color: 'red' } as const;
 const blueCircle = { shape: 'circle', color: 'blue' } as const;
 const greenCircle = { shape: 'circle', color: 'green' } as const;
-const yellowCircle = { shape: 'circle', color: 'yellow' } as const;
 const blueSquare = { shape: 'square', color: 'blue' } as const;
 
 test('first kill selects a target and starts at one', () => {
@@ -255,9 +254,10 @@ test('first kill selects a target and starts at one', () => {
   assert.equal(transition.state.progress, 1);
 });
 
-test('four enemies sharing one color complete a chain', () => {
+test('three enemies sharing one exact color complete a chain', () => {
+  assert.equal(MEMORY_ARENA_CONFIG.chain.requiredKills, 3);
   let state = createInitialChainState();
-  for (const enemy of [redCircle, redSquare, redTriangle, redCircle]) {
+  for (const enemy of [redCircle, redSquare, redTriangle]) {
     state = registerPlayerEnemyKill(state, enemy).state;
   }
   assert.equal(state.level, 2);
@@ -268,16 +268,16 @@ test('four enemies sharing one color complete a chain', () => {
   assert.equal(state.matchingColor, null);
 });
 
-test('four enemies sharing one shape complete a chain', () => {
+test('three enemies sharing one exact shape complete a chain', () => {
   let state = createInitialChainState();
-  for (const enemy of [redCircle, blueCircle, greenCircle, yellowCircle]) {
+  for (const enemy of [redCircle, blueCircle, greenCircle]) {
     state = registerPlayerEnemyKill(state, enemy).state;
   }
   assert.equal(state.level, 2);
   assert.equal(state.completedChains, 1);
 });
 
-test('the whole streak must retain a common trait', () => {
+test('the whole streak must retain the exact same shape or exact same color', () => {
   let state = registerPlayerEnemyKill(createInitialChainState(), redCircle).state;
   state = registerPlayerEnemyKill(state, redSquare).state;
   assert.equal(state.matchingShape, null);
@@ -304,7 +304,7 @@ test('levels have no artificial maximum and spawners are chain-neutral', () => {
   const original = {
     ...createInitialChainState(),
     level: 1_000_000,
-    progress: 3,
+    progress: 2,
     target: redCircle,
     matchingShape: redCircle.shape,
     matchingColor: redCircle.color,
@@ -466,7 +466,13 @@ test('malformed or incomplete chain identities are rejected', () => {
     matchingColor: null,
     progress: 1,
   }), false);
-  assert.equal(isValidChainState({ ...createInitialChainState(), progress: 4 }), false);
+  assert.equal(isValidChainState({
+    ...createInitialChainState(),
+    target: redCircle,
+    matchingShape: redCircle.shape,
+    matchingColor: redCircle.color,
+    progress: 3,
+  }), false);
 });
 
 test('square volley directions remain orthogonal', () => {
