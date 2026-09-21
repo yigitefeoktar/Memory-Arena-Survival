@@ -868,6 +868,15 @@ export function areEnemyFactionsHostile(
   return first !== second;
 }
 
+export function canMemoryProjectileDamageEnemies(
+  projectile: { isPlayer: boolean; isPlayerAlly?: boolean; factionColor?: EnemyFactionColor },
+  enemyFactionCombatEnabled: boolean = MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled,
+): boolean {
+  return projectile.isPlayer || Boolean(
+    enemyFactionCombatEnabled && (projectile.isPlayerAlly || projectile.factionColor),
+  );
+}
+
 export function registerPlayerEnemyKill(current: ChainState, killed: EnemyIdentity): ChainTransition {
   if (!current.target) {
     return {

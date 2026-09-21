@@ -14,6 +14,7 @@ import {
   applyPlayerDamage,
   collectAbilityPickup,
   canEnemyFactionDamageSpawner,
+  canMemoryProjectileDamageEnemies,
   createInitialChainState,
   createEmptyAbilityOwnership,
   createInitialAbilityDropProgress,
@@ -330,6 +331,15 @@ test('autonomous enemy faction combat is disabled while faction relationships re
   assert.equal(areEnemyFactionsHostile('red', 'blue'), true);
   assert.equal(areEnemyFactionsHostile('green', 'yellow'), true);
   assert.equal(areEnemyFactionsHostile('red', 'red'), false);
+});
+
+test('only the player can damage enemies while autonomous faction combat is disabled', () => {
+  assert.equal(canMemoryProjectileDamageEnemies({ isPlayer: true }), true);
+  assert.equal(canMemoryProjectileDamageEnemies({ isPlayer: false, isPlayerAlly: true }), false);
+  assert.equal(canMemoryProjectileDamageEnemies({ isPlayer: false, factionColor: 'red' }), false);
+  assert.equal(canMemoryProjectileDamageEnemies({ isPlayer: false }), false);
+  assert.equal(canMemoryProjectileDamageEnemies({ isPlayer: false, isPlayerAlly: true }, true), true);
+  assert.equal(canMemoryProjectileDamageEnemies({ isPlayer: false, factionColor: 'red' }, true), true);
 });
 
 test('faction raids begin idle and use stable spread-out formation positions', () => {

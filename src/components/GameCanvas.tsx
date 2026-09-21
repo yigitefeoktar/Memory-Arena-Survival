@@ -60,6 +60,7 @@ import {
   applyPlayerDamage,
   areEnemyFactionsHostile,
   canEnemyFactionDamageSpawner,
+  canMemoryProjectileDamageEnemies,
   collectAbilityPickup,
   createInitialChainState,
   createEmptyAbilityOwnership,
@@ -13107,7 +13108,10 @@ export default function GameCanvas() {
             !bullet.isPlayerAlly &&
             bullet.factionColor
           );
-          if (!bulletDestroyed && (bulletColor !== '#ff0066' || isMemoryFactionBullet || isMemoryAllyBullet)) {
+          const canBulletDamageEnemies = state.memoryMode
+            ? canMemoryProjectileDamageEnemies(bullet)
+            : bulletColor !== '#ff0066';
+          if (!bulletDestroyed && canBulletDamageEnemies) {
             for (let e = state.enemies.length - 1; e >= 0; e--) {
               const enemy = state.enemies[e];
               if ((bullet.isPlayer || isMemoryAllyBullet) && enemy.isPlayerAlly) continue;
