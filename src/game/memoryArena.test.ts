@@ -325,8 +325,8 @@ test('the prototype exposes all twelve shape and color identities', () => {
   assert.equal(new Set(identities).size, 12);
 });
 
-test('different enemy factions are hostile while matching factions are friendly', () => {
-  assert.equal(MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled, true);
+test('autonomous enemy faction combat is disabled while faction relationships remain identifiable', () => {
+  assert.equal(MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled, false);
   assert.equal(areEnemyFactionsHostile('red', 'blue'), true);
   assert.equal(areEnemyFactionsHostile('green', 'yellow'), true);
   assert.equal(areEnemyFactionsHostile('red', 'red'), false);

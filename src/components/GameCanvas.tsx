@@ -10653,7 +10653,7 @@ export default function GameCanvas() {
         const isAuthoritativeMultiplayerSimulation =
           Boolean(mpRef.current.roomId && mpRef.current.isHost);
 
-        if (state.memoryMode) {
+        if (state.memoryMode && MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled) {
           const emergencyConfig = MEMORY_ARENA_CONFIG.factionEmergency;
           for (const faction of ENEMY_FACTIONS) {
             const members = state.enemies.filter(enemy => !enemy.isPlayerAlly && enemy.factionColor === faction);
@@ -10875,6 +10875,10 @@ export default function GameCanvas() {
               }
             }
           }
+        } else if (state.memoryMode) {
+          for (const enemy of state.enemies) {
+            clearMemoryEnemyFactionAbility(enemy);
+          }
         }
 
         if (state.memoryMode && MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled) {
@@ -10957,7 +10961,7 @@ export default function GameCanvas() {
           }
         }
 
-        const activeBlueShieldsForEnemyMovement = state.memoryMode
+        const activeBlueShieldsForEnemyMovement = state.memoryMode && MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled
           ? state.enemies.filter(enemy => (
               !enemy.isPlayerAlly &&
               enemy.factionColor === 'blue' &&

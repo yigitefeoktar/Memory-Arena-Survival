@@ -71,7 +71,7 @@ export const PLAYER_COLOR_HEX = MEMORY_ARENA_PALETTE.player.effect;
 export const MEMORY_ARENA_CONFIG = {
   combat: {
     bulletRicochetEnabled: false,
-    enemyFactionCombatEnabled: true,
+    enemyFactionCombatEnabled: false,
   },
   population: {
     openingHostiles: 24,
