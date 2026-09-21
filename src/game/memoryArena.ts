@@ -73,6 +73,15 @@ export const MEMORY_ARENA_CONFIG = {
     bulletRicochetEnabled: false,
     enemyFactionCombatEnabled: true,
   },
+  population: {
+    openingHostiles: 24,
+    targetHostiles: 36,
+    maximumTotalEnemies: 48,
+    extraSpawnIntervalMs: 750,
+    nearbySpawnRadiusMin: 300,
+    nearbySpawnRadiusMax: 900,
+    nearbySpawnOffscreenPadding: 40,
+  },
   navigation: {
     wallFollowOutwardWeight: 0.28,
     pathClearanceInset: 0.5,
@@ -89,7 +98,7 @@ export const MEMORY_ARENA_CONFIG = {
     factionAbilityCooldownReductionMsPerTier: 1000,
     minimumFactionAbilityCooldownMs: 15000,
     movementMultiplierPerTier: 0.025,
-    maximumMovementMultiplier: 1.3,
+    maximumMovementMultiplier: 1.15,
     fullVisualIntensityTier: 12,
   },
   raids: {
@@ -165,25 +174,25 @@ export const MEMORY_ARENA_CONFIG = {
     replicationPlayerClearance: 120,
   },
   circle: {
-    bulletDamage: 30,
-    fireIntervalMs: 2500,
+    bulletDamage: 10,
+    fireIntervalMs: 4500,
     aggroRange: 1000,
   },
   square: {
-    bulletDamage: 12,
-    fireIntervalMs: 2500,
+    bulletDamage: 4,
+    fireIntervalMs: 5000,
     rotationRadiansPerSecond: 0.5,
     minTurnIntervalMs: 2500,
     maxTurnIntervalMs: 4500,
   },
   triangle: {
-    dashDamage: 50,
+    dashDamage: 15,
     detectionRange: 450,
-    telegraphMs: 600,
+    telegraphMs: 900,
     telegraphTurnSpeedRadiansPerSecond: 9,
-    dashSpeed: 500,
+    dashSpeed: 350,
     maxDashDistance: 600,
-    recoveryMs: 4000,
+    recoveryMs: 5000,
   },
 } as const;
 
@@ -498,6 +507,31 @@ export function getMissingEnemyCombinations(
   return ENEMY_FACTIONS.flatMap(color => ENEMY_SHAPES
     .filter(shape => !present.has(`${color}:${shape}`))
     .map(shape => ({ shape, color })));
+}
+
+/** Fill the least represented hostile identity first so the larger roster stays balanced. */
+export function getLeastRepresentedEnemyCombination(
+  enemies: readonly { shape?: EnemyShape; factionColor?: EnemyFactionColor; isPlayerAlly?: boolean }[],
+): EnemyIdentity {
+  const counts = new Map<string, number>();
+  for (const enemy of enemies) {
+    if (enemy.isPlayerAlly) continue;
+    const key = `${enemy.factionColor}:${enemy.shape}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  let selected: EnemyIdentity = { color: ENEMY_FACTIONS[0], shape: ENEMY_SHAPES[0] };
+  let fewest = Infinity;
+  for (const color of ENEMY_FACTIONS) {
+    for (const shape of ENEMY_SHAPES) {
+      const count = counts.get(`${color}:${shape}`) ?? 0;
+      if (count < fewest) {
+        selected = { color, shape };
+        fewest = count;
+      }
+    }
+  }
+  return selected;
 }
 
 export interface EnemyAiState {

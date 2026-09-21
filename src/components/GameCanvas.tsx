@@ -79,6 +79,7 @@ import {
   getPlayerLevelStats,
   getMemoryThreatStats,
   getMissingEnemyCombinations,
+  getLeastRepresentedEnemyCombination,
   grantPlayerLevelUpgrade,
   getWallFollowDirection,
   derivePlayerUpgradeRanks,
@@ -230,6 +231,7 @@ const BULLET_RADIUS = 5;
 const FIRE_RATE = 800; // ms between shots (slow shooting)
 const ENEMY_FIRE_RATE = 2500;
 const ENEMY_SPEED = 60;
+const MEMORY_ENEMY_SPEED = 45;
 const DASH_COOLDOWN = 25000;
 const BUILD_COOLDOWN = 25000;
 const MEMORY_ABILITY_SHARED_COOLDOWN = 15000;
@@ -1833,6 +1835,30 @@ function getSafeSpawn(
     }
   }
 
+  return null;
+}
+
+function getSafeSpawnAroundPlayer(
+  walls: { x: number; y: number; w: number; h: number }[],
+  player: { x: number; y: number },
+  camera: { x: number; y: number; width: number; height: number },
+  avoidPositions: { x: number; y: number }[],
+): { x: number; y: number } | null {
+  const population = MEMORY_ARENA_CONFIG.population;
+  const minRadiusSquared = population.nearbySpawnRadiusMin ** 2;
+  const maxRadiusSquared = population.nearbySpawnRadiusMax ** 2;
+  const margin = population.nearbySpawnOffscreenPadding;
+  for (let attempt = 0; attempt < 120; attempt++) {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = Math.sqrt(minRadiusSquared + Math.random() * (maxRadiusSquared - minRadiusSquared));
+    const x = player.x + Math.cos(angle) * radius;
+    const y = player.y + Math.sin(angle) * radius;
+    if (
+      x >= camera.x - margin && x <= camera.x + camera.width + margin &&
+      y >= camera.y - margin && y <= camera.y + camera.height + margin
+    ) continue;
+    if (isPositionSafe(x, y, walls, ENEMY_RADIUS + 12, avoidPositions, 140)) return { x, y };
+  }
   return null;
 }
 
@@ -3669,6 +3695,7 @@ export default function GameCanvas() {
     hardMode: false,
     memoryMode: false,
     memoryRunElapsedMs: 0,
+    openingHostilesSeeded: false,
     chain: createInitialChainState() as ChainState,
     playerUpgradeRanks: createInitialPlayerUpgradeRanks() as PlayerUpgradeRanks,
     factionRaids: createInitialFactionRaidStates() as FactionRaidStates,
@@ -5642,6 +5669,7 @@ export default function GameCanvas() {
       hardMode: cleanGameMode !== 'normal',
       memoryMode: isMemorySave,
       memoryRunElapsedMs: reconstructedMemoryRunElapsedMs,
+      openingHostilesSeeded: false,
       chain: reconstructedChain,
       playerUpgradeRanks: reconstructedPlayerUpgradeRanks,
       factionRaids: reconstructedFactionRaids,
@@ -6368,6 +6396,7 @@ export default function GameCanvas() {
     state.hardMode = isHardMode;
     state.memoryMode = !isMultiplayer;
     state.memoryRunElapsedMs = 0;
+    state.openingHostilesSeeded = false;
     state.nextEntityId = 1;
 
     state.tutorial = {
@@ -6628,6 +6657,7 @@ export default function GameCanvas() {
       const resetTime = performance.now();
       state.memoryMode = true;
       state.memoryRunElapsedMs = 0;
+      state.openingHostilesSeeded = false;
       state.chain = createInitialChainState();
       state.factionRaids = createInitialFactionRaidStates(resetTime);
       state.factionEmergencies = createInitialFactionEmergencyStates(resetTime);
@@ -9951,7 +9981,7 @@ export default function GameCanvas() {
             for (const { enemy } of crossedEnemies) {
               maybeSpawnAbilityDrop(enemy, 'player');
               const defeatedColor = enemy.factionColor ? ENEMY_COLOR_HEX[enemy.factionColor] : '#ff3333';
-              spawnParticles(enemy.x, enemy.y, defeatedColor, 30);
+              spawnParticles(enemy.x, enemy.y, defeatedColor, 10);
               state.shockwaves.push({
                 x: enemy.x,
                 y: enemy.y,
@@ -10519,18 +10549,56 @@ export default function GameCanvas() {
             }
           }
 
-        // Maintain one autonomous hostile for every colour and shape combination.
-        // The host owns this roster in multiplayer; guests receive it in snapshots.
-        for (const identity of STATUS === 'PLAYING' ? getMissingEnemyCombinations(state.enemies) : []) {
+        // The host owns the autonomous roster in multiplayer; guests receive it in snapshots.
+        // Keep the twelve identities guaranteed, then fill a larger, evenly distributed solo roster.
+        const spawnAutonomousEnemy = (identity: { shape: EnemyShape; color: EnemyFactionColor }, required: boolean, preferNearby = false) => {
           const avoidPositions = [
             { x: state.player.x, y: state.player.y },
             ...(Object.values(state.multiplayerPlayers) as Array<{ x: number; y: number }>).map(player => ({ x: player.x, y: player.y })),
             ...state.enemies.map(enemy => ({ x: enemy.x, y: enemy.y })),
           ];
-          const spawn = getSafeSpawn(activeWalls, ENEMY_RADIUS + 12, avoidPositions, ENEMY_RADIUS * 2 + 8)
-            ?? getSafeSpawn(activeWalls, ENEMY_RADIUS + 2, avoidPositions, ENEMY_RADIUS + 2)
-            ?? getSafeSpawn(activeWalls, ENEMY_RADIUS + 2, avoidPositions.slice(0, 1), ENEMY_RADIUS + 2);
-          if (!spawn) continue;
+          // Mandatory identities and every other extra use the full map; the remaining
+          // extras arrive outside the camera but close enough to enter play soon.
+          const spawn = (preferNearby ? getSafeSpawnAroundPlayer(activeWalls, state.player, state.camera, avoidPositions) : null)
+            ?? getSafeSpawn(activeWalls, ENEMY_RADIUS + 12, avoidPositions, state.memoryMode ? 140 : ENEMY_RADIUS * 2 + 8)
+            ?? getSafeSpawn(activeWalls, ENEMY_RADIUS + 2, avoidPositions, 80)
+            ?? getSafeSpawn(activeWalls, ENEMY_RADIUS + 2, avoidPositions.slice(0, 1), 180);
+          if (!spawn) return false;
+
+          if (state.memoryMode && state.enemies.length >= MEMORY_ARENA_CONFIG.population.maximumTotalEnemies) {
+            if (!required) return false;
+            // Allies or faction conversions can otherwise consume every slot and
+            // break the identity guarantee. Retire a distant ally first, then a duplicate.
+            const hostileCounts = new Map<string, number>();
+            for (const enemy of state.enemies) {
+              if (enemy.isPlayerAlly) continue;
+              const key = `${enemy.factionColor}:${enemy.shape}`;
+              hostileCounts.set(key, (hostileCounts.get(key) ?? 0) + 1);
+            }
+            let farthestAllyIndex = -1;
+            let farthestDuplicateIndex = -1;
+            let farthestDistance = -1;
+            let farthestDuplicateDistance = -1;
+            for (let index = 0; index < state.enemies.length; index++) {
+              const enemy = state.enemies[index];
+              const distance = (enemy.x - state.player.x) ** 2 + (enemy.y - state.player.y) ** 2;
+              if (enemy.isPlayerAlly && distance > farthestDistance) {
+                farthestDistance = distance;
+                farthestAllyIndex = index;
+              } else if (
+                !enemy.isPlayerAlly &&
+                (hostileCounts.get(`${enemy.factionColor}:${enemy.shape}`) ?? 0) > 1 &&
+                distance > farthestDuplicateDistance
+              ) {
+                farthestDuplicateDistance = distance;
+                farthestDuplicateIndex = index;
+              }
+            }
+            const replacementIndex = farthestAllyIndex >= 0 ? farthestAllyIndex : farthestDuplicateIndex;
+            if (replacementIndex < 0) return false;
+            state.enemies.splice(replacementIndex, 1);
+          }
+
           const moveAngle = Math.random() * Math.PI * 2;
           state.enemies.push({
             id: 'me_' + state.nextEntityId++,
@@ -10538,7 +10606,7 @@ export default function GameCanvas() {
             y: spawn.y,
             radius: ENEMY_RADIUS,
             lastShoot: currentTime + Math.random() * 600,
-            speed: ENEMY_SPEED + Math.random() * 20,
+            speed: state.memoryMode ? MEMORY_ENEMY_SPEED + Math.random() * 15 : ENEMY_SPEED + Math.random() * 20,
             shape: identity.shape,
             factionColor: identity.color,
             angle: moveAngle,
@@ -10552,6 +10620,34 @@ export default function GameCanvas() {
             kbvy: 0,
             processedZoneKbs: [],
           });
+          return true;
+        };
+
+        if (STATUS === 'PLAYING') {
+          for (const identity of getMissingEnemyCombinations(state.enemies)) {
+            spawnAutonomousEnemy(identity, true);
+          }
+
+          if (state.memoryMode) {
+            const population = MEMORY_ARENA_CONFIG.population;
+            let hostileCount = state.enemies.filter(enemy => !enemy.isPlayerAlly).length;
+            // Seed two of each identity on a new run, then grow toward three of each over time.
+            if (!state.openingHostilesSeeded) {
+              while (hostileCount < population.openingHostiles && state.enemies.length < population.maximumTotalEnemies) {
+                if (!spawnAutonomousEnemy(getLeastRepresentedEnemyCombination(state.enemies), false, hostileCount % 2 === 0)) break;
+                hostileCount++;
+              }
+              state.openingHostilesSeeded = true;
+            }
+            if (
+              hostileCount < population.targetHostiles &&
+              state.enemies.length < population.maximumTotalEnemies &&
+              currentTime - state.lastEnemySpawn >= population.extraSpawnIntervalMs
+            ) {
+              state.lastEnemySpawn = currentTime;
+              spawnAutonomousEnemy(getLeastRepresentedEnemyCombination(state.enemies), false, hostileCount % 2 === 0);
+            }
+          }
         }
 
         const isAuthoritativeMultiplayerSimulation =
@@ -11259,7 +11355,7 @@ export default function GameCanvas() {
                       const defeatedColor = candidate.isPlayerAlly
                         ? PLAYER_COLOR_HEX
                         : ENEMY_COLOR_HEX[candidate.factionColor];
-                      spawnParticles(candidate.x, candidate.y, defeatedColor, 18);
+                      spawnParticles(candidate.x, candidate.y, defeatedColor, state.memoryMode ? 10 : 18);
                       state.shockwaves.push({ x: candidate.x, y: candidate.y, color: defeatedColor, maxRadius: 55, age: 0, maxAge: 0.2, thickness: 5 });
                     }
                   }
@@ -13026,7 +13122,7 @@ export default function GameCanvas() {
                 const defeatedColor = enemy.isPlayerAlly
                   ? PLAYER_COLOR_HEX
                   : (enemy.factionColor ? ENEMY_COLOR_HEX[enemy.factionColor] : '#ff3333');
-                spawnParticles(enemy.x, enemy.y, defeatedColor, 30);
+                spawnParticles(enemy.x, enemy.y, defeatedColor, state.memoryMode ? 10 : 30);
                 state.shockwaves.push({ x: enemy.x, y: enemy.y, color: defeatedColor, maxRadius: 80, age: 0, maxAge: 0.25, thickness: 8 });
                 if (bullet.isPlayer) state.shake = 10;
                 state.enemies.splice(e, 1);

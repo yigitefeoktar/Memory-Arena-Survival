@@ -31,6 +31,7 @@ import {
   getPlayerLevelStats,
   getMemoryThreatStats,
   getMissingEnemyCombinations,
+  getLeastRepresentedEnemyCombination,
   getWallFollowDirection,
   grantPlayerLevelUpgrade,
   derivePlayerUpgradeRanks,
@@ -58,6 +59,46 @@ test('missing enemy combinations cover every hostile colour and shape', () => {
   assert.ok(getMissingEnemyCombinations([
     { factionColor: 'blue', shape: 'square', isPlayerAlly: true },
   ]).some(enemy => enemy.color === 'blue' && enemy.shape === 'square'));
+});
+
+test('the larger autonomous roster remains evenly spread across all identities', () => {
+  const population = MEMORY_ARENA_CONFIG.population;
+  const combinations = ENEMY_FACTIONS.length * ENEMY_SHAPES.length;
+  assert.equal(population.openingHostiles, combinations * 2);
+  assert.equal(population.targetHostiles, combinations * 3);
+  assert.ok(population.maximumTotalEnemies > population.targetHostiles);
+
+  const enemies: Array<{ factionColor: (typeof ENEMY_FACTIONS)[number]; shape: (typeof ENEMY_SHAPES)[number] }> = [];
+  for (let index = 0; index < population.targetHostiles; index++) {
+    const next = getLeastRepresentedEnemyCombination(enemies);
+    enemies.push({ factionColor: next.color, shape: next.shape });
+  }
+  for (const color of ENEMY_FACTIONS) {
+    for (const shape of ENEMY_SHAPES) {
+      assert.equal(enemies.filter(enemy => enemy.factionColor === color && enemy.shape === shape).length, 3);
+    }
+  }
+  assert.deepEqual(getMissingEnemyCombinations(enemies), []);
+});
+
+test('converted allies do not count toward a hostile identity', () => {
+  const enemies = ENEMY_FACTIONS.flatMap(factionColor => ENEMY_SHAPES.map(shape => ({ factionColor, shape })));
+  enemies.push({ factionColor: 'red', shape: 'circle' });
+  assert.deepEqual(getLeastRepresentedEnemyCombination([
+    ...enemies,
+    { factionColor: 'red', shape: 'square', isPlayerAlly: true },
+  ]), { color: 'red', shape: 'square' });
+});
+
+test('the denser roster has a lower theoretical ranged damage budget', () => {
+  const circlesPerRoster = ENEMY_FACTIONS.length;
+  const squaresPerRoster = ENEMY_FACTIONS.length;
+  const previousDamagePerSecond = circlesPerRoster * 30 / 2.5 + squaresPerRoster * 4 * 12 / 2.5;
+  const copiesPerCombination = MEMORY_ARENA_CONFIG.population.targetHostiles / (ENEMY_FACTIONS.length * ENEMY_SHAPES.length);
+  const swarmDamagePerSecond =
+    circlesPerRoster * copiesPerCombination * MEMORY_ARENA_CONFIG.circle.bulletDamage * 1000 / MEMORY_ARENA_CONFIG.circle.fireIntervalMs +
+    squaresPerRoster * copiesPerCombination * 4 * MEMORY_ARENA_CONFIG.square.bulletDamage * 1000 / MEMORY_ARENA_CONFIG.square.fireIntervalMs;
+  assert.ok(swarmDamagePerSecond < previousDamagePerSecond * 0.6);
 });
 
 test('memory threat combines elapsed time and player level', () => {
@@ -432,22 +473,22 @@ test('triangle advances through telegraph, dash, hit-once, and recovery', () => 
   let ai = createTriangleAiState(0);
   ai = advanceTriangleAi(ai, { now: 100, seesTarget: true, travelled: 0, collidedWithWall: false });
   assert.equal(ai.phase, 'telegraph');
-  ai = advanceTriangleAi(ai, { now: 700, seesTarget: true, travelled: 0, collidedWithWall: false });
+  ai = advanceTriangleAi(ai, { now: 1000, seesTarget: true, travelled: 0, collidedWithWall: false });
   assert.equal(ai.phase, 'dash');
   ai = markTrianglePlayerHit(ai);
   assert.equal(ai.hitPlayer, true);
   assert.equal(markTrianglePlayerHit(ai), ai);
-  ai = advanceTriangleAi(ai, { now: 800, seesTarget: true, travelled: 600, collidedWithWall: false });
+  ai = advanceTriangleAi(ai, { now: 1100, seesTarget: true, travelled: 600, collidedWithWall: false });
   assert.equal(ai.phase, 'recover');
-  ai = advanceTriangleAi(ai, { now: 4800, seesTarget: false, travelled: 0, collidedWithWall: false });
+  ai = advanceTriangleAi(ai, { now: 6100, seesTarget: false, travelled: 0, collidedWithWall: false });
   assert.equal(ai.phase, 'wander');
 });
 
-test('triangle warning animation keeps the 600ms timing and settles before the dash', () => {
-  assert.equal(MEMORY_ARENA_CONFIG.triangle.telegraphMs, 600);
+test('triangle warning animation keeps the 900ms timing and settles before the dash', () => {
+  assert.equal(MEMORY_ARENA_CONFIG.triangle.telegraphMs, 900);
   const start = getTriangleTelegraphVisual(0);
-  const middle = getTriangleTelegraphVisual(300);
-  const end = getTriangleTelegraphVisual(600);
+  const middle = getTriangleTelegraphVisual(450);
+  const end = getTriangleTelegraphVisual(900);
   assert.equal(start.pullBack, 0);
   assert.ok(middle.pullBack > 0);
   assert.ok(middle.glowBlur > start.glowBlur);
