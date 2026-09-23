@@ -609,7 +609,88 @@ export const MEMORY_MAP_CORE_INDICES: Record<string, readonly [number, number, n
   scattered_ruins: [0, 1, 3, 4],
   checkerboard: [0, 1, 3, 4],
   memory_test: [0, 1, 2, 3],
+  mega_grid: [0, 10, 30, 40],
 };
+
+export interface ArenaWallGeometry {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface ArenaSpawnerGeometry {
+  x: number;
+  y: number;
+  [key: string]: unknown;
+}
+
+export interface ArenaTileGeometry<TSpawner extends ArenaSpawnerGeometry = ArenaSpawnerGeometry> {
+  walls: readonly ArenaWallGeometry[];
+  spawners: readonly TSpawner[];
+  spawnPoint?: { x: number; y: number };
+}
+
+export interface ComposedArenaGeometry<TSpawner extends ArenaSpawnerGeometry = ArenaSpawnerGeometry> {
+  width: number;
+  height: number;
+  walls: ArenaWallGeometry[];
+  spawners: TSpawner[];
+  spawnPoint: { x: number; y: number };
+}
+
+/**
+ * Joins nine standard arenas into one continuous world. Each tile's four
+ * outside boundary walls are removed so movement can flow across tile seams;
+ * one boundary is then added around the complete 3x3 arena.
+ */
+export function composeThreeByThreeArena<TSpawner extends ArenaSpawnerGeometry>(
+  tiles: readonly ArenaTileGeometry<TSpawner>[],
+  tileWidth = 3000,
+  tileHeight = 3000,
+  boundaryThickness = 50,
+): ComposedArenaGeometry<TSpawner> {
+  if (tiles.length !== 9) {
+    throw new Error('A 3x3 arena requires exactly nine source maps');
+  }
+
+  const isTileBoundary = (wall: ArenaWallGeometry): boolean => (
+    (wall.x === 0 && wall.y === 0 && wall.w === tileWidth && wall.h === boundaryThickness) ||
+    (wall.x === 0 && wall.y === 0 && wall.w === boundaryThickness && wall.h === tileHeight) ||
+    (wall.x === tileWidth - boundaryThickness && wall.y === 0 && wall.w === boundaryThickness && wall.h === tileHeight) ||
+    (wall.x === 0 && wall.y === tileHeight - boundaryThickness && wall.w === tileWidth && wall.h === boundaryThickness)
+  );
+
+  const width = tileWidth * 3;
+  const height = tileHeight * 3;
+  const walls: ArenaWallGeometry[] = [
+    { x: 0, y: 0, w: width, h: boundaryThickness },
+    { x: 0, y: 0, w: boundaryThickness, h: height },
+    { x: width - boundaryThickness, y: 0, w: boundaryThickness, h: height },
+    { x: 0, y: height - boundaryThickness, w: width, h: boundaryThickness },
+  ];
+  const spawners: TSpawner[] = [];
+
+  tiles.forEach((tile, tileIndex) => {
+    const offsetX = (tileIndex % 3) * tileWidth;
+    const offsetY = Math.floor(tileIndex / 3) * tileHeight;
+    walls.push(...tile.walls
+      .filter(wall => !isTileBoundary(wall))
+      .map(wall => ({ ...wall, x: wall.x + offsetX, y: wall.y + offsetY })));
+    spawners.push(...tile.spawners.map(spawner => ({
+      ...spawner,
+      x: spawner.x + offsetX,
+      y: spawner.y + offsetY,
+    })));
+  });
+
+  const centerTile = tiles[4];
+  const spawnPoint = centerTile.spawnPoint
+    ? { x: centerTile.spawnPoint.x + tileWidth, y: centerTile.spawnPoint.y + tileHeight }
+    : { x: width / 2, y: height / 2 };
+
+  return { width, height, walls, spawners, spawnPoint };
+}
 
 export interface ChainState {
   target: EnemyIdentity | null;

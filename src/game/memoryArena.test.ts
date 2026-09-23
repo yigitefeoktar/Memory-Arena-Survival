@@ -22,6 +22,7 @@ import {
   createInitialFactionEmergencyStates,
   createInitialPlayerUpgradeRanks,
   createMemoryCoreSpawners,
+  composeThreeByThreeArena,
   createShuffledShapeBag,
   createTriangleAiState,
   countRemainingCoreSpawners,
@@ -48,6 +49,37 @@ import {
   type ColoredCoreSpawnerState,
   type EnemyAiState,
 } from './memoryArena';
+import { getMapDimensions, isValidMapId, VALID_MAP_IDS } from '../shared/matchSettings';
+
+test('3x3 arena composition creates a seamless 9000px world', () => {
+  const boundaryWalls = [
+    { x: 0, y: 0, w: 3000, h: 50 },
+    { x: 0, y: 0, w: 50, h: 3000 },
+    { x: 2950, y: 0, w: 50, h: 3000 },
+    { x: 0, y: 2950, w: 3000, h: 50 },
+  ];
+  const tiles = Array.from({ length: 9 }, (_, index) => ({
+    walls: [...boundaryWalls, { x: 100 + index, y: 200, w: 60, h: 80 }],
+    spawners: [{ x: 400, y: 500, tile: index }],
+    ...(index === 4 ? { spawnPoint: { x: 600, y: 700 } } : {}),
+  }));
+
+  const composed = composeThreeByThreeArena(tiles);
+  assert.equal(composed.width, 9000);
+  assert.equal(composed.height, 9000);
+  assert.equal(composed.walls.length, 13, 'four world boundaries plus one interior wall per tile');
+  assert.equal(composed.spawners.length, 9);
+  assert.deepEqual(composed.spawnPoint, { x: 3600, y: 3700 });
+  assert.deepEqual(composed.spawners[8], { x: 6400, y: 6500, tile: 8 });
+  assert.ok(composed.walls.some(wall => wall.x === 6108 && wall.y === 6200));
+  assert.equal(composed.walls.filter(wall => wall.w === 9000 || wall.h === 9000).length, 4);
+});
+
+test('mega grid is a valid map with shared 9000px server bounds', () => {
+  assert.equal(isValidMapId('mega_grid'), true);
+  assert.deepEqual(getMapDimensions('mega_grid'), { width: 9000, height: 9000 });
+  assert.deepEqual(getMapDimensions('medium'), { width: 3000, height: 3000 });
+});
 
 test('missing enemy combinations cover every hostile colour and shape', () => {
   const all = getMissingEnemyCombinations([]);
@@ -591,7 +623,8 @@ test('memory map conversion keeps four colored cores and preserves canonical rel
 });
 
 test('every available arena has a four-faction Memory core layout', () => {
-  assert.equal(Object.keys(MEMORY_MAP_CORE_INDICES).length, 19);
+  assert.equal(Object.keys(MEMORY_MAP_CORE_INDICES).length, VALID_MAP_IDS.length + 1);
+  assert.ok(VALID_MAP_IDS.every(mapId => mapId in MEMORY_MAP_CORE_INDICES));
   for (const indices of Object.values(MEMORY_MAP_CORE_INDICES)) {
     assert.equal(indices.length, 4);
     assert.equal(new Set(indices).size, 4);

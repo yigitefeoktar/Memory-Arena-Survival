@@ -4,7 +4,7 @@ import { readFileSync } from "fs";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { createHash, randomBytes } from "crypto";
-import { MatchSettings, DEFAULT_MATCH_SETTINGS, isValidGameMode, isValidMapId } from "./src/shared/matchSettings.js";
+import { MatchSettings, DEFAULT_MATCH_SETTINGS, getMapDimensions, isValidGameMode, isValidMapId } from "./src/shared/matchSettings.js";
 import { isWorldRelayedGameplayEvent, parseRelayedGameplayEvent } from "./src/shared/gameplayAnalyticsRelay.js";
 
 async function startServer() {
@@ -1067,6 +1067,7 @@ async function startServer() {
         return;
       }
 
+      const mapDimensions = getMapDimensions(room.matchSettings.mapId);
       for (const pid of roomPlayerIds) {
         const pos = spawnAssignments[pid];
         if (
@@ -1076,9 +1077,9 @@ async function startServer() {
           !Number.isFinite(pos.x) ||
           !Number.isFinite(pos.y) ||
           pos.x < 0 ||
-          pos.x > 3000 ||
+          pos.x > mapDimensions.width ||
           pos.y < 0 ||
-          pos.y > 3000
+          pos.y > mapDimensions.height
         ) {
           if (cb) cb({ success: false, error: "INVALID_SPAWN_COORDINATES" });
           return;

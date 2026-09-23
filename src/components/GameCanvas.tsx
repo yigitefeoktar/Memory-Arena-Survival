@@ -70,6 +70,7 @@ import {
   createInitialFactionEmergencyStates,
   createInitialPlayerUpgradeRanks,
   createMemoryCoreSpawners,
+  composeThreeByThreeArena,
   createShuffledShapeBag,
   createTriangleAiState,
   countRemainingCoreSpawners,
@@ -287,7 +288,10 @@ const BASE_WALLS = [
   { x: 0, y: MAP_HEIGHT - 50, w: MAP_WIDTH, h: 50 },
 ];
 
-type MapDefinition = { name: string; difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'EXPERT'; description: string; walls: {x: number, y: number, w: number, h: number}[]; spawners: {x: number, y: number, radius: number, hp: number, maxHp: number, specialType?: string, factionColor?: EnemyFactionColor, isCore?: boolean}[]; spawnPoint?: { x: number; y: number } };
+type MapDefinition = { name: string; difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'EXPERT'; description: string; width?: number; height?: number; walls: {x: number, y: number, w: number, h: number}[]; spawners: {x: number, y: number, radius: number, hp: number, maxHp: number, specialType?: string, factionColor?: EnemyFactionColor, isCore?: boolean}[]; spawnPoint?: { x: number; y: number } };
+
+const getMapWidth = (mapDef: MapDefinition): number => mapDef.width ?? MAP_WIDTH;
+const getMapHeight = (mapDef: MapDefinition): number => mapDef.height ?? MAP_HEIGHT;
 
 const MAPS: Record<string, MapDefinition> = {
   medium: {
@@ -1011,6 +1015,25 @@ const MAPS: Record<string, MapDefinition> = {
   }
 };
 
+const megaGridGeometry = composeThreeByThreeArena([
+  MAPS.medium,
+  MAPS.crossroads,
+  MAPS.scattered_ruins,
+  MAPS.pinball,
+  MAPS.fortress,
+  MAPS.classic_arena,
+  MAPS.choke_points,
+  MAPS.safe_haven,
+  MAPS.gridlock,
+]);
+
+MAPS.mega_grid = {
+  name: 'Ninefold Expanse',
+  difficulty: 'EXPERT',
+  description: 'Nine existing arenas joined into one seamless 3x3 battlefield with open crossings between every sector.',
+  ...megaGridGeometry,
+};
+
 MAPS.memory_test = {
   name: 'Memory Test',
   difficulty: 'MEDIUM',
@@ -1045,6 +1068,8 @@ const MEMORY_MAPS: Record<string, MapDefinition> = Object.fromEntries(
 const MEMORY_DEFAULT_MAP_ID = 'medium';
 
 let activeWalls = MAPS.medium.walls;
+let activeMapWidth = getMapWidth(MAPS.medium);
+let activeMapHeight = getMapHeight(MAPS.medium);
 
 interface MemoryEnemy {
   id?: string;
@@ -1144,7 +1169,9 @@ function resolveWallCollisions(
   radius: number,
   walls: { x: number; y: number; w: number; h: number }[],
   prevX?: number,
-  prevY?: number
+  prevY?: number,
+  worldWidth = activeMapWidth,
+  worldHeight = activeMapHeight,
 ): { x: number; y: number; normals: { nx: number; ny: number }[]; collided: boolean } {
   let curX = x;
   let curY = y;
@@ -1187,8 +1214,8 @@ function resolveWallCollisions(
 
           // Filter out-of-bounds candidates
           const legalCandidates = candidates.filter(c =>
-            c.x >= radius && c.x <= MAP_WIDTH - radius &&
-            c.y >= radius && c.y <= MAP_HEIGHT - radius
+            c.x >= radius && c.x <= worldWidth - radius &&
+            c.y >= radius && c.y <= worldHeight - radius
           );
 
           let chosen;
@@ -1234,8 +1261,8 @@ function resolveWallCollisions(
             nx = chosen.nx;
             ny = chosen.ny;
           } else {
-             curX = clamp(curX, radius + epsilon, MAP_WIDTH - radius - epsilon);
-             curY = clamp(curY, radius + epsilon, MAP_HEIGHT - radius - epsilon);
+             curX = clamp(curX, radius + epsilon, worldWidth - radius - epsilon);
+             curY = clamp(curY, radius + epsilon, worldHeight - radius - epsilon);
           }
         }
 
@@ -1248,8 +1275,8 @@ function resolveWallCollisions(
     if (!passCollision) break;
   }
 
-  curX = Math.max(radius + epsilon, Math.min(curX, MAP_WIDTH - radius - epsilon));
-  curY = Math.max(radius + epsilon, Math.min(curY, MAP_HEIGHT - radius - epsilon));
+  curX = Math.max(radius + epsilon, Math.min(curX, worldWidth - radius - epsilon));
+  curY = Math.max(radius + epsilon, Math.min(curY, worldHeight - radius - epsilon));
 
   let stillStuck = false;
   for (const wall of walls) {
@@ -1286,7 +1313,7 @@ function resolveWallCollisions(
           const angle = (a / angleSteps) * Math.PI * 2;
           const tx = curX + Math.cos(angle) * d;
           const ty = curY + Math.sin(angle) * d;
-          if (tx < radius || tx > MAP_WIDTH - radius || ty < radius || ty > MAP_HEIGHT - radius) continue;
+          if (tx < radius || tx > worldWidth - radius || ty < radius || ty > worldHeight - radius) continue;
           let wallHit = false;
           for (const wall of walls) {
             if (circleOverlapsWall(tx, ty, radius, wall)) {
@@ -1792,7 +1819,7 @@ function isPositionSafe(
   avoidPositions: { x: number; y: number }[] = [],
   minAvoidDist = 180
 ): boolean {
-  if (x < minDistToWalls || x > MAP_WIDTH - minDistToWalls || y < minDistToWalls || y > MAP_HEIGHT - minDistToWalls) {
+  if (x < minDistToWalls || x > activeMapWidth - minDistToWalls || y < minDistToWalls || y > activeMapHeight - minDistToWalls) {
     return false;
   }
   for (const wall of walls) {
@@ -1820,16 +1847,16 @@ function getSafeSpawn(
   minAvoidDist = 180
 ): { x: number; y: number } | null {
   for (let attempt = 0; attempt < 200; attempt++) {
-    const spawnX = 100 + Math.random() * (MAP_WIDTH - 200);
-    const spawnY = 100 + Math.random() * (MAP_HEIGHT - 200);
+    const spawnX = 100 + Math.random() * (activeMapWidth - 200);
+    const spawnY = 100 + Math.random() * (activeMapHeight - 200);
     if (isPositionSafe(spawnX, spawnY, walls, minDistToWalls, avoidPositions, minAvoidDist)) {
       return { x: spawnX, y: spawnY };
     }
   }
 
   const gridStep = 40;
-  for (let x = minDistToWalls + 20; x <= MAP_WIDTH - minDistToWalls - 20; x += gridStep) {
-    for (let y = minDistToWalls + 20; y <= MAP_HEIGHT - minDistToWalls - 20; y += gridStep) {
+  for (let x = minDistToWalls + 20; x <= activeMapWidth - minDistToWalls - 20; x += gridStep) {
+    for (let y = minDistToWalls + 20; y <= activeMapHeight - minDistToWalls - 20; y += gridStep) {
       if (isPositionSafe(x, y, walls, minDistToWalls, avoidPositions, minAvoidDist)) {
         return { x, y };
       }
@@ -1882,8 +1909,10 @@ function lineIntersectsRect(x1: number, y1: number, x2: number, y2: number, rx: 
 
 function isValidPlayerSpawnPos(px: number, py: number, targetSpawner: {x: number, y: number} | null, mapDef: MapDefinition): boolean {
   const MIN_DIST = 60; // 20 radius + 40 padding
+  const mapWidth = getMapWidth(mapDef);
+  const mapHeight = getMapHeight(mapDef);
 
-  if (px < MIN_DIST || px > MAP_WIDTH - MIN_DIST || py < MIN_DIST || py > MAP_HEIGHT - MIN_DIST) {
+  if (px < MIN_DIST || px > mapWidth - MIN_DIST || py < MIN_DIST || py > mapHeight - MIN_DIST) {
     return false;
   }
 
@@ -1914,17 +1943,19 @@ function isValidPlayerSpawnPos(px: number, py: number, targetSpawner: {x: number
 }
 
 function getValidatedFallbackSpawn(mapDef: MapDefinition): {x: number, y: number} {
+  const mapWidth = getMapWidth(mapDef);
+  const mapHeight = getMapHeight(mapDef);
   for (let i = 0; i < 100; i++) {
-    const px = Math.random() * MAP_WIDTH;
-    const py = Math.random() * MAP_HEIGHT;
+    const px = Math.random() * mapWidth;
+    const py = Math.random() * mapHeight;
     if (isValidPlayerSpawnPos(px, py, null, mapDef)) {
       // @ts-ignore
       if (import.meta.env.DEV) console.warn("Fallback: Used full arena player spawn for map:", mapDef.name);
       return { x: px, y: py };
     }
   }
-  for (let x = 0; x <= MAP_WIDTH; x += 50) {
-    for (let y = 0; y <= MAP_HEIGHT; y += 50) {
+  for (let x = 0; x <= mapWidth; x += 50) {
+    for (let y = 0; y <= mapHeight; y += 50) {
       if (isValidPlayerSpawnPos(x, y, null, mapDef)) {
         // @ts-ignore
         if (import.meta.env.DEV) console.warn("Fallback: Used full arena player spawn for map:", mapDef.name);
@@ -1952,6 +1983,8 @@ function generateMultiplayerSpawnAssignments(
   const N = shuffledIds.length;
   const activeWallsList = walls || mapDef.walls || [];
   const spawnersList = mapDef.spawners || [];
+  const mapWidth = getMapWidth(mapDef);
+  const mapHeight = getMapHeight(mapDef);
 
   const testCandidateFormation = (
     cx: number,
@@ -1969,9 +2002,9 @@ function generateMultiplayerSpawnAssignments(
       const padding = PLAYER_RADIUS + 30;
       if (
         sx < padding ||
-        sx > MAP_WIDTH - padding ||
+        sx > mapWidth - padding ||
         sy < padding ||
-        sy > MAP_HEIGHT - padding
+        sy > mapHeight - padding
       ) {
         return null;
       }
@@ -2058,8 +2091,8 @@ function generateMultiplayerSpawnAssignments(
 
     for (let attempt = 0; attempt < 300; attempt++) {
       const margin = 100 + radius;
-      const cx = margin + Math.random() * Math.max(1, MAP_WIDTH - 2 * margin);
-      const cy = margin + Math.random() * Math.max(1, MAP_HEIGHT - 2 * margin);
+      const cx = margin + Math.random() * Math.max(1, mapWidth - 2 * margin);
+      const cy = margin + Math.random() * Math.max(1, mapHeight - 2 * margin);
       const rotation = Math.random() * Math.PI * 2;
 
       const slots = testCandidateFormation(cx, cy, radius, rotation);
@@ -2076,8 +2109,8 @@ function generateMultiplayerSpawnAssignments(
     const margin = 60 + radius;
     const anglesToTry = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4];
 
-    for (let cx = margin; cx <= MAP_WIDTH - margin; cx += gridStep) {
-      for (let cy = margin; cy <= MAP_HEIGHT - margin; cy += gridStep) {
+    for (let cx = margin; cx <= mapWidth - margin; cx += gridStep) {
+      for (let cy = margin; cy <= mapHeight - margin; cy += gridStep) {
         for (const rotation of anglesToTry) {
           const slots = testCandidateFormation(cx, cy, radius, rotation);
           if (slots) {
@@ -3775,8 +3808,8 @@ export default function GameCanvas() {
       player_x: state.player.x,
       player_y: state.player.y,
       initial_spawner_count: state.spawners.length,
-      world_width: MAP_WIDTH,
-      world_height: MAP_HEIGHT,
+      world_width: activeMapWidth,
+      world_height: activeMapHeight,
     });
   }, []);
 
@@ -4735,6 +4768,8 @@ export default function GameCanvas() {
     }
     const mapId = rawUi.mapId;
     const mapDef = isMemorySave ? MEMORY_MAPS[mapId] : MAPS[mapId];
+    const mapWidth = getMapWidth(mapDef);
+    const mapHeight = getMapHeight(mapDef);
 
     if (rawUi.gameMode !== undefined && !isValidGameMode(rawUi.gameMode)) {
       throw new Error("INVALID SAVE FILE");
@@ -4848,7 +4883,7 @@ export default function GameCanvas() {
       reconstructedAbilityPickups = rawState.abilityPickups.map((pickup: unknown) => {
         if (!isObject(pickup)) throw new Error("INVALID SAVE FILE");
         if (typeof pickup.id !== 'string' || pickup.id.length === 0 || pickup.id.length > 128 ||
-            !isBoundedNum(pickup.x, 0, MAP_WIDTH) || !isBoundedNum(pickup.y, 0, MAP_HEIGHT) ||
+            !isBoundedNum(pickup.x, 0, mapWidth) || !isBoundedNum(pickup.y, 0, mapHeight) ||
             !isEnemyFactionColor(pickup.factionColor) ||
             pickup.abilityId !== ABILITY_BY_FACTION[pickup.factionColor] ||
             pickupFactions.has(pickup.factionColor) ||
@@ -4895,10 +4930,10 @@ export default function GameCanvas() {
     let px = rawPlayer.x;
     let py = rawPlayer.y;
 
-    px = Math.max(PLAYER_RADIUS, Math.min(MAP_WIDTH - PLAYER_RADIUS, px));
-    py = Math.max(PLAYER_RADIUS, Math.min(MAP_HEIGHT - PLAYER_RADIUS, py));
+    px = Math.max(PLAYER_RADIUS, Math.min(mapWidth - PLAYER_RADIUS, px));
+    py = Math.max(PLAYER_RADIUS, Math.min(mapHeight - PLAYER_RADIUS, py));
 
-    const wallResolved = resolveWallCollisions(px, py, PLAYER_RADIUS, mapDef.walls);
+    const wallResolved = resolveWallCollisions(px, py, PLAYER_RADIUS, mapDef.walls, undefined, undefined, mapWidth, mapHeight);
     px = wallResolved.x;
     py = wallResolved.y;
 
@@ -5006,7 +5041,7 @@ export default function GameCanvas() {
         recentBlocks = rawPlayer.recentBlocks.map((rb: any) => {
           if (!isObject(rb)) throw new Error("INVALID SAVE FILE");
           if (typeof rb.key !== 'string' || rb.key.length > 64) throw new Error("INVALID SAVE FILE");
-          if (!isBoundedNum(rb.x, 0, MAP_WIDTH) || !isBoundedNum(rb.y, 0, MAP_HEIGHT)) throw new Error("INVALID SAVE FILE");
+          if (!isBoundedNum(rb.x, 0, mapWidth) || !isBoundedNum(rb.y, 0, mapHeight)) throw new Error("INVALID SAVE FILE");
           const ts = adjustTime(rb.timestamp);
           return {
             key: rb.key,
@@ -5075,8 +5110,8 @@ export default function GameCanvas() {
               ))?.radius
             : MEMORY_ARENA_CONFIG.spawner.replicaRadius;
           if (expectedRadius === undefined || savedSpawner.radius !== expectedRadius ||
-              !isBoundedNum(savedSpawner.x, expectedRadius, MAP_WIDTH - expectedRadius) ||
-              !isBoundedNum(savedSpawner.y, expectedRadius, MAP_HEIGHT - expectedRadius)) {
+              !isBoundedNum(savedSpawner.x, expectedRadius, mapWidth - expectedRadius) ||
+              !isBoundedNum(savedSpawner.y, expectedRadius, mapHeight - expectedRadius)) {
             throw new Error("INVALID SAVE FILE");
           }
 
@@ -5226,7 +5261,7 @@ export default function GameCanvas() {
 
     const reconstructedBlocks = rawBlocks.map((b: any) => {
       if (!isObject(b)) throw new Error("INVALID SAVE FILE");
-      if (!isBoundedNum(b.x, 0, MAP_WIDTH) || !isBoundedNum(b.y, 0, MAP_HEIGHT)) {
+      if (!isBoundedNum(b.x, 0, mapWidth) || !isBoundedNum(b.y, 0, mapHeight)) {
         throw new Error("INVALID SAVE FILE");
       }
       if (!isBoundedNum(b.size, 1, 500)) throw new Error("INVALID SAVE FILE");
@@ -5252,7 +5287,7 @@ export default function GameCanvas() {
     const reconstructedBullets = rawBullets.map((b: any) => {
       if (!isObject(b)) throw new Error("INVALID SAVE FILE");
       if (!isValidStringOpt(b.id, 128)) throw new Error("INVALID SAVE FILE");
-      if (!isBoundedNum(b.x, 0, MAP_WIDTH) || !isBoundedNum(b.y, 0, MAP_HEIGHT)) {
+      if (!isBoundedNum(b.x, 0, mapWidth) || !isBoundedNum(b.y, 0, mapHeight)) {
         throw new Error("INVALID SAVE FILE");
       }
       if (!isBoundedNum(b.dx, -10000, 10000) || !isBoundedNum(b.dy, -10000, 10000)) {
@@ -5333,7 +5368,7 @@ export default function GameCanvas() {
     const reconstructedEnemies = rawEnemies.map((e: any) => {
       if (!isObject(e)) throw new Error("INVALID SAVE FILE");
       if (!isValidStringOpt(e.id, 128)) throw new Error("INVALID SAVE FILE");
-      if (!isBoundedNum(e.x, 0, MAP_WIDTH) || !isBoundedNum(e.y, 0, MAP_HEIGHT)) {
+      if (!isBoundedNum(e.x, 0, mapWidth) || !isBoundedNum(e.y, 0, mapHeight)) {
         throw new Error("INVALID SAVE FILE");
       }
       if (!isBoundedNum(e.radius, 1, 200)) throw new Error("INVALID SAVE FILE");
@@ -5458,7 +5493,7 @@ export default function GameCanvas() {
     const reconstructedBouncers = rawBouncers.map((b: any) => {
       if (!isObject(b)) throw new Error("INVALID SAVE FILE");
       if (!isValidStringOpt(b.id, 128)) throw new Error("INVALID SAVE FILE");
-      if (!isBoundedNum(b.x, 0, MAP_WIDTH) || !isBoundedNum(b.y, 0, MAP_HEIGHT)) {
+      if (!isBoundedNum(b.x, 0, mapWidth) || !isBoundedNum(b.y, 0, mapHeight)) {
         throw new Error("INVALID SAVE FILE");
       }
       if (!isBoundedNum(b.dx, -10000, 10000) || !isBoundedNum(b.dy, -10000, 10000)) {
@@ -5518,7 +5553,7 @@ export default function GameCanvas() {
 
     const reconstructedZones = rawZones.map((z: any) => {
       if (!isObject(z)) throw new Error("INVALID SAVE FILE");
-      if (!isBoundedNum(z.x, 0, MAP_WIDTH) || !isBoundedNum(z.y, 0, MAP_HEIGHT)) {
+      if (!isBoundedNum(z.x, 0, mapWidth) || !isBoundedNum(z.y, 0, mapHeight)) {
         throw new Error("INVALID SAVE FILE");
       }
       if (!isBoundedNum(z.innerRadius, 0, 1000) || !isBoundedNum(z.outerRadius, 1, 2000)) {
@@ -5703,6 +5738,8 @@ export default function GameCanvas() {
       cleanUi,
       cleanState,
       walls: mapDef.walls,
+      width: mapWidth,
+      height: mapHeight,
     };
   };
 
@@ -5710,6 +5747,8 @@ export default function GameCanvas() {
     resetEndPresentation();
     // Set activeWalls from the reconstructed map
     activeWalls = reconstructed.walls;
+    activeMapWidth = reconstructed.width;
+    activeMapHeight = reconstructed.height;
 
     // Copy the reconstructed state into the existing live state object
     const liveState = stateRef.current;
@@ -6397,6 +6436,9 @@ export default function GameCanvas() {
       startPos = pSpawn.pos;
       tutIdx = pSpawn.tutorialSpawnerIndex;
     }
+    activeWalls = mapDef.walls;
+    activeMapWidth = getMapWidth(mapDef);
+    activeMapHeight = getMapHeight(mapDef);
 
     if (pulseTimeoutRef.current) {
       clearTimeout(pulseTimeoutRef.current);
@@ -6411,8 +6453,6 @@ export default function GameCanvas() {
     }
     setChainFeedback(null);
     setLevelUpgradeNotice(null);
-    activeWalls = mapDef.walls;
-
     const state = stateRef.current;
     state.gameMode = selectedGameMode;
     state.hardMode = isHardMode;
@@ -6938,7 +6978,7 @@ export default function GameCanvas() {
          if (gridX % 40 !== 0 || gridY % 40 !== 0) return false;
 
          // 5. the complete 40×40 block remains within map bounds
-         if (gridX - 20 < 0 || gridX + 20 > MAP_WIDTH || gridY - 20 < 0 || gridY + 20 > MAP_HEIGHT) {
+         if (gridX - 20 < 0 || gridX + 20 > activeMapWidth || gridY - 20 < 0 || gridY + 20 > activeMapHeight) {
              return false;
          }
 
@@ -10216,9 +10256,9 @@ export default function GameCanvas() {
               b.y += b.dy * b.speed * dt;
 
               if (b.x < b.radius) { b.x = b.radius; b.dx *= -1; }
-              if (b.x > MAP_WIDTH - b.radius) { b.x = MAP_WIDTH - b.radius; b.dx *= -1; }
+              if (b.x > activeMapWidth - b.radius) { b.x = activeMapWidth - b.radius; b.dx *= -1; }
               if (b.y < b.radius) { b.y = b.radius; b.dy *= -1; }
-              if (b.y > MAP_HEIGHT - b.radius) { b.y = MAP_HEIGHT - b.radius; b.dy *= -1; }
+              if (b.y > activeMapHeight - b.radius) { b.y = activeMapHeight - b.radius; b.dy *= -1; }
             }
 
             // 3. Draw trails from authoritative buffered bullet positions.
@@ -10729,12 +10769,12 @@ export default function GameCanvas() {
                     x: clamp(
                       centerX + directionX * emergencyConfig.yellowFormationForwardOffset + tangentX * slotOffset,
                       ENEMY_RADIUS + 50,
-                      MAP_WIDTH - ENEMY_RADIUS - 50,
+                      activeMapWidth - ENEMY_RADIUS - 50,
                     ),
                     y: clamp(
                       centerY + directionY * emergencyConfig.yellowFormationForwardOffset + tangentY * slotOffset,
                       ENEMY_RADIUS + 50,
-                      MAP_HEIGHT - ENEMY_RADIUS - 50,
+                      activeMapHeight - ENEMY_RADIUS - 50,
                     ),
                   });
                 });
@@ -11793,11 +11833,11 @@ export default function GameCanvas() {
             let intendedX = bBeforeX + (b.dx * b.speed + kbvx) * dt;
             let intendedY = bBeforeY + (b.dy * b.speed + kbvy) * dt;
 
-            // Preserve existing world-boundary safety checks. Do not allow outside MAP_WIDTH/MAP_HEIGHT.
+            // Preserve world-boundary safety checks for the selected map dimensions.
             if (intendedX < b.radius) { intendedX = b.radius; b.dx *= -1; boundaryCollided = true; }
-            if (intendedX > MAP_WIDTH - b.radius) { intendedX = MAP_WIDTH - b.radius; b.dx *= -1; boundaryCollided = true; }
+            if (intendedX > activeMapWidth - b.radius) { intendedX = activeMapWidth - b.radius; b.dx *= -1; boundaryCollided = true; }
             if (intendedY < b.radius) { intendedY = b.radius; b.dy *= -1; boundaryCollided = true; }
-            if (intendedY > MAP_HEIGHT - b.radius) { intendedY = MAP_HEIGHT - b.radius; b.dy *= -1; boundaryCollided = true; }
+            if (intendedY > activeMapHeight - b.radius) { intendedY = activeMapHeight - b.radius; b.dy *= -1; boundaryCollided = true; }
 
             // Sweep static walls
             const wallResolved = sweptMultiplayerPlayerResolve(
@@ -11875,9 +11915,9 @@ export default function GameCanvas() {
             if (Math.abs(b.kbvy) < 1) b.kbvy = 0;
 
             if (b.x < b.radius) { b.x = b.radius; b.dx *= -1; }
-            if (b.x > MAP_WIDTH - b.radius) { b.x = MAP_WIDTH - b.radius; b.dx *= -1; }
+            if (b.x > activeMapWidth - b.radius) { b.x = activeMapWidth - b.radius; b.dx *= -1; }
             if (b.y < b.radius) { b.y = b.radius; b.dy *= -1; }
-            if (b.y > MAP_HEIGHT - b.radius) { b.y = MAP_HEIGHT - b.radius; b.dy *= -1; }
+            if (b.y > activeMapHeight - b.radius) { b.y = activeMapHeight - b.radius; b.dy *= -1; }
 
             // Collision with Walls
             const bResolved = resolveWallCollisions(b.x, b.y, b.radius, activeWalls, bBeforeX, bBeforeY);
@@ -13445,8 +13485,8 @@ export default function GameCanvas() {
 
         state.camera.x = state.player.x - state.camera.width / 2 + shakeX;
         state.camera.y = state.player.y - state.camera.height / 2 + shakeY;
-        state.camera.x = clamp(state.camera.x, 0, Math.max(0, MAP_WIDTH - state.camera.width));
-        state.camera.y = clamp(state.camera.y, 0, Math.max(0, MAP_HEIGHT - state.camera.height));
+        state.camera.x = clamp(state.camera.x, 0, Math.max(0, activeMapWidth - state.camera.width));
+        state.camera.y = clamp(state.camera.y, 0, Math.max(0, activeMapHeight - state.camera.height));
       }
 
       // Clear background
@@ -15034,12 +15074,12 @@ export default function GameCanvas() {
                                {/* Responsive map container */}
                                <div className="flex-1 w-full min-h-[120px] flex items-center justify-center p-1 md:p-2 relative overflow-hidden shrink mt-1 mb-1">
                                  <svg
-                                   viewBox="0 0 3000 3000"
+                                   viewBox={`0 0 ${getMapWidth(selMap)} ${getMapHeight(selMap)}`}
                                    className="w-full h-full aspect-square max-w-[130px] max-h-[130px] sm:max-w-[145px] sm:max-h-[145px] md:max-w-[220px] md:max-h-[220px]"
                                    preserveAspectRatio="xMidYMid meet"
                                  >
                                    {/* Base Map Square Background & Outer Border inside the coordinate system */}
-                                    <rect width="3000" height="3000" fill="#050508" stroke="rgba(0, 240, 255, 0.4)" strokeWidth="15" />
+                                    <rect width={getMapWidth(selMap)} height={getMapHeight(selMap)} fill="#050508" stroke="rgba(0, 240, 255, 0.4)" strokeWidth="15" />
 
                                     {/* Grid lines inside preview */}
                                    <defs>
@@ -15047,7 +15087,7 @@ export default function GameCanvas() {
                                        <path d="M 150 0 L 0 0 0 150" fill="none" stroke="rgba(0, 240, 255, 0.05)" strokeWidth="4" />
                                      </pattern>
                                    </defs>
-                                   <rect width="3000" height="3000" fill="url(#preview-grid)" />
+                                   <rect width={getMapWidth(selMap)} height={getMapHeight(selMap)} fill="url(#preview-grid)" />
 
                                    {/* Render Walls */}
                                    {selMap.walls.map((w, i) => (
@@ -15244,12 +15284,12 @@ export default function GameCanvas() {
                                {/* Responsive map container */}
                                <div className="flex-1 w-full min-h-[120px] flex items-center justify-center p-1 md:p-2 relative overflow-hidden shrink mt-1 mb-1">
                                  <svg
-                                   viewBox="0 0 3000 3000"
+                                   viewBox={`0 0 ${getMapWidth(selMap)} ${getMapHeight(selMap)}`}
                                    className="w-full h-full aspect-square max-w-[130px] max-h-[130px] sm:max-w-[145px] sm:max-h-[145px] md:max-w-[220px] md:max-h-[220px]"
                                    preserveAspectRatio="xMidYMid meet"
                                  >
                                    {/* Base Map Square Background & Outer Border */}
-                                    <rect width="3000" height="3000" fill="#050508" stroke="rgba(255, 204, 0, 0.4)" strokeWidth="15" />
+                                    <rect width={getMapWidth(selMap)} height={getMapHeight(selMap)} fill="#050508" stroke="rgba(255, 204, 0, 0.4)" strokeWidth="15" />
 
                                     {/* Grid lines inside preview */}
                                    <defs>
@@ -15257,7 +15297,7 @@ export default function GameCanvas() {
                                        <path d="M 150 0 L 0 0 0 150" fill="none" stroke="rgba(255, 204, 0, 0.08)" strokeWidth="4" />
                                      </pattern>
                                    </defs>
-                                   <rect width="3000" height="3000" fill="url(#mp-preview-grid)" />
+                                   <rect width={getMapWidth(selMap)} height={getMapHeight(selMap)} fill="url(#mp-preview-grid)" />
 
                                    {/* Render Walls */}
                                    {selMap.walls.map((w, i) => (

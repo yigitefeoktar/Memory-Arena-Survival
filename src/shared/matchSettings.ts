@@ -35,7 +35,16 @@ export const VALID_MAP_IDS = [
   'labyrinth',
   'scattered_ruins',
   'checkerboard',
+  'mega_grid',
 ] as const;
+
+export const STANDARD_MAP_SIZE = 3000;
+export const MEGA_GRID_MAP_SIZE = STANDARD_MAP_SIZE * 3;
+
+export function getMapDimensions(mapId: unknown): { width: number; height: number } {
+  const size = mapId === 'mega_grid' ? MEGA_GRID_MAP_SIZE : STANDARD_MAP_SIZE;
+  return { width: size, height: size };
+}
 
 export function isValidMapId(mapId: unknown): mapId is string {
   return typeof mapId === 'string' && (VALID_MAP_IDS as readonly string[]).includes(mapId);
