@@ -59,6 +59,7 @@ import {
   addFactionEmergencyPressure,
   applyPlayerDamage,
   areEnemyFactionsHostile,
+  calculateEnemySeparationSteering,
   canEnemyFactionDamageSpawner,
   canMemoryProjectileDamageEnemies,
   collectAbilityPickup,
@@ -98,6 +99,7 @@ import {
   regeneratePlayerHealth,
   registerPlayerEnemyKill,
   registerAbilityDropKill,
+  resolveEnemyOverlaps,
   takeShapeFromBag,
   turnAngleTowards,
   type AbilityDropProgress,
@@ -1105,6 +1107,8 @@ interface MemoryEnemy {
   wallFollowDy?: number;
   wallFollowTargetX?: number;
   wallFollowTargetY?: number;
+  separationDx?: number;
+  separationDy?: number;
 }
 
 interface MemoryBlock {
@@ -11023,6 +11027,12 @@ export default function GameCanvas() {
           }
         }
 
+        const enemySeparationSteering = calculateEnemySeparationSteering(state.enemies);
+        for (let index = 0; index < state.enemies.length; index++) {
+          state.enemies[index].separationDx = enemySeparationSteering[index].x;
+          state.enemies[index].separationDy = enemySeparationSteering[index].y;
+        }
+
         const activeBlueShieldsForEnemyMovement = state.memoryMode && MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled
           ? state.enemies.filter(enemy => (
               !enemy.isPlayerAlly &&
@@ -11516,8 +11526,9 @@ export default function GameCanvas() {
           let moveX = 0;
           let moveY = 0;
           if (dist > 0) {
-            moveX = (dx / dist) * enemy.speed;
-            moveY = (dy / dist) * enemy.speed;
+            const direction = blendEnemyMovementWithSeparation(enemy, dx / dist, dy / dist);
+            moveX = direction.x * enemy.speed;
+            moveY = direction.y * enemy.speed;
           }
 
           const kbvx = enemy.kbvx || 0;
@@ -11720,6 +11731,21 @@ export default function GameCanvas() {
 
         if (enemiesDefeatedByFactions.size > 0) {
           state.enemies = state.enemies.filter(enemy => !enemiesDefeatedByFactions.has(enemy));
+        }
+
+        const overlapResolution = resolveEnemyOverlaps(state.enemies, (enemy, _index, previous) => {
+          const constrained = resolveWallCollisions(
+            enemy.x,
+            enemy.y,
+            enemy.radius,
+            activeWalls,
+            previous.x,
+            previous.y,
+          );
+          return { x: constrained.x, y: constrained.y };
+        });
+        if (isAuthoritativeMultiplayerSimulation && overlapResolution.correctedPairs > 0) {
+          state.forceBroadcast = true;
         }
 
         // Bouncer Capacity increase
@@ -16885,6 +16911,22 @@ function clearMemoryEnemyWallFollow(enemy: MemoryEnemy): void {
   delete enemy.wallFollowTargetY;
 }
 
+function blendEnemyMovementWithSeparation(
+  enemy: MemoryEnemy,
+  directionX: number,
+  directionY: number,
+): { x: number; y: number } {
+  const directionLength = Math.hypot(directionX, directionY);
+  const baseX = directionLength > 0.0001 ? directionX / directionLength : 0;
+  const baseY = directionLength > 0.0001 ? directionY / directionLength : 0;
+  const separationWeight = MEMORY_ARENA_CONFIG.navigation.separationSteeringWeight;
+  const blendedX = baseX + (enemy.separationDx ?? 0) * separationWeight;
+  const blendedY = baseY + (enemy.separationDy ?? 0) * separationWeight;
+  const blendedLength = Math.hypot(blendedX, blendedY);
+  if (blendedLength <= 0.0001) return { x: baseX, y: baseY };
+  return { x: blendedX / blendedLength, y: blendedY / blendedLength };
+}
+
 function moveMemoryEnemyTowards(
   enemy: MemoryEnemy,
   targetX: number,
@@ -16919,6 +16961,9 @@ function moveMemoryEnemyTowards(
   let moveDy = directPathBlocked && enemy.wallFollowDy !== undefined
     ? enemy.wallFollowDy
     : directDy;
+  const steeredDirection = blendEnemyMovementWithSeparation(enemy, moveDx, moveDy);
+  moveDx = steeredDirection.x;
+  moveDy = steeredDirection.y;
   const previousX = enemy.x;
   const previousY = enemy.y;
   const step = Math.min(targetDistance, speed * dt);
@@ -16963,6 +17008,9 @@ function moveMemoryEnemyInDirection(
   const directionLength = Math.hypot(directionX, directionY);
   let moveDx = directionLength > 0.0001 ? directionX / directionLength : 0;
   let moveDy = directionLength > 0.0001 ? directionY / directionLength : 0;
+  const steeredDirection = blendEnemyMovementWithSeparation(enemy, moveDx, moveDy);
+  moveDx = steeredDirection.x;
+  moveDy = steeredDirection.y;
   const previousX = enemy.x;
   const previousY = enemy.y;
   const step = speed * dt;

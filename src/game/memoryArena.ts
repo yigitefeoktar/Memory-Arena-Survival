@@ -88,6 +88,11 @@ export const MEMORY_ARENA_CONFIG = {
   navigation: {
     wallFollowOutwardWeight: 0.28,
     pathClearanceInset: 0.5,
+    separationSteeringRangeMultiplier: 1.45,
+    separationSteeringWeight: 0.7,
+    minimumEnemyDistanceRatio: 0.9,
+    overlapResolutionPasses: 2,
+    maximumSeparationCorrectionPerPass: 8,
   },
   threat: {
     millisecondsPerTimeTier: 60000,
@@ -300,6 +305,138 @@ export function getWallFollowDirection(
   const steerY = tangent.y + normalY * outwardWeight;
   const steerLength = Math.max(0.0001, Math.hypot(steerX, steerY));
   return { x: steerX / steerLength, y: steerY / steerLength };
+}
+
+export interface EnemySeparationBody {
+  id?: string;
+  x: number;
+  y: number;
+  radius: number;
+}
+
+export interface EnemyOverlapResolution {
+  correctedPairs: number;
+  maximumRemainingOverlap: number;
+}
+
+function getEnemySeparationKey(body: EnemySeparationBody, index: number): string {
+  return body.id ? `id:${body.id}` : `index:${index}`;
+}
+
+/** Returns a stable direction from the first enemy toward the second. */
+function getEnemyPairNormal(
+  first: EnemySeparationBody,
+  firstIndex: number,
+  second: EnemySeparationBody,
+  secondIndex: number,
+): MovementVector {
+  const dx = second.x - first.x;
+  const dy = second.y - first.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance > 0.0001) return { x: dx / distance, y: dy / distance };
+
+  const firstKey = getEnemySeparationKey(first, firstIndex);
+  const secondKey = getEnemySeparationKey(second, secondIndex);
+  const orderedFirst = firstKey <= secondKey;
+  const pairKey = orderedFirst ? `${firstKey}|${secondKey}` : `${secondKey}|${firstKey}`;
+  let hash = 2166136261;
+  for (let index = 0; index < pairKey.length; index++) {
+    hash ^= pairKey.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  const angle = ((hash >>> 0) / 0xffffffff) * Math.PI * 2;
+  const direction = { x: Math.cos(angle), y: Math.sin(angle) };
+  return orderedFirst ? direction : { x: -direction.x, y: -direction.y };
+}
+
+/**
+ * Builds a gentle, symmetrical avoidance vector for each enemy before movement.
+ * The force starts outside contact range so converging crowds spread naturally.
+ */
+export function calculateEnemySeparationSteering(
+  enemies: readonly EnemySeparationBody[],
+  rangeMultiplier = MEMORY_ARENA_CONFIG.navigation.separationSteeringRangeMultiplier,
+): MovementVector[] {
+  const steering = enemies.map(() => ({ x: 0, y: 0 }));
+  for (let firstIndex = 0; firstIndex < enemies.length; firstIndex++) {
+    const first = enemies[firstIndex];
+    for (let secondIndex = firstIndex + 1; secondIndex < enemies.length; secondIndex++) {
+      const second = enemies[secondIndex];
+      const influenceDistance = (first.radius + second.radius) * rangeMultiplier;
+      const distance = Math.hypot(second.x - first.x, second.y - first.y);
+      if (distance >= influenceDistance) continue;
+
+      const normal = getEnemyPairNormal(first, firstIndex, second, secondIndex);
+      const strength = 1 - distance / Math.max(0.0001, influenceDistance);
+      steering[firstIndex].x -= normal.x * strength;
+      steering[firstIndex].y -= normal.y * strength;
+      steering[secondIndex].x += normal.x * strength;
+      steering[secondIndex].y += normal.y * strength;
+    }
+  }
+
+  return steering.map(vector => {
+    const length = Math.hypot(vector.x, vector.y);
+    if (length <= 1 || length <= 0.0001) return vector;
+    return { x: vector.x / length, y: vector.y / length };
+  });
+}
+
+/**
+ * Resolves excessive circle overlap in a few bounded passes. A small amount of
+ * overlap remains intentional so a crowd still reads as dense rather than rigid.
+ */
+export function resolveEnemyOverlaps<T extends EnemySeparationBody>(
+  enemies: T[],
+  constrainPosition?: (enemy: T, index: number, previous: MovementVector) => MovementVector,
+): EnemyOverlapResolution {
+  const navigation = MEMORY_ARENA_CONFIG.navigation;
+  let correctedPairs = 0;
+
+  for (let pass = 0; pass < navigation.overlapResolutionPasses; pass++) {
+    const previousPositions = enemies.map(enemy => ({ x: enemy.x, y: enemy.y }));
+    for (let firstIndex = 0; firstIndex < enemies.length; firstIndex++) {
+      const first = enemies[firstIndex];
+      for (let secondIndex = firstIndex + 1; secondIndex < enemies.length; secondIndex++) {
+        const second = enemies[secondIndex];
+        const minimumDistance = (first.radius + second.radius) * navigation.minimumEnemyDistanceRatio;
+        const distance = Math.hypot(second.x - first.x, second.y - first.y);
+        if (distance >= minimumDistance - 0.0001) continue;
+
+        const normal = getEnemyPairNormal(first, firstIndex, second, secondIndex);
+        const correctionPerEnemy = Math.min(
+          (minimumDistance - distance) / 2,
+          navigation.maximumSeparationCorrectionPerPass,
+        );
+        first.x -= normal.x * correctionPerEnemy;
+        first.y -= normal.y * correctionPerEnemy;
+        second.x += normal.x * correctionPerEnemy;
+        second.y += normal.y * correctionPerEnemy;
+        correctedPairs++;
+      }
+    }
+
+    if (constrainPosition) {
+      for (let index = 0; index < enemies.length; index++) {
+        const constrained = constrainPosition(enemies[index], index, previousPositions[index]);
+        enemies[index].x = constrained.x;
+        enemies[index].y = constrained.y;
+      }
+    }
+  }
+
+  let maximumRemainingOverlap = 0;
+  for (let firstIndex = 0; firstIndex < enemies.length; firstIndex++) {
+    for (let secondIndex = firstIndex + 1; secondIndex < enemies.length; secondIndex++) {
+      const first = enemies[firstIndex];
+      const second = enemies[secondIndex];
+      const minimumDistance = (first.radius + second.radius) * navigation.minimumEnemyDistanceRatio;
+      const distance = Math.hypot(second.x - first.x, second.y - first.y);
+      maximumRemainingOverlap = Math.max(maximumRemainingOverlap, minimumDistance - distance);
+    }
+  }
+
+  return { correctedPairs, maximumRemainingOverlap };
 }
 
 export const PLAYER_UPGRADE_STATS = ['fireRate', 'maxHp', 'regeneration', 'cooldown'] as const;

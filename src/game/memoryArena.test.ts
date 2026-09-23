@@ -12,6 +12,7 @@ import {
   addFactionEmergencyPressure,
   areEnemyFactionsHostile,
   applyPlayerDamage,
+  calculateEnemySeparationSteering,
   collectAbilityPickup,
   canEnemyFactionDamageSpawner,
   canMemoryProjectileDamageEnemies,
@@ -45,6 +46,7 @@ import {
   regeneratePlayerHealth,
   registerPlayerEnemyKill,
   registerAbilityDropKill,
+  resolveEnemyOverlaps,
   turnAngleTowards,
   type ColoredCoreSpawnerState,
   type EnemyAiState,
@@ -73,6 +75,49 @@ test('3x3 arena composition creates a seamless 9000px world', () => {
   assert.deepEqual(composed.spawners[8], { x: 6400, y: 6500, tile: 8 });
   assert.ok(composed.walls.some(wall => wall.x === 6108 && wall.y === 6200));
   assert.equal(composed.walls.filter(wall => wall.w === 9000 || wall.h === 9000).length, 4);
+});
+
+test('nearby enemies receive equal and opposite separation steering', () => {
+  const steering = calculateEnemySeparationSteering([
+    { id: 'left', x: 0, y: 0, radius: 10 },
+    { id: 'right', x: 15, y: 0, radius: 10 },
+    { id: 'far', x: 100, y: 0, radius: 10 },
+  ]);
+
+  assert.ok(steering[0].x < 0);
+  assert.ok(steering[1].x > 0);
+  assert.ok(Math.abs(steering[0].x + steering[1].x) < 1e-9);
+  assert.deepEqual(steering[2], { x: 0, y: 0 });
+});
+
+test('overlap resolution preserves a dense allowance while separating stacked enemies', () => {
+  const enemies = [
+    { id: 'first', x: 50, y: 50, radius: 16 },
+    { id: 'second', x: 50, y: 50, radius: 16 },
+  ];
+  const result = resolveEnemyOverlaps(enemies);
+  const distance = Math.hypot(enemies[1].x - enemies[0].x, enemies[1].y - enemies[0].y);
+  const expectedMinimum = 32 * MEMORY_ARENA_CONFIG.navigation.minimumEnemyDistanceRatio;
+
+  assert.ok(result.correctedPairs > 0);
+  assert.ok(distance >= expectedMinimum - 1e-6);
+  assert.ok(distance < 32, 'the configured allowance should retain slight visual overlap');
+  assert.ok(result.maximumRemainingOverlap < 1e-6);
+});
+
+test('overlap resolution reapplies position constraints after every pass', () => {
+  const enemies = [
+    { id: 'wall-side', x: 2, y: 20, radius: 10 },
+    { id: 'inside', x: 8, y: 20, radius: 10 },
+  ];
+  let constraintCalls = 0;
+  resolveEnemyOverlaps(enemies, enemy => {
+    constraintCalls++;
+    return { x: Math.max(0, enemy.x), y: enemy.y };
+  });
+
+  assert.equal(constraintCalls, enemies.length * MEMORY_ARENA_CONFIG.navigation.overlapResolutionPasses);
+  assert.ok(enemies.every(enemy => enemy.x >= 0));
 });
 
 test('mega grid is a valid map with shared 9000px server bounds', () => {
