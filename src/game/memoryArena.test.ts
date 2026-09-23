@@ -240,9 +240,7 @@ test('collecting a pickup unlocks only its ability and preserves the shared cool
 
 const redCircle = { shape: 'circle', color: 'red' } as const;
 const redSquare = { shape: 'square', color: 'red' } as const;
-const redTriangle = { shape: 'triangle', color: 'red' } as const;
 const blueCircle = { shape: 'circle', color: 'blue' } as const;
-const greenCircle = { shape: 'circle', color: 'green' } as const;
 const blueSquare = { shape: 'square', color: 'blue' } as const;
 
 test('first kill selects a target and starts at one', () => {
@@ -254,10 +252,10 @@ test('first kill selects a target and starts at one', () => {
   assert.equal(transition.state.progress, 1);
 });
 
-test('three enemies sharing one exact color complete a chain', () => {
+test('three enemies with the exact same color and shape complete a chain', () => {
   assert.equal(MEMORY_ARENA_CONFIG.chain.requiredKills, 3);
   let state = createInitialChainState();
-  for (const enemy of [redCircle, redSquare, redTriangle]) {
+  for (const enemy of [redCircle, redCircle, redCircle]) {
     state = registerPlayerEnemyKill(state, enemy).state;
   }
   assert.equal(state.level, 2);
@@ -268,27 +266,17 @@ test('three enemies sharing one exact color complete a chain', () => {
   assert.equal(state.matchingColor, null);
 });
 
-test('three enemies sharing one exact shape complete a chain', () => {
-  let state = createInitialChainState();
-  for (const enemy of [redCircle, blueCircle, greenCircle]) {
-    state = registerPlayerEnemyKill(state, enemy).state;
-  }
-  assert.equal(state.level, 2);
-  assert.equal(state.completedChains, 1);
-});
+test('matching only the color or only the shape resets the chain', () => {
+  const started = registerPlayerEnemyKill(createInitialChainState(), redCircle).state;
+  const sameColor = registerPlayerEnemyKill(started, redSquare);
+  assert.equal(sameColor.result, 'retargeted');
+  assert.deepEqual(sameColor.state.target, redSquare);
+  assert.equal(sameColor.state.progress, 1);
 
-test('the whole streak must retain the exact same shape or exact same color', () => {
-  let state = registerPlayerEnemyKill(createInitialChainState(), redCircle).state;
-  state = registerPlayerEnemyKill(state, redSquare).state;
-  assert.equal(state.matchingShape, null);
-  assert.equal(state.matchingColor, 'red');
-
-  const transition = registerPlayerEnemyKill(state, blueSquare);
-  assert.equal(transition.result, 'retargeted');
-  assert.deepEqual(transition.state.target, blueSquare);
-  assert.equal(transition.state.matchingShape, 'square');
-  assert.equal(transition.state.matchingColor, 'blue');
-  assert.equal(transition.state.progress, 1);
+  const sameShape = registerPlayerEnemyKill(started, blueCircle);
+  assert.equal(sameShape.result, 'retargeted');
+  assert.deepEqual(sameShape.state.target, blueCircle);
+  assert.equal(sameShape.state.progress, 1);
 });
 
 test('wrong kill retargets and counts as one', () => {
@@ -463,7 +451,7 @@ test('malformed or incomplete chain identities are rejected', () => {
     ...createInitialChainState(),
     target: redCircle,
     matchingShape: null,
-    matchingColor: null,
+    matchingColor: redCircle.color,
     progress: 1,
   }), false);
   assert.equal(isValidChainState({

@@ -894,9 +894,8 @@ export function registerPlayerEnemyKill(current: ChainState, killed: EnemyIdenti
     };
   }
 
-  const matchingShape = current.matchingShape === killed.shape ? current.matchingShape : null;
-  const matchingColor = current.matchingColor === killed.color ? current.matchingColor : null;
-  if (!matchingShape && !matchingColor) {
+  const matchesTarget = current.target.shape === killed.shape && current.target.color === killed.color;
+  if (!matchesTarget) {
     return {
       result: 'retargeted',
       state: {
@@ -926,7 +925,7 @@ export function registerPlayerEnemyKill(current: ChainState, killed: EnemyIdenti
 
   return {
     result: 'advanced',
-    state: { ...current, matchingShape, matchingColor, progress: nextProgress },
+    state: { ...current, progress: nextProgress },
   };
 }
 
@@ -1124,9 +1123,8 @@ export function isValidChainState(value: unknown): value is ChainState {
     ? candidate.target === null && candidate.matchingShape === null && candidate.matchingColor === null
     : Boolean(
         candidate.target &&
-        (candidate.matchingShape !== null || candidate.matchingColor !== null) &&
-        (candidate.matchingShape === null || candidate.matchingShape === candidate.target.shape) &&
-        (candidate.matchingColor === null || candidate.matchingColor === candidate.target.color)
+        candidate.matchingShape === candidate.target.shape &&
+        candidate.matchingColor === candidate.target.color
       );
   return Boolean(
     targetValid &&

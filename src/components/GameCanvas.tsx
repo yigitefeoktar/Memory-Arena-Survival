@@ -244,7 +244,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 9;
+const SAVE_VERSION = 10;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -4709,7 +4709,7 @@ export default function GameCanvas() {
           matchingColor: rawState.chain.target?.color ?? null,
         }
       : rawState.chain;
-    const normalizedRawChain = isMemorySave && version < 9 && isObject(identityNormalizedRawChain) &&
+    const lengthNormalizedRawChain = isMemorySave && version < 9 && isObject(identityNormalizedRawChain) &&
       typeof identityNormalizedRawChain.progress === 'number' &&
       identityNormalizedRawChain.progress >= MEMORY_ARENA_CONFIG.chain.requiredKills
       ? {
@@ -4717,6 +4717,19 @@ export default function GameCanvas() {
           progress: MEMORY_ARENA_CONFIG.chain.requiredKills - 1,
         }
       : identityNormalizedRawChain;
+    const normalizedRawChain = isMemorySave && version < 10 && isObject(lengthNormalizedRawChain) &&
+      typeof lengthNormalizedRawChain.progress === 'number' && lengthNormalizedRawChain.progress > 0 &&
+      isObject(lengthNormalizedRawChain.target) && (
+        lengthNormalizedRawChain.matchingShape !== lengthNormalizedRawChain.target.shape ||
+        lengthNormalizedRawChain.matchingColor !== lengthNormalizedRawChain.target.color
+      )
+      ? {
+          ...lengthNormalizedRawChain,
+          matchingShape: lengthNormalizedRawChain.target.shape,
+          matchingColor: lengthNormalizedRawChain.target.color,
+          progress: 1,
+        }
+      : lengthNormalizedRawChain;
     if (typeof rawUi.mapId !== 'string' || !(isMemorySave ? MEMORY_MAPS[rawUi.mapId] : MAPS[rawUi.mapId])) {
       throw new Error("UNKNOWN MAP");
     }
@@ -14851,7 +14864,7 @@ export default function GameCanvas() {
                     MEMORY <br/> <span className="text-[#00f0ff]">ARENA</span>
                   </h1>
                   <p className="text-[#00f0ff]/80 font-mono mb-3 sm:mb-6 whitespace-pre-wrap leading-snug sm:leading-relaxed text-[9px] sm:text-xs uppercase tracking-widest border-t border-b border-[#00f0ff]/30 py-2 sm:py-3 shrink-0">
-                    Remember the enemy.{"\n"}Build a three-kill chain with the same shape or color.
+                    Remember the enemy.{"\n"}Build a three-kill chain with the exact same color and shape.
                     {"\n\n"}
                     Desktop: WASD + Mouse.{"\n"}Mobile: Dual Joysticks.
                   </p>
