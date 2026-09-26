@@ -9,6 +9,7 @@ import {
   MEMORY_MAP_CORE_INDICES,
   advanceFactionEmergencyState,
   advanceTriangleAi,
+  advanceSoloWaveBreak,
   addFactionEmergencyPressure,
   areEnemyFactionsHostile,
   applyPlayerDamage,
@@ -17,6 +18,7 @@ import {
   canEnemyFactionDamageSpawner,
   canMemoryProjectileDamageEnemies,
   createInitialChainState,
+  createInitialSoloWaveState,
   createEmptyAbilityOwnership,
   createInitialAbilityDropProgress,
   createInitialFactionRaidStates,
@@ -33,18 +35,24 @@ import {
   getTriangleTelegraphVisual,
   getPlayerLevelStats,
   getMemoryThreatStats,
+  getSoloWaveIdentities,
+  getSoloWaveSpawnDeficits,
+  getSoloWaveSpeedMultiplier,
+  getSoloWaveStreakTarget,
   getMissingEnemyCombinations,
   getLeastRepresentedEnemyCombination,
   getWallFollowDirection,
   grantPlayerLevelUpgrade,
   derivePlayerUpgradeRanks,
   isValidChainState,
+  isValidSoloWaveState,
   isValidFactionRaidStates,
   isValidFactionEmergencyStates,
   markTrianglePlayerHit,
   preserveChainOnSpawnerDestroyed,
   regeneratePlayerHealth,
   registerPlayerEnemyKill,
+  registerSoloWaveStreak,
   registerAbilityDropKill,
   resolveEnemyOverlaps,
   turnAngleTowards,
@@ -363,6 +371,49 @@ test('wrong kill retargets and counts as one', () => {
   assert.equal(transition.result, 'retargeted');
   assert.deepEqual(transition.state.target, blueSquare);
   assert.equal(transition.state.progress, 1);
+});
+
+test('solo waves clear only after enough exact three-kill streaks and restart after the break', () => {
+  let wave = createInitialSoloWaveState();
+  let chain = createInitialChainState();
+  assert.equal(getSoloWaveStreakTarget(1), 2);
+  assert.equal(getSoloWaveStreakTarget(4), 5);
+  for (const kill of [redCircle, redCircle, blueSquare, blueSquare, blueSquare]) {
+    const transition = registerPlayerEnemyKill(chain, kill);
+    chain = transition.state;
+    if (transition.result === 'completed') wave = registerSoloWaveStreak(wave);
+  }
+  assert.equal(wave.completedStreaks, 1);
+  assert.equal(wave.phase, 'active');
+  assert.equal(chain.progress, 0);
+  for (let i = 0; i < 3; i++) {
+    const transition = registerPlayerEnemyKill(chain, redCircle);
+    chain = transition.state;
+    if (transition.result === 'completed') wave = registerSoloWaveStreak(wave);
+  }
+  assert.equal(wave.phase, 'break');
+  assert.equal(wave.completedStreaks, 2);
+  assert.equal(registerSoloWaveStreak(wave), wave);
+  assert.equal(advanceSoloWaveBreak(wave, 2999).phase, 'break');
+  wave = advanceSoloWaveBreak(wave, 3000);
+  assert.deepEqual(wave, { number: 2, completedStreaks: 0, phase: 'active', breakRemainingMs: 0 });
+  assert.equal(getSoloWaveStreakTarget(wave.number), 3);
+  assert.equal(isValidSoloWaveState(wave), true);
+  assert.equal(isValidSoloWaveState({ ...wave, completedStreaks: 3 }), false);
+});
+
+test('every wave offers three of each identity and replenishes depleted chain targets', () => {
+  for (const wave of [1, 3, 4, 10, 100]) {
+    const identities = getSoloWaveIdentities(wave);
+    assert.equal(new Set(identities.map(identity => `${identity.color}:${identity.shape}`)).size, identities.length);
+    const initial = getSoloWaveSpawnDeficits(wave, []);
+    assert.equal(initial.length, identities.length * MEMORY_ARENA_CONFIG.waves.minimumPerIdentity);
+    assert.deepEqual(getSoloWaveSpawnDeficits(wave, initial), []);
+    assert.deepEqual(getSoloWaveSpawnDeficits(wave, initial.slice(1)), [initial[0]]);
+  }
+  assert.equal(getSoloWaveSpeedMultiplier(1), 1);
+  assert.ok(getSoloWaveSpeedMultiplier(5) > getSoloWaveSpeedMultiplier(1));
+  assert.equal(getSoloWaveSpeedMultiplier(100), MEMORY_ARENA_CONFIG.waves.maximumSpeedMultiplier);
 });
 
 test('levels have no artificial maximum and spawners are chain-neutral', () => {

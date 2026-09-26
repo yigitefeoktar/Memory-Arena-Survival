@@ -69,6 +69,14 @@ export const ENEMY_COLOR_HEX: Record<EnemyFactionColor, string> = {
 export const PLAYER_COLOR_HEX = MEMORY_ARENA_PALETTE.player.effect;
 
 export const MEMORY_ARENA_CONFIG = {
+  waves: {
+    breakMs: 3000,
+    initialStreaks: 2,
+    minimumPerIdentity: 3,
+    maximumIdentities: 6,
+    speedIncreasePerWave: 0.035,
+    maximumSpeedMultiplier: 1.35,
+  },
   combat: {
     bulletRicochetEnabled: false,
     enemyFactionCombatEnabled: false,
@@ -1149,6 +1157,71 @@ export function registerPlayerEnemyKill(current: ChainState, killed: EnemyIdenti
 
 export function preserveChainOnSpawnerDestroyed(current: ChainState): ChainState {
   return current;
+}
+
+export interface SoloWaveState {
+  number: number;
+  completedStreaks: number;
+  phase: 'active' | 'break';
+  breakRemainingMs: number;
+}
+
+export function createInitialSoloWaveState(): SoloWaveState {
+  return { number: 1, completedStreaks: 0, phase: 'active', breakRemainingMs: 0 };
+}
+
+export function getSoloWaveStreakTarget(wave: number): number {
+  return MEMORY_ARENA_CONFIG.waves.initialStreaks + Math.max(0, Math.floor(wave) - 1);
+}
+
+export function getSoloWaveIdentities(wave: number): EnemyIdentity[] {
+  const all = ENEMY_FACTIONS.flatMap(color => ENEMY_SHAPES.map(shape => ({ shape, color })));
+  const count = Math.min(MEMORY_ARENA_CONFIG.waves.maximumIdentities, 2 + Math.floor((Math.max(1, wave) - 1) / 3));
+  const start = (Math.max(1, Math.floor(wave)) - 1) % all.length;
+  return Array.from({ length: count }, (_, index) => all[(start + index) % all.length]);
+}
+
+export function getSoloWaveSpawnDeficits(wave: number, living: readonly EnemyIdentity[]): EnemyIdentity[] {
+  return getSoloWaveIdentities(wave).flatMap(identity => {
+    const count = living.filter(enemy => enemy.shape === identity.shape && enemy.color === identity.color).length;
+    return Array.from({ length: Math.max(0, MEMORY_ARENA_CONFIG.waves.minimumPerIdentity - count) }, () => identity);
+  });
+}
+
+export function getSoloWaveSpeedMultiplier(wave: number): number {
+  return Math.min(
+    MEMORY_ARENA_CONFIG.waves.maximumSpeedMultiplier,
+    1 + (Math.max(1, wave) - 1) * MEMORY_ARENA_CONFIG.waves.speedIncreasePerWave,
+  );
+}
+
+export function registerSoloWaveStreak(current: SoloWaveState): SoloWaveState {
+  if (current.phase !== 'active') return current;
+  const completedStreaks = current.completedStreaks + 1;
+  return completedStreaks >= getSoloWaveStreakTarget(current.number)
+    ? { ...current, completedStreaks, phase: 'break', breakRemainingMs: MEMORY_ARENA_CONFIG.waves.breakMs }
+    : { ...current, completedStreaks };
+}
+
+export function advanceSoloWaveBreak(current: SoloWaveState, elapsedMs: number): SoloWaveState {
+  if (current.phase !== 'break') return current;
+  const remaining = Math.max(0, current.breakRemainingMs - Math.max(0, elapsedMs));
+  return remaining > 0
+    ? { ...current, breakRemainingMs: remaining }
+    : { number: current.number + 1, completedStreaks: 0, phase: 'active', breakRemainingMs: 0 };
+}
+
+export function isValidSoloWaveState(value: unknown): value is SoloWaveState {
+  if (!value || typeof value !== 'object') return false;
+  const wave = value as Partial<SoloWaveState>;
+  return Number.isInteger(wave.number) && wave.number! >= 1 && wave.number! <= 1_000_000 &&
+    Number.isInteger(wave.completedStreaks) && wave.completedStreaks! >= 0 &&
+    wave.completedStreaks! <= getSoloWaveStreakTarget(wave.number!) &&
+    (wave.phase === 'active' || wave.phase === 'break') &&
+    typeof wave.breakRemainingMs === 'number' && Number.isFinite(wave.breakRemainingMs) &&
+    wave.breakRemainingMs >= 0 && wave.breakRemainingMs <= MEMORY_ARENA_CONFIG.waves.breakMs &&
+    (wave.phase === 'active' ? wave.breakRemainingMs === 0 && wave.completedStreaks! < getSoloWaveStreakTarget(wave.number!)
+      : wave.completedStreaks === getSoloWaveStreakTarget(wave.number!));
 }
 
 export function createShuffledShapeBag(random: () => number = Math.random): EnemyShape[] {

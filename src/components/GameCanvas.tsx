@@ -55,6 +55,7 @@ import {
   PLAYER_COLOR_HEX,
   PLAYER_UPGRADE_STATS,
   advanceTriangleAi,
+  advanceSoloWaveBreak,
   advanceFactionEmergencyState,
   addFactionEmergencyPressure,
   applyPlayerDamage,
@@ -64,6 +65,7 @@ import {
   canMemoryProjectileDamageEnemies,
   collectAbilityPickup,
   createInitialChainState,
+  createInitialSoloWaveState,
   createEmptyAbilityOwnership,
   createFullAbilityOwnership,
   createInitialAbilityDropProgress,
@@ -81,8 +83,10 @@ import {
   getTriangleTelegraphVisual,
   getPlayerLevelStats,
   getMemoryThreatStats,
+  getSoloWaveSpawnDeficits,
+  getSoloWaveSpeedMultiplier,
+  getSoloWaveStreakTarget,
   getMissingEnemyCombinations,
-  getLeastRepresentedEnemyCombination,
   grantPlayerLevelUpgrade,
   getWallFollowDirection,
   derivePlayerUpgradeRanks,
@@ -90,6 +94,7 @@ import {
   isEnemyShape,
   isFactionEnemyAbilityId,
   isValidChainState,
+  isValidSoloWaveState,
   isValidAbilityDropProgress,
   isValidAbilityOwnership,
   isValidFactionRaidStates,
@@ -98,6 +103,7 @@ import {
   markTrianglePlayerHit,
   regeneratePlayerHealth,
   registerPlayerEnemyKill,
+  registerSoloWaveStreak,
   registerAbilityDropKill,
   resolveEnemyOverlaps,
   takeShapeFromBag,
@@ -107,6 +113,7 @@ import {
   type AbilityOwnership,
   type AbilityPickup,
   type ChainState,
+  type SoloWaveState,
   type EnemyFactionColor,
   type EnemyShape,
   type FactionEnemyAbilityId,
@@ -247,7 +254,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 10;
+const SAVE_VERSION = 11;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -1067,7 +1074,7 @@ const MEMORY_MAPS: Record<string, MapDefinition> = Object.fromEntries(
   }),
 );
 
-const MEMORY_DEFAULT_MAP_ID = 'medium';
+const MEMORY_DEFAULT_MAP_ID = 'classic_arena';
 
 let activeWalls = MAPS.medium.walls;
 let activeMapWidth = getMapWidth(MAPS.medium);
@@ -2867,6 +2874,7 @@ export default function GameCanvas() {
   }, []);
 
   const [uiState, setUiState] = useState<{ status: 'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER' | 'VICTORY' | 'LOBBY'; score: number; deviceType: 'desktop' | 'mobile'; activeTool: 'weapon' | 'special' | 'build'; blocks: number; spawnersLeft: number; mapId: string; hardMode: boolean; gameMode: GameMode; hp: number; maxHp: number; level: number; chainProgress: number; ownedAbilities: AbilityOwnership; buttonCounters: { damage: number; special: number; build: number; convert: number } }>({ status: 'MENU', score: 0, deviceType: 'desktop', activeTool: 'special', blocks: 50, spawnersLeft: 0, mapId: MEMORY_DEFAULT_MAP_ID, hardMode: false, gameMode: 'normal', hp: MEMORY_ARENA_CONFIG.player.maxHp, maxHp: MEMORY_ARENA_CONFIG.player.maxHp, level: 1, chainProgress: 0, ownedAbilities: createEmptyAbilityOwnership(), buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 } });
+  const [soloWaveUi, setSoloWaveUi] = useState<SoloWaveState>(createInitialSoloWaveState);
   const uiRef = useRef(uiState);
   uiRef.current = uiState;
 
@@ -3735,6 +3743,7 @@ export default function GameCanvas() {
     memoryRunElapsedMs: 0,
     openingHostilesSeeded: false,
     chain: createInitialChainState() as ChainState,
+    soloWave: createInitialSoloWaveState() as SoloWaveState,
     playerUpgradeRanks: createInitialPlayerUpgradeRanks() as PlayerUpgradeRanks,
     factionRaids: createInitialFactionRaidStates() as FactionRaidStates,
     factionEmergencies: createInitialFactionEmergencyStates() as FactionEmergencyStates,
@@ -4576,6 +4585,7 @@ export default function GameCanvas() {
         ...state.chain,
         target: state.chain.target ? { ...state.chain.target } : null,
       },
+      soloWave: { ...state.soloWave },
       playerUpgradeRanks: { ...state.playerUpgradeRanks },
       factionRaids: Object.fromEntries(ENEMY_FACTIONS.map(faction => [
         faction,
@@ -4816,6 +4826,10 @@ export default function GameCanvas() {
 
     if (isMemorySave) {
       if (rawState.memoryMode !== true || !isValidChainState(normalizedRawChain)) {
+        throw new Error("INVALID SAVE FILE");
+      }
+      if (version >= 11 && (mapId !== MEMORY_DEFAULT_MAP_ID || !isValidSoloWaveState(rawState.soloWave) ||
+          !Array.isArray(rawState.spawners) || rawState.spawners.length !== 0)) {
         throw new Error("INVALID SAVE FILE");
       }
       if (rawState.factionRaids !== undefined && !isValidFactionRaidStates(rawState.factionRaids)) {
@@ -5732,18 +5746,39 @@ export default function GameCanvas() {
       memoryRunElapsedMs: reconstructedMemoryRunElapsedMs,
       openingHostilesSeeded: false,
       chain: reconstructedChain,
+      soloWave: isMemorySave && version >= 11 ? { ...rawState.soloWave } as SoloWaveState : createInitialSoloWaveState(),
       playerUpgradeRanks: reconstructedPlayerUpgradeRanks,
       factionRaids: reconstructedFactionRaids,
       factionEmergencies: reconstructedFactionEmergencies,
       tutorial: { active: false, spawnerIndex: null, enemySpawned: false, timer: 0 },
     };
 
+    if (isMemorySave && version < 11) {
+      // Legacy solo saves used a spawner objective and could use the nine-map world.
+      // Keep earned levels and score, then place the player into the new first wave.
+      cleanUi.mapId = MEMORY_DEFAULT_MAP_ID;
+      cleanUi.chainProgress = 0;
+      cleanState.player.x = 1500;
+      cleanState.player.y = 1200;
+      cleanState.player.vx = 0;
+      cleanState.player.vy = 0;
+      cleanState.enemies = [];
+      cleanState.bullets = [];
+      cleanState.blocks = [];
+      cleanState.spawners = [];
+      cleanState.abilityPickups = [];
+      cleanState.zones = [];
+      cleanState.camera.x = 1500 - cleanState.camera.width / (2 * cleanState.camera.z);
+      cleanState.camera.y = 1200 - cleanState.camera.height / (2 * cleanState.camera.z);
+      cleanState.chain = { ...cleanState.chain, target: null, matchingShape: null, matchingColor: null, progress: 0 };
+    }
+    const loadedMap = isMemorySave && version < 11 ? MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID] : mapDef;
     return {
       cleanUi,
       cleanState,
-      walls: mapDef.walls,
-      width: mapWidth,
-      height: mapHeight,
+      walls: loadedMap.walls,
+      width: getMapWidth(loadedMap),
+      height: getMapHeight(loadedMap),
     };
   };
 
@@ -5757,6 +5792,7 @@ export default function GameCanvas() {
     // Copy the reconstructed state into the existing live state object
     const liveState = stateRef.current;
     Object.assign(liveState, reconstructed.cleanState);
+    setSoloWaveUi({ ...liveState.soloWave });
 
     // Treat the newly loaded PAUSED state as beginning a new pause at the load time
     accumulatedPauseOffsetRef.current = 0;
@@ -6511,6 +6547,8 @@ export default function GameCanvas() {
     const resetTime = performance.now();
     state.spawners = [];
     state.chain = createInitialChainState();
+    state.soloWave = createInitialSoloWaveState();
+    setSoloWaveUi({ ...state.soloWave });
     state.factionRaids = createInitialFactionRaidStates(resetTime);
     state.factionEmergencies = createInitialFactionEmergencyStates(resetTime);
     if (state.memoryMode) {
@@ -6654,8 +6692,8 @@ export default function GameCanvas() {
   ): boolean => {
     if (mpRef.current.roomId) return false;
 
-    // Every solo map uses its four-core Memory Arena derivative.
-    const selectedMapId = mapId && MEMORY_MAPS[mapId] ? mapId : MEMORY_DEFAULT_MAP_ID;
+    // Wave play uses one existing compact arena; multiplayer retains its map selection.
+    const selectedMapId = MEMORY_DEFAULT_MAP_ID;
     const selectedGameMode: GameMode = 'normal';
 
     // Clear any active pause-feedback timeout before clearing its state
@@ -6725,6 +6763,8 @@ export default function GameCanvas() {
       state.memoryRunElapsedMs = 0;
       state.openingHostilesSeeded = false;
       state.chain = createInitialChainState();
+      state.soloWave = createInitialSoloWaveState();
+      setSoloWaveUi({ ...state.soloWave });
       state.factionRaids = createInitialFactionRaidStates(resetTime);
       state.factionEmergencies = createInitialFactionEmergencyStates(resetTime);
       state.spawners = [];
@@ -9785,6 +9825,15 @@ export default function GameCanvas() {
       if (shouldRunUpdates) {
         if (state.memoryMode && STATUS === 'PLAYING') {
           state.memoryRunElapsedMs += dt * 1000;
+          if (state.soloWave.phase === 'break') {
+            state.enemies = [];
+            state.bullets = [];
+            const previousSeconds = Math.ceil(state.soloWave.breakRemainingMs / 1000);
+            state.soloWave = advanceSoloWaveBreak(state.soloWave, dt * 1000);
+            if (state.soloWave.phase === 'active' || Math.ceil(state.soloWave.breakRemainingMs / 1000) !== previousSeconds) {
+              setSoloWaveUi({ ...state.soloWave });
+            }
+          }
         }
         const memoryThreat = getMemoryThreatStats(state.memoryRunElapsedMs, state.chain.level);
 
@@ -10058,7 +10107,7 @@ export default function GameCanvas() {
                 thickness: 8,
               });
 
-              if (enemy.shape && enemy.factionColor) {
+              if (state.memoryMode && state.soloWave.phase === 'active' && enemy.shape && enemy.factionColor) {
                 const chainTransition = registerPlayerEnemyKill(state.chain, {
                   shape: enemy.shape,
                   color: enemy.factionColor,
@@ -10068,6 +10117,8 @@ export default function GameCanvas() {
                   showChainFeedback('reset');
                 } else if (chainTransition.result === 'completed') {
                   applyCompletedPlayerLevelUpgrade();
+                  state.soloWave = registerSoloWaveStreak(state.soloWave);
+                  setSoloWaveUi({ ...state.soloWave });
                 }
               }
             }
@@ -10672,7 +10723,9 @@ export default function GameCanvas() {
             y: spawn.y,
             radius: ENEMY_RADIUS,
             lastShoot: currentTime + Math.random() * 600,
-            speed: state.memoryMode ? MEMORY_ENEMY_SPEED + Math.random() * 15 : ENEMY_SPEED + Math.random() * 20,
+            speed: state.memoryMode
+              ? (MEMORY_ENEMY_SPEED + Math.random() * 15) * getSoloWaveSpeedMultiplier(state.soloWave.number)
+              : ENEMY_SPEED + Math.random() * 20,
             shape: identity.shape,
             factionColor: identity.color,
             angle: moveAngle,
@@ -10690,28 +10743,19 @@ export default function GameCanvas() {
         };
 
         if (STATUS === 'PLAYING') {
-          for (const identity of getMissingEnemyCombinations(state.enemies)) {
-            spawnAutonomousEnemy(identity, true);
-          }
-
           if (state.memoryMode) {
-            const population = MEMORY_ARENA_CONFIG.population;
-            let hostileCount = state.enemies.filter(enemy => !enemy.isPlayerAlly).length;
-            // Seed two of each identity on a new run, then grow toward three of each over time.
-            if (!state.openingHostilesSeeded) {
-              while (hostileCount < population.openingHostiles && state.enemies.length < population.maximumTotalEnemies) {
-                if (!spawnAutonomousEnemy(getLeastRepresentedEnemyCombination(state.enemies), false, hostileCount % 2 === 0)) break;
-                hostileCount++;
+            if (state.soloWave.phase === 'active') {
+              // Keep three of each offered identity alive. A chain remains possible
+              // even after an ally kill, conversion, or a missed target.
+              const living = state.enemies.filter(enemy => !enemy.isPlayerAlly && enemy.shape && enemy.factionColor)
+                .map(enemy => ({ shape: enemy.shape!, color: enemy.factionColor! }));
+              for (const [index, identity] of getSoloWaveSpawnDeficits(state.soloWave.number, living).entries()) {
+                spawnAutonomousEnemy(identity, true, index % 2 === 0);
               }
-              state.openingHostilesSeeded = true;
             }
-            if (
-              hostileCount < population.targetHostiles &&
-              state.enemies.length < population.maximumTotalEnemies &&
-              currentTime - state.lastEnemySpawn >= population.extraSpawnIntervalMs
-            ) {
-              state.lastEnemySpawn = currentTime;
-              spawnAutonomousEnemy(getLeastRepresentedEnemyCombination(state.enemies), false, hostileCount % 2 === 0);
+          } else {
+            for (const identity of getMissingEnemyCombinations(state.enemies)) {
+              spawnAutonomousEnemy(identity, true);
             }
           }
         }
@@ -13227,7 +13271,7 @@ export default function GameCanvas() {
                   maybeSpawnAbilityDrop(enemy, bullet.isPlayer ? 'player' : 'ally');
                 }
 
-                if (state.memoryMode && bullet.isPlayer && enemy.shape && enemy.factionColor) {
+                if (state.memoryMode && state.soloWave.phase === 'active' && bullet.isPlayer && enemy.shape && enemy.factionColor) {
                   const chainTransition = registerPlayerEnemyKill(state.chain, {
                     shape: enemy.shape,
                     color: enemy.factionColor,
@@ -13237,6 +13281,8 @@ export default function GameCanvas() {
                     showChainFeedback('reset');
                   } else if (chainTransition.result === 'completed') {
                     applyCompletedPlayerLevelUpgrade();
+                    state.soloWave = registerSoloWaveStreak(state.soloWave);
+                    setSoloWaveUi({ ...state.soloWave });
                   }
                   const nextUi = {
                     ...uiRef.current,
@@ -14930,7 +14976,7 @@ export default function GameCanvas() {
                     MEMORY <br/> <span className="text-[#00f0ff]">ARENA</span>
                   </h1>
                   <p className="text-[#00f0ff]/80 font-mono mb-3 sm:mb-6 whitespace-pre-wrap leading-snug sm:leading-relaxed text-[9px] sm:text-xs uppercase tracking-widest border-t border-b border-[#00f0ff]/30 py-2 sm:py-3 shrink-0">
-                    Remember the enemy.{"\n"}Build a three-kill chain with the exact same color and shape.
+                    Remember the enemy.{"\n"}Build three-kill chains with the exact same color and shape to clear endless waves.
                     {"\n\n"}
                     Desktop: WASD + Mouse.{"\n"}Mobile: Dual Joysticks.
                   </p>
@@ -15038,7 +15084,7 @@ export default function GameCanvas() {
                         ref={mapListRef}
                         className="flex-1 overflow-y-auto p-2 grid grid-cols-2 gap-2 content-start [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
                       >
-                        {Object.entries(MEMORY_MAPS)
+                        {Object.entries(MEMORY_MAPS).filter(([id]) => id === MEMORY_DEFAULT_MAP_ID)
                           .sort((a, b) => {
                             const difficultyRank: Record<string, number> = {
                               'EASY': 1,
@@ -15995,6 +16041,17 @@ export default function GameCanvas() {
                       left: 'calc(0.75rem + env(safe-area-inset-left, 0px))',
                     }}
                   >
+                    <div className="w-full border-2 border-[#00f0ff]/80 bg-[#07141d]/90 px-3 py-2 text-white shadow-[0_0_14px_rgba(0,240,255,0.22)] backdrop-blur-sm" aria-live="polite">
+                      <div className="flex items-center justify-between gap-2 text-[11px] font-black uppercase tracking-[0.12em] sm:text-sm">
+                        <span>WAVE {soloWaveUi.number}</span>
+                        <span>STREAKS {soloWaveUi.completedStreaks}/{getSoloWaveStreakTarget(soloWaveUi.number)}</span>
+                      </div>
+                      <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-[#a6f3ff] sm:text-[11px]">
+                        {soloWaveUi.phase === 'break'
+                          ? `WAVE CLEAR · NEXT IN ${Math.ceil(soloWaveUi.breakRemainingMs / 1000)}s`
+                          : 'MATCH 3 KILLS · SAME SHAPE + COLOR'}
+                      </div>
+                    </div>
                     <div className="flex h-[48px] w-full items-stretch gap-2.5 sm:gap-3">
                       <div
                         className="flex w-[58px] shrink-0 -skew-x-12 items-center justify-center border-2 text-[#F5F7FF] backdrop-blur-sm sm:w-[72px]"
@@ -16021,6 +16078,7 @@ export default function GameCanvas() {
                         }}
                       >
                         <div className="flex h-full skew-x-12 items-center gap-2 px-3" aria-label={`Chain progress ${uiState.chainProgress} of ${MEMORY_ARENA_CONFIG.chain.requiredKills}`}>
+                          <span className="text-[9px] font-black tracking-wider">CHAIN</span>
                           <div className="grid min-w-0 flex-1 grid-cols-3 gap-1.5">
                             {Array.from({ length: MEMORY_ARENA_CONFIG.chain.requiredKills }, (_, index) => {
                               const isComplete = index < uiState.chainProgress;
@@ -16563,6 +16621,7 @@ export default function GameCanvas() {
               className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-8 text-xs sm:text-sm font-mono text-red-200/80 mb-4 sm:mb-6 md:mb-10 uppercase tracking-widest border-t border-b border-red-500/30 py-3 sm:py-6"
             >
               <div>FINAL SCORE: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.score}</span></div>
+              <div>HIGHEST WAVE: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{soloWaveUi.number}</span></div>
             </motion.div>
 
             <motion.div
