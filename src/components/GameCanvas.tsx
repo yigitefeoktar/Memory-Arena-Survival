@@ -83,7 +83,7 @@ import {
   getTriangleTelegraphVisual,
   getPlayerLevelStats,
   getMemoryThreatStats,
-  getSoloWaveSpawnDeficits,
+  getSoloWaveRescueSpawns,
   getSoloWaveSpeedMultiplier,
   getSoloWaveStreakTarget,
   getMissingEnemyCombinations,
@@ -254,7 +254,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 11;
+const SAVE_VERSION = 12;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -1074,7 +1074,25 @@ const MEMORY_MAPS: Record<string, MapDefinition> = Object.fromEntries(
   }),
 );
 
-const MEMORY_DEFAULT_MAP_ID = 'classic_arena';
+MEMORY_MAPS.wave_arena = {
+  name: 'Wave Arena',
+  difficulty: 'EASY',
+  description: 'A compact arena with two cover blocks and instant enemy waves.',
+  width: 1200,
+  height: 900,
+  walls: [
+    { x: 0, y: 0, w: 1200, h: 40 },
+    { x: 0, y: 0, w: 40, h: 900 },
+    { x: 1160, y: 0, w: 40, h: 900 },
+    { x: 0, y: 860, w: 1200, h: 40 },
+    { x: 340, y: 260, w: 90, h: 90 },
+    { x: 770, y: 550, w: 90, h: 90 },
+  ],
+  spawners: [],
+  spawnPoint: { x: 600, y: 450 },
+};
+
+const MEMORY_DEFAULT_MAP_ID = 'wave_arena';
 
 let activeWalls = MAPS.medium.walls;
 let activeMapWidth = getMapWidth(MAPS.medium);
@@ -4828,7 +4846,7 @@ export default function GameCanvas() {
       if (rawState.memoryMode !== true || !isValidChainState(normalizedRawChain)) {
         throw new Error("INVALID SAVE FILE");
       }
-      if (version >= 11 && (mapId !== MEMORY_DEFAULT_MAP_ID || !isValidSoloWaveState(rawState.soloWave) ||
+      if (version >= 11 && (mapId !== (version >= 12 ? MEMORY_DEFAULT_MAP_ID : 'classic_arena') || !isValidSoloWaveState(rawState.soloWave) ||
           !Array.isArray(rawState.spawners) || rawState.spawners.length !== 0)) {
         throw new Error("INVALID SAVE FILE");
       }
@@ -5753,13 +5771,12 @@ export default function GameCanvas() {
       tutorial: { active: false, spawnerIndex: null, enemySpawned: false, timer: 0 },
     };
 
-    if (isMemorySave && version < 11) {
-      // Legacy solo saves used a spawner objective and could use the nine-map world.
-      // Keep earned levels and score, then place the player into the new first wave.
+    if (isMemorySave && version < 12) {
+      // Move older solo saves into the compact arena while retaining their earned progress.
       cleanUi.mapId = MEMORY_DEFAULT_MAP_ID;
       cleanUi.chainProgress = 0;
-      cleanState.player.x = 1500;
-      cleanState.player.y = 1200;
+      cleanState.player.x = MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID].spawnPoint!.x;
+      cleanState.player.y = MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID].spawnPoint!.y;
       cleanState.player.vx = 0;
       cleanState.player.vy = 0;
       cleanState.enemies = [];
@@ -5768,11 +5785,11 @@ export default function GameCanvas() {
       cleanState.spawners = [];
       cleanState.abilityPickups = [];
       cleanState.zones = [];
-      cleanState.camera.x = 1500 - cleanState.camera.width / (2 * cleanState.camera.z);
-      cleanState.camera.y = 1200 - cleanState.camera.height / (2 * cleanState.camera.z);
+      cleanState.camera.x = Math.max(0, cleanState.player.x - cleanState.camera.width / 2);
+      cleanState.camera.y = Math.max(0, cleanState.player.y - cleanState.camera.height / 2);
       cleanState.chain = { ...cleanState.chain, target: null, matchingShape: null, matchingColor: null, progress: 0 };
     }
-    const loadedMap = isMemorySave && version < 11 ? MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID] : mapDef;
+    const loadedMap = isMemorySave && version < 12 ? MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID] : mapDef;
     return {
       cleanUi,
       cleanState,
@@ -6692,7 +6709,7 @@ export default function GameCanvas() {
   ): boolean => {
     if (mpRef.current.roomId) return false;
 
-    // Wave play uses one existing compact arena; multiplayer retains its map selection.
+    // Solo wave play uses its compact arena; multiplayer retains its map selection.
     const selectedMapId = MEMORY_DEFAULT_MAP_ID;
     const selectedGameMode: GameMode = 'normal';
 
@@ -9931,6 +9948,18 @@ export default function GameCanvas() {
           }
         };
 
+        const explodeRemainingWaveEnemies = () => {
+          for (const enemy of state.enemies) {
+            const color = enemy.isPlayerAlly ? PLAYER_COLOR_HEX : ENEMY_COLOR_HEX[enemy.factionColor ?? 'red'];
+            spawnParticles(enemy.x, enemy.y, color, 18);
+            state.shockwaves.push({
+              x: enemy.x, y: enemy.y, color,
+              maxRadius: 72, age: 0, maxAge: 0.4, thickness: 7,
+            });
+          }
+          state.enemies = [];
+        };
+
         const applyCompletedPlayerLevelUpgrade = () => {
           const previousStats = getPlayerLevelStats(state.playerUpgradeRanks);
           const upgrade = grantPlayerLevelUpgrade(state.chain.level, state.playerUpgradeRanks);
@@ -10118,6 +10147,7 @@ export default function GameCanvas() {
                 } else if (chainTransition.result === 'completed') {
                   applyCompletedPlayerLevelUpgrade();
                   state.soloWave = registerSoloWaveStreak(state.soloWave);
+                  if (state.soloWave.phase === 'break') explodeRemainingWaveEnemies();
                   setSoloWaveUi({ ...state.soloWave });
                 }
               }
@@ -10667,18 +10697,15 @@ export default function GameCanvas() {
           }
 
         // The host owns the autonomous roster in multiplayer; guests receive it in snapshots.
-        // Keep the twelve identities guaranteed, then fill a larger, evenly distributed solo roster.
         const spawnAutonomousEnemy = (identity: { shape: EnemyShape; color: EnemyFactionColor }, required: boolean, preferNearby = false) => {
           const avoidPositions = [
             { x: state.player.x, y: state.player.y },
             ...(Object.values(state.multiplayerPlayers) as Array<{ x: number; y: number }>).map(player => ({ x: player.x, y: player.y })),
             ...state.enemies.map(enemy => ({ x: enemy.x, y: enemy.y })),
           ];
-          // Mandatory identities and every other extra use the full map; the remaining
-          // extras arrive outside the camera but close enough to enter play soon.
           const spawn = (preferNearby ? getSafeSpawnAroundPlayer(activeWalls, state.player, state.camera, avoidPositions) : null)
-            ?? getSafeSpawn(activeWalls, ENEMY_RADIUS + 12, avoidPositions, state.memoryMode ? 140 : ENEMY_RADIUS * 2 + 8)
-            ?? getSafeSpawn(activeWalls, ENEMY_RADIUS + 2, avoidPositions, 80)
+            ?? getSafeSpawn(activeWalls, ENEMY_RADIUS + 12, avoidPositions, state.memoryMode ? 90 : ENEMY_RADIUS * 2 + 8)
+            ?? getSafeSpawn(activeWalls, ENEMY_RADIUS + 2, avoidPositions, 65)
             ?? getSafeSpawn(activeWalls, ENEMY_RADIUS + 2, avoidPositions.slice(0, 1), 180);
           if (!spawn) return false;
 
@@ -10745,12 +10772,12 @@ export default function GameCanvas() {
         if (STATUS === 'PLAYING') {
           if (state.memoryMode) {
             if (state.soloWave.phase === 'active') {
-              // Keep three of each offered identity alive. A chain remains possible
-              // even after an ally kill, conversion, or a missed target.
+              // Spawn the wave's fixed roster at once. Rescue only a depleted chain
+              // or an exhausted roster, so an unavailable type never blocks progress.
               const living = state.enemies.filter(enemy => !enemy.isPlayerAlly && enemy.shape && enemy.factionColor)
                 .map(enemy => ({ shape: enemy.shape!, color: enemy.factionColor! }));
-              for (const [index, identity] of getSoloWaveSpawnDeficits(state.soloWave.number, living).entries()) {
-                spawnAutonomousEnemy(identity, true, index % 2 === 0);
+              for (const identity of getSoloWaveRescueSpawns(state.soloWave.number, state.chain, living)) {
+                spawnAutonomousEnemy(identity, true);
               }
             }
           } else {
@@ -13282,6 +13309,7 @@ export default function GameCanvas() {
                   } else if (chainTransition.result === 'completed') {
                     applyCompletedPlayerLevelUpgrade();
                     state.soloWave = registerSoloWaveStreak(state.soloWave);
+                    if (state.soloWave.phase === 'break') explodeRemainingWaveEnemies();
                     setSoloWaveUi({ ...state.soloWave });
                   }
                   const nextUi = {

@@ -36,7 +36,8 @@ import {
   getPlayerLevelStats,
   getMemoryThreatStats,
   getSoloWaveIdentities,
-  getSoloWaveSpawnDeficits,
+  getSoloWaveRescueSpawns,
+  getSoloWaveRoster,
   getSoloWaveSpeedMultiplier,
   getSoloWaveStreakTarget,
   getMissingEnemyCombinations,
@@ -402,18 +403,30 @@ test('solo waves clear only after enough exact three-kill streaks and restart af
   assert.equal(isValidSoloWaveState({ ...wave, completedStreaks: 3 }), false);
 });
 
-test('every wave offers three of each identity and replenishes depleted chain targets', () => {
+test('every wave starts with a fixed roster of three per offered identity', () => {
   for (const wave of [1, 3, 4, 10, 100]) {
     const identities = getSoloWaveIdentities(wave);
     assert.equal(new Set(identities.map(identity => `${identity.color}:${identity.shape}`)).size, identities.length);
-    const initial = getSoloWaveSpawnDeficits(wave, []);
-    assert.equal(initial.length, identities.length * MEMORY_ARENA_CONFIG.waves.minimumPerIdentity);
-    assert.deepEqual(getSoloWaveSpawnDeficits(wave, initial), []);
-    assert.deepEqual(getSoloWaveSpawnDeficits(wave, initial.slice(1)), [initial[0]]);
+    const initial = getSoloWaveRoster(wave);
+    assert.equal(initial.length, identities.length * MEMORY_ARENA_CONFIG.waves.enemiesPerIdentity);
+    for (const identity of identities) {
+      assert.equal(initial.filter(enemy => enemy.shape === identity.shape && enemy.color === identity.color).length, 3);
+    }
+    assert.deepEqual(getSoloWaveRescueSpawns(wave, createInitialChainState(), initial), []);
   }
   assert.equal(getSoloWaveSpeedMultiplier(1), 1);
   assert.ok(getSoloWaveSpeedMultiplier(5) > getSoloWaveSpeedMultiplier(1));
   assert.equal(getSoloWaveSpeedMultiplier(100), MEMORY_ARENA_CONFIG.waves.maximumSpeedMultiplier);
+});
+
+test('a depleted chain or exhausted roster gets immediate enemies needed for progress', () => {
+  const roster = getSoloWaveRoster(1);
+  assert.deepEqual(getSoloWaveRescueSpawns(1, createInitialChainState(), []), roster);
+  const chain = registerPlayerEnemyKill(createInitialChainState(), roster[0]).state;
+  assert.deepEqual(getSoloWaveRescueSpawns(1, chain, roster.slice(3)), [roster[0], roster[0]]);
+  assert.deepEqual(getSoloWaveRescueSpawns(1, chain, roster.slice(1)), []);
+  const stranded = [roster[0], roster[3]];
+  assert.deepEqual(getSoloWaveRescueSpawns(1, createInitialChainState(), stranded), [roster[0], roster[0], roster[0]]);
 });
 
 test('levels have no artificial maximum and spawners are chain-neutral', () => {
