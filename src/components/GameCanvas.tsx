@@ -13585,8 +13585,12 @@ export default function GameCanvas() {
 
         state.camera.x = state.player.x - state.camera.width / 2 + shakeX;
         state.camera.y = state.player.y - state.camera.height / 2 + shakeY;
-        state.camera.x = clamp(state.camera.x, 0, Math.max(0, activeMapWidth - state.camera.width));
-        state.camera.y = clamp(state.camera.y, 0, Math.max(0, activeMapHeight - state.camera.height));
+        state.camera.x = activeMapWidth < state.camera.width
+          ? (activeMapWidth - state.camera.width) / 2
+          : clamp(state.camera.x, 0, activeMapWidth - state.camera.width);
+        state.camera.y = activeMapHeight < state.camera.height
+          ? (activeMapHeight - state.camera.height) / 2
+          : clamp(state.camera.y, 0, activeMapHeight - state.camera.height);
       }
 
       // Clear background
@@ -15014,7 +15018,7 @@ export default function GameCanvas() {
                       onClick={() => setIsMapSelectOpen(true)}
                       className="flex-1 py-2 sm:py-3 bg-transparent text-[#00f0ff] border-2 border-[#00f0ff]/50 hover:bg-[#00f0ff]/10 hover:border-[#00f0ff] font-bold tracking-[0.2em] transition-all duration-200 uppercase text-[10px] sm:text-xs"
                     >
-                      CHANGE MAP: {MAPS[uiState.mapId]?.name || 'UNKNOWN'}
+                      CHANGE MAP: {MEMORY_MAPS[uiState.mapId]?.name || 'UNKNOWN'}
                     </button>
                     <button
                       onClick={() => setUiState(prev => {
