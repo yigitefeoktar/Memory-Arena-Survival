@@ -418,21 +418,41 @@ test('opening waves start with sixteen enemies across four visible identities an
     for (const identity of identities) {
       assert.equal(initial.filter(enemy => enemy.shape === identity.shape && enemy.color === identity.color).length, 4);
     }
-    assert.deepEqual(getSoloWaveRescueSpawns(wave, createInitialChainState(), initial), []);
+    const waveState = { number: wave, completedStreaks: 0, phase: 'active' as const, breakRemainingMs: 0 };
+    const reinforcements = getSoloWaveRescueSpawns(waveState, createInitialChainState(), initial);
+    assert.deepEqual(getSoloWaveRescueSpawns(waveState, createInitialChainState(), [...initial, ...reinforcements]), []);
+    if (wave === 3) assert.equal(reinforcements.length, 3);
   }
   assert.equal(getSoloWaveSpeedMultiplier(1), 1);
   assert.ok(getSoloWaveSpeedMultiplier(5) > getSoloWaveSpeedMultiplier(1));
   assert.equal(getSoloWaveSpeedMultiplier(100), MEMORY_ARENA_CONFIG.waves.maximumSpeedMultiplier);
 });
 
-test('a depleted chain or exhausted roster gets immediate enemies needed for progress', () => {
+test('a partial chain receives a spare target before its last matching enemies are gone', () => {
+  const wave = createInitialSoloWaveState();
   const roster = getSoloWaveRoster(1);
-  assert.deepEqual(getSoloWaveRescueSpawns(1, createInitialChainState(), []), roster);
+  assert.deepEqual(getSoloWaveRescueSpawns(wave, createInitialChainState(), []), roster);
   const chain = registerPlayerEnemyKill(createInitialChainState(), roster[0]).state;
-  assert.deepEqual(getSoloWaveRescueSpawns(1, chain, roster.slice(4)), [roster[0], roster[0]]);
-  assert.deepEqual(getSoloWaveRescueSpawns(1, chain, roster.slice(1)), []);
+  assert.deepEqual(getSoloWaveRescueSpawns(wave, chain, roster.slice(2)), [roster[0]]);
+  assert.deepEqual(getSoloWaveRescueSpawns(wave, chain, roster.slice(4)), [roster[0], roster[0], roster[0]]);
+  assert.deepEqual(getSoloWaveRescueSpawns(wave, chain, roster.slice(1)), []);
+});
+
+test('reinforcements arrive while one streak is still possible and stabilize the roster', () => {
+  const wave = { ...createInitialSoloWaveState(), completedStreaks: 1 };
+  const identity = getSoloWaveIdentities(1)[0];
+  const living = [identity, identity, identity];
+  const reinforcements = getSoloWaveRescueSpawns(wave, createInitialChainState(), living);
+  assert.equal(reinforcements.length, 3);
+  assert.deepEqual(getSoloWaveRescueSpawns(wave, createInitialChainState(), [...living, ...reinforcements]), []);
+
+  const activeWave = createInitialSoloWaveState();
+  const roster = getSoloWaveRoster(1);
   const stranded = [roster[0], roster[4]];
-  assert.deepEqual(getSoloWaveRescueSpawns(1, createInitialChainState(), stranded), [roster[0], roster[0], roster[0]]);
+  const rescue = getSoloWaveRescueSpawns(activeWave, createInitialChainState(), stranded);
+  assert.equal(rescue.length, 9);
+  assert.deepEqual(getSoloWaveRescueSpawns(activeWave, createInitialChainState(), [...stranded, ...rescue]), []);
+  assert.deepEqual(getSoloWaveRescueSpawns({ ...activeWave, completedStreaks: 2, phase: 'break' }, createInitialChainState(), []), []);
 });
 
 test('levels have no artificial maximum and spawners are chain-neutral', () => {

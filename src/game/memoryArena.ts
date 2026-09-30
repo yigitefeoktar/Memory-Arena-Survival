@@ -75,6 +75,7 @@ export const MEMORY_ARENA_CONFIG = {
     enemiesPerIdentity: 4,
     initialIdentities: 4,
     maximumIdentities: 8,
+    reserveStreakCapacity: 5,
     speedIncreasePerWave: 0.035,
     maximumSpeedMultiplier: 1.35,
   },
@@ -1198,15 +1199,38 @@ export function getSoloWaveRoster(wave: number): EnemyIdentity[] {
     Array.from({ length: MEMORY_ARENA_CONFIG.waves.enemiesPerIdentity }, () => identity));
 }
 
-export function getSoloWaveRescueSpawns(wave: number, chain: ChainState, living: readonly EnemyIdentity[]): EnemyIdentity[] {
-  if (living.length === 0) return getSoloWaveRoster(wave);
+export function getSoloWaveRescueSpawns(wave: SoloWaveState, chain: ChainState, living: readonly EnemyIdentity[]): EnemyIdentity[] {
+  if (wave.phase !== 'active') return [];
+  if (living.length === 0) return getSoloWaveRoster(wave.number);
+
+  const identities = getSoloWaveIdentities(wave.number);
+  const keyOf = (identity: EnemyIdentity) => `${identity.color}:${identity.shape}`;
+  const counts = new Map<string, number>();
+  for (const enemy of living) counts.set(keyOf(enemy), (counts.get(keyOf(enemy)) ?? 0) + 1);
+  const planned: EnemyIdentity[] = [];
+  const add = (identity: EnemyIdentity, count: number) => {
+    for (let index = 0; index < count; index++) planned.push(identity);
+    counts.set(keyOf(identity), (counts.get(keyOf(identity)) ?? 0) + count);
+  };
+
+  // Give a partial chain one spare target before its last usable enemies disappear.
   if (chain.target && chain.progress > 0) {
-    const matching = living.filter(enemy => enemy.shape === chain.target!.shape && enemy.color === chain.target!.color).length;
-    return Array.from({ length: Math.max(0, MEMORY_ARENA_CONFIG.chain.requiredKills - chain.progress - matching) }, () => chain.target!);
+    const needed = MEMORY_ARENA_CONFIG.chain.requiredKills - chain.progress;
+    add(chain.target, Math.max(0, needed + 1 - (counts.get(keyOf(chain.target)) ?? 0)));
   }
-  const completable = getSoloWaveIdentities(wave).some(identity =>
-    living.filter(enemy => enemy.shape === identity.shape && enemy.color === identity.color).length >= MEMORY_ARENA_CONFIG.chain.requiredKills);
-  return completable ? [] : Array.from({ length: MEMORY_ARENA_CONFIG.chain.requiredKills }, () => getSoloWaveIdentities(wave)[0]);
+
+  const remainingStreaks = getSoloWaveStreakTarget(wave.number) - wave.completedStreaks;
+  const desiredCapacity = Math.min(remainingStreaks + 1, MEMORY_ARENA_CONFIG.waves.reserveStreakCapacity);
+  const capacity = () => identities.reduce((total, identity) => {
+    const partialProgress = chain.target && keyOf(identity) === keyOf(chain.target) ? chain.progress : 0;
+    return total + Math.floor(((counts.get(keyOf(identity)) ?? 0) + partialProgress) / MEMORY_ARENA_CONFIG.chain.requiredKills);
+  }, 0);
+  let nextIdentity = (wave.number + wave.completedStreaks) % identities.length;
+  while (capacity() < desiredCapacity) {
+    add(identities[nextIdentity], MEMORY_ARENA_CONFIG.chain.requiredKills);
+    nextIdentity = (nextIdentity + 1) % identities.length;
+  }
+  return planned;
 }
 
 export function getSoloWaveSpeedMultiplier(wave: number): number {

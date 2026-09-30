@@ -10731,11 +10731,11 @@ export default function GameCanvas() {
         if (STATUS === 'PLAYING') {
           if (state.memoryMode) {
             if (state.soloWave.phase === 'active') {
-              // Spawn the wave's fixed roster at once. Rescue only a depleted chain
-              // or an exhausted roster, so an unavailable type never blocks progress.
+              // Spawn the wave's fixed roster at once, then reinforce before too few
+              // matching enemies remain to support the unfinished streaks.
               const living = state.enemies.filter(enemy => !enemy.isPlayerAlly && enemy.shape && enemy.factionColor)
                 .map(enemy => ({ shape: enemy.shape!, color: enemy.factionColor! }));
-              for (const identity of getSoloWaveRescueSpawns(state.soloWave.number, state.chain, living)) {
+              for (const identity of getSoloWaveRescueSpawns(state.soloWave, state.chain, living)) {
                 spawnAutonomousEnemy(identity, true);
               }
             }
