@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { spawnDestructionBurst, type BurstParticle } from '../game/visualEffects';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { io, Socket } from 'socket.io-client';
 import { Copy, Check, Shuffle } from 'lucide-react';
@@ -3371,6 +3372,18 @@ export default function GameCanvas() {
   const [chainFeedback, setChainFeedback] = useState<'reset' | 'level' | null>(null);
   const [levelUpgradeNotice, setLevelUpgradeNotice] = useState<string | null>(null);
   const chainFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [arenaCue, setArenaCue] = useState<{ id: number; title: string; detail: string } | null>(null);
+  const arenaCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const arenaCueIdRef = useRef(0);
+
+  const showArenaCue = useCallback((title: string, detail: string) => {
+    if (arenaCueTimerRef.current) clearTimeout(arenaCueTimerRef.current);
+    setArenaCue({ id: ++arenaCueIdRef.current, title, detail });
+    arenaCueTimerRef.current = setTimeout(() => {
+      setArenaCue(null);
+      arenaCueTimerRef.current = null;
+    }, 1150);
+  }, []);
 
   const showChainFeedback = useCallback((feedback: 'reset' | 'level', upgradeNotice?: string) => {
     if (chainFeedbackTimerRef.current) clearTimeout(chainFeedbackTimerRef.current);
@@ -3385,6 +3398,7 @@ export default function GameCanvas() {
 
   useEffect(() => () => {
     if (chainFeedbackTimerRef.current) clearTimeout(chainFeedbackTimerRef.current);
+    if (arenaCueTimerRef.current) clearTimeout(arenaCueTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -3743,7 +3757,7 @@ export default function GameCanvas() {
     },
     camera: { x: 0, y: 0, width: 0, height: 0, z: 1 },
     lastBroadcastTime: 0,
-    particles: [] as { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; radius: number }[],
+    particles: [] as BurstParticle[],
     trails: [] as { x: number; y: number; age: number; color: string; radius: number, isSuperStrong?: boolean }[],
     shockwaves: [] as { x: number; y: number; color: string; maxRadius: number; age: number; maxAge: number; thickness: number }[],
     damageWaves: [] as { x: number; y: number; age: number; maxAge: number; maxRadius: number; previousRadius: number }[],
@@ -6699,6 +6713,7 @@ export default function GameCanvas() {
       awaitingOpeningProtectionAuthorityRef.current = false;
     }
 
+    showArenaCue(isMultiplayer ? 'ARENA RESET' : 'WAVE 01', isMultiplayer ? 'NEW ROUND // SURVIVE' : 'NEW RUN // SURVIVE');
     return true;
   };
 
@@ -8493,7 +8508,9 @@ export default function GameCanvas() {
         for (const oldEnemy of prevEnemies) {
           const stillAlive = newEnemies.some((e: any) => Math.abs(e.x - oldEnemy.x) < 5 && Math.abs(e.y - oldEnemy.y) < 5);
           if (!stillAlive) {
-            spawnParticlesDirect(oldEnemy.x, oldEnemy.y, '#ff3333', 25);
+            const color = oldEnemy.isPlayerAlly ? PLAYER_COLOR_HEX :
+              (oldEnemy.factionColor ? ENEMY_COLOR_HEX[oldEnemy.factionColor] : '#ff3333');
+            spawnDestructionBurst(stateRef.current, oldEnemy.x, oldEnemy.y, color, 1, Boolean(shouldReduceMotion));
           }
         }
       }
@@ -8504,8 +8521,7 @@ export default function GameCanvas() {
           const stillAlive = newSpawners.some((s: any) => Math.abs(s.x - oldSpawner.x) < 5 && Math.abs(s.y - oldSpawner.y) < 5);
           if (!stillAlive) {
             const spawnerColor = uiRef.current.hardMode ? '#ff3300' : '#ff00ff';
-            spawnParticlesDirect(oldSpawner.x, oldSpawner.y, spawnerColor, 80);
-            stateRef.current.shockwaves.push({ x: oldSpawner.x, y: oldSpawner.y, color: spawnerColor, maxRadius: 200, age: 0, maxAge: 0.5, thickness: 20 });
+            spawnDestructionBurst(stateRef.current, oldSpawner.x, oldSpawner.y, spawnerColor, 2, Boolean(shouldReduceMotion));
             handleSpawnerDestroyed(oldSpawner);
           }
         }
@@ -8516,7 +8532,7 @@ export default function GameCanvas() {
         for (const oldBlock of prevBlocks) {
           const stillAlive = newBlocks.some((b: any) => Math.abs(b.x - oldBlock.x) < 5 && Math.abs(b.y - oldBlock.y) < 5);
           if (!stillAlive) {
-            spawnParticlesDirect(oldBlock.x, oldBlock.y, '#ffcc00', 15);
+            spawnDestructionBurst(stateRef.current, oldBlock.x, oldBlock.y, '#ffcc00', 0.7, Boolean(shouldReduceMotion));
           }
         }
       }
@@ -9661,51 +9677,10 @@ export default function GameCanvas() {
       const pDef = PLAYER_COLORS[colorIdx !== undefined ? colorIdx : 0] || PLAYER_COLORS[0];
       const pColor = stateRef.current.memoryMode ? MEMORY_ARENA_PALETTE.player.effect : pDef.n;
 
-      // 1. Vector Ring Burst (Option 1)
-      const count = 48; // A beautiful complete circle of particles
-      for (let i = 0; i < count; i++) {
-        const angle = (i / count) * Math.PI * 2 + (Math.random() * 0.1 - 0.05);
-        const speed = Math.random() * 120 + 260; // High-velocity shockwave burst
-        stateRef.current.particles.push({
-          x, y,
-          vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed,
-          life: 0,
-          maxLife: Math.random() * 0.4 + 0.6, // Longer lifecycle for maximum visual impact
-          color: pColor,
-          radius: Math.random() * 3.5 + 2 // Slightly larger particles for dramatic impact
-        });
-      }
+      spawnDestructionBurst(stateRef.current, x, y, pColor, 2.5, Boolean(shouldReduceMotion));
+      if (!shouldReduceMotion) stateRef.current.shake = Math.max(stateRef.current.shake, 20);
 
-      // Add 15 extra smaller trailing dust sparks for dramatic lingering feedback
-      for (let i = 0; i < 15; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const speed = Math.random() * 100 + 30;
-        stateRef.current.particles.push({
-          x, y,
-          vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed,
-          life: 0,
-          maxLife: Math.random() * 0.6 + 0.5,
-          color: '#ffffff',
-          radius: Math.random() * 1.5 + 0.8
-        });
-      }
-
-      // 2. High-contrast expanding colored shockwave
-      stateRef.current.shockwaves.push({
-        x, y,
-        color: pColor,
-        maxRadius: 240,
-        age: 0,
-        maxAge: 0.65,
-        thickness: 16
-      });
-
-      // 3. Tactile camera shake of 25px
-      stateRef.current.shake = 25;
-
-      // 4. Floating holographic / neon panel
+      // Floating holographic / neon panel
       if (label && label.trim().length > 0) {
         if (!stateRef.current.floatingTexts) {
           stateRef.current.floatingTexts = [];
@@ -9847,6 +9822,9 @@ export default function GameCanvas() {
             state.bullets = [];
             const previousSeconds = Math.ceil(state.soloWave.breakRemainingMs / 1000);
             state.soloWave = advanceSoloWaveBreak(state.soloWave, dt * 1000);
+            if (state.soloWave.phase === 'active') {
+              showArenaCue(`WAVE ${String(state.soloWave.number).padStart(2, '0')}`, 'INCOMING // SURVIVE');
+            }
             if (state.soloWave.phase === 'active' || Math.ceil(state.soloWave.breakRemainingMs / 1000) !== previousSeconds) {
               setSoloWaveUi({ ...state.soloWave });
             }
@@ -9951,11 +9929,7 @@ export default function GameCanvas() {
         const explodeRemainingWaveEnemies = () => {
           for (const enemy of state.enemies) {
             const color = enemy.isPlayerAlly ? PLAYER_COLOR_HEX : ENEMY_COLOR_HEX[enemy.factionColor ?? 'red'];
-            spawnParticles(enemy.x, enemy.y, color, 18);
-            state.shockwaves.push({
-              x: enemy.x, y: enemy.y, color,
-              maxRadius: 72, age: 0, maxAge: 0.4, thickness: 7,
-            });
+            spawnDestructionBurst(state, enemy.x, enemy.y, color, 0.8, Boolean(shouldReduceMotion));
           }
           state.enemies = [];
         };
@@ -9995,24 +9969,15 @@ export default function GameCanvas() {
           if (!state.memoryMode || spawner.isCore || !spawner.factionColor || damage <= 0) return false;
           spawner.hp = Math.max(0, spawner.hp - damage);
           const color = ENEMY_COLOR_HEX[spawner.factionColor];
-          spawnParticles(spawner.x, spawner.y, color, spawner.hp <= 0 ? 45 : 8);
+          if (spawner.hp > 0) spawnParticles(spawner.x, spawner.y, color, 8);
           if (spawner.hp <= 0) {
+            spawnDestructionBurst(state, spawner.x, spawner.y, color, 1.8, Boolean(shouldReduceMotion));
             state.factionEmergencies[spawner.factionColor] = addFactionEmergencyPressure(
               state.factionEmergencies[spawner.factionColor],
               MEMORY_ARENA_CONFIG.factionEmergency.replicaLossPressure,
             );
             const spawnerIndex = state.spawners.indexOf(spawner);
             if (spawnerIndex >= 0) state.spawners.splice(spawnerIndex, 1);
-            state.shockwaves.push({
-              x: spawner.x,
-              y: spawner.y,
-              color,
-              maxRadius: 130,
-              age: 0,
-              maxAge: 0.4,
-              thickness: 12,
-            });
-            state.shake = Math.max(state.shake, 12);
           }
           return true;
         };
@@ -10125,16 +10090,7 @@ export default function GameCanvas() {
             for (const { enemy } of crossedEnemies) {
               maybeSpawnAbilityDrop(enemy, 'player');
               const defeatedColor = enemy.factionColor ? ENEMY_COLOR_HEX[enemy.factionColor] : '#ff3333';
-              spawnParticles(enemy.x, enemy.y, defeatedColor, 10);
-              state.shockwaves.push({
-                x: enemy.x,
-                y: enemy.y,
-                color: defeatedColor,
-                maxRadius: 80,
-                age: 0,
-                maxAge: 0.25,
-                thickness: 8,
-              });
+              spawnDestructionBurst(state, enemy.x, enemy.y, defeatedColor, 1, Boolean(shouldReduceMotion));
 
               if (state.memoryMode && state.soloWave.phase === 'active' && enemy.shape && enemy.factionColor) {
                 const chainTransition = registerPlayerEnemyKill(state.chain, {
@@ -10147,7 +10103,10 @@ export default function GameCanvas() {
                 } else if (chainTransition.result === 'completed') {
                   applyCompletedPlayerLevelUpgrade();
                   state.soloWave = registerSoloWaveStreak(state.soloWave);
-                  if (state.soloWave.phase === 'break') explodeRemainingWaveEnemies();
+                  if (state.soloWave.phase === 'break') {
+                    explodeRemainingWaveEnemies();
+                    showArenaCue('WAVE CLEAR', 'ARENA RECONSTRUCTING');
+                  }
                   setSoloWaveUi({ ...state.soloWave });
                 }
               }
@@ -10892,7 +10851,7 @@ export default function GameCanvas() {
                 const defeatedColor = target.isPlayerAlly
                   ? PLAYER_COLOR_HEX
                   : (target.factionColor ? ENEMY_COLOR_HEX[target.factionColor] : '#ffffff');
-                spawnParticles(target.x, target.y, defeatedColor, 5);
+                spawnDestructionBurst(state, target.x, target.y, defeatedColor, 0.7, Boolean(shouldReduceMotion));
               }
               state.enemies = state.enemies.filter(enemy => !defeatedEnemies.has(enemy));
               state.bullets = state.bullets.filter(bullet => {
@@ -11502,8 +11461,7 @@ export default function GameCanvas() {
                       const defeatedColor = candidate.isPlayerAlly
                         ? PLAYER_COLOR_HEX
                         : ENEMY_COLOR_HEX[candidate.factionColor];
-                      spawnParticles(candidate.x, candidate.y, defeatedColor, state.memoryMode ? 10 : 18);
-                      state.shockwaves.push({ x: candidate.x, y: candidate.y, color: defeatedColor, maxRadius: 55, age: 0, maxAge: 0.2, thickness: 5 });
+                      spawnDestructionBurst(state, candidate.x, candidate.y, defeatedColor, 0.8, Boolean(shouldReduceMotion));
                     }
                   }
                   if (!isPlayerAlly) {
@@ -13171,7 +13129,7 @@ export default function GameCanvas() {
                 ? authoritativeTargetHit?.type === 'bouncer' && authoritativeTargetHit.index === b
                 : dx * dx + dy * dy < (bouncer.radius + bullet.radius) ** 2;
               if (hitThisBouncer) {
-                spawnParticles(bouncer.x, bouncer.y, '#ff3333', 20);
+                spawnDestructionBurst(state, bouncer.x, bouncer.y, '#ff3333', 1.2, Boolean(shouldReduceMotion));
                 bulletDestroyed = true;
                 state.bouncers.splice(b, 1);
 
@@ -13288,8 +13246,7 @@ export default function GameCanvas() {
                 const defeatedColor = enemy.isPlayerAlly
                   ? PLAYER_COLOR_HEX
                   : (enemy.factionColor ? ENEMY_COLOR_HEX[enemy.factionColor] : '#ff3333');
-                spawnParticles(enemy.x, enemy.y, defeatedColor, state.memoryMode ? 10 : 30);
-                state.shockwaves.push({ x: enemy.x, y: enemy.y, color: defeatedColor, maxRadius: 80, age: 0, maxAge: 0.25, thickness: 8 });
+                spawnDestructionBurst(state, enemy.x, enemy.y, defeatedColor, 1, Boolean(shouldReduceMotion));
                 if (bullet.isPlayer) state.shake = 10;
                 state.enemies.splice(e, 1);
                 bulletDestroyed = true;
@@ -13309,7 +13266,10 @@ export default function GameCanvas() {
                   } else if (chainTransition.result === 'completed') {
                     applyCompletedPlayerLevelUpgrade();
                     state.soloWave = registerSoloWaveStreak(state.soloWave);
-                    if (state.soloWave.phase === 'break') explodeRemainingWaveEnemies();
+                    if (state.soloWave.phase === 'break') {
+                      explodeRemainingWaveEnemies();
+                      showArenaCue('WAVE CLEAR', 'ARENA RECONSTRUCTING');
+                    }
                     setSoloWaveUi({ ...state.soloWave });
                   }
                   const nextUi = {
@@ -13480,6 +13440,7 @@ export default function GameCanvas() {
           }
           p.x += p.vx * dt;
           p.y += p.vy * dt;
+          if (p.spin) p.rotation = (p.rotation ?? 0) + p.spin * dt;
           p.vx *= 0.95;
           p.vy *= 0.95;
         }
@@ -14225,10 +14186,30 @@ export default function GameCanvas() {
         ) continue;
         const alpha = 1 - (p.life / p.maxLife);
         ctx.fillStyle = p.color;
+        ctx.strokeStyle = p.color;
         ctx.globalAlpha = alpha;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.radius * alpha, 0, Math.PI * 2);
-        ctx.fill();
+        if (p.shape === 'shard') {
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rotation ?? 0);
+          ctx.beginPath();
+          ctx.moveTo(p.radius * 2.2 * alpha, 0);
+          ctx.lineTo(-p.radius * alpha, p.radius * 0.7 * alpha);
+          ctx.lineTo(-p.radius * 0.5 * alpha, -p.radius * 0.7 * alpha);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        } else if (p.shape === 'spark') {
+          ctx.lineWidth = Math.max(0.7, p.radius * alpha);
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(p.x - p.vx * 0.035 * alpha, p.y - p.vy * 0.035 * alpha);
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.radius * alpha, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
       ctx.globalAlpha = 1.0;
 
@@ -14983,6 +14964,46 @@ export default function GameCanvas() {
       <div className="absolute inset-0 pointer-events-none z-[60] shadow-[inset_0_0_150px_rgba(0,0,0,0.9)]" />
 
       <canvas ref={canvasRef} className="w-full h-full block cursor-crosshair touch-none mix-blend-screen" />
+
+      <AnimatePresence>
+        {arenaCue && uiState.status === 'PLAYING' && (
+          <motion.div
+            key={arenaCue.id}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.18 }}
+            className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center overflow-hidden"
+          >
+            {!shouldReduceMotion && (
+              <>
+                <motion.div
+                  initial={{ opacity: 0.5, scale: 0.2 }}
+                  animate={{ opacity: 0, scale: 2.2 }}
+                  transition={{ duration: 0.85, ease: 'easeOut' }}
+                  className="absolute h-[min(70vw,520px)] w-[min(70vw,520px)] rounded-full border-2 border-[#00f0ff] shadow-[0_0_35px_#00f0ff,inset_0_0_35px_#00f0ff]"
+                />
+                <motion.div
+                  initial={{ opacity: 0.32, scale: 0.5 }}
+                  animate={{ opacity: 0, scale: 1.7 }}
+                  transition={{ duration: 0.6, ease: 'easeOut' }}
+                  className="absolute h-[min(90vw,680px)] w-[min(90vw,680px)] rounded-full bg-[radial-gradient(circle,rgba(0,240,255,0.25),transparent_65%)]"
+                />
+              </>
+            )}
+            <motion.div
+              initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, scale: 1.2, y: 18 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              transition={{ duration: shouldReduceMotion ? 0 : 0.28, ease: 'easeOut' }}
+              className="relative w-[min(86vw,460px)] border-y-2 border-[#00f0ff] bg-[#06121d]/90 px-6 py-4 text-center shadow-[0_0_28px_rgba(0,240,255,0.35)] backdrop-blur-sm"
+            >
+              <div className="mb-1 text-[9px] font-bold tracking-[0.5em] text-[#8eeaff]">MEMORY ARENA // SYSTEM ONLINE</div>
+              <div className="font-display text-4xl tracking-[0.08em] text-white drop-shadow-[0_0_14px_#00f0ff] sm:text-6xl">{arenaCue.title}</div>
+              <div className="mt-1 text-[10px] font-black tracking-[0.3em] text-[#00f0ff] sm:text-xs">{arenaCue.detail}</div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Absolute HUD Layers */}
       <AnimatePresence>
