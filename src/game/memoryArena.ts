@@ -72,8 +72,9 @@ export const MEMORY_ARENA_CONFIG = {
   waves: {
     breakMs: 3000,
     initialStreaks: 2,
-    enemiesPerIdentity: 3,
-    maximumIdentities: 6,
+    enemiesPerIdentity: 4,
+    initialIdentities: 4,
+    maximumIdentities: 8,
     speedIncreasePerWave: 0.035,
     maximumSpeedMultiplier: 1.35,
   },
@@ -1175,9 +1176,20 @@ export function getSoloWaveStreakTarget(wave: number): number {
 }
 
 export function getSoloWaveIdentities(wave: number): EnemyIdentity[] {
-  const all = ENEMY_FACTIONS.flatMap(color => ENEMY_SHAPES.map(shape => ({ shape, color })));
-  const count = Math.min(MEMORY_ARENA_CONFIG.waves.maximumIdentities, 2 + Math.floor((Math.max(1, wave) - 1) / 3));
+  const all = Array.from({ length: ENEMY_FACTIONS.length * ENEMY_SHAPES.length }, (_, index) => {
+    const colorIndex = index % ENEMY_FACTIONS.length;
+    const shapeCycle = Math.floor(index / ENEMY_FACTIONS.length);
+    return {
+      color: ENEMY_FACTIONS[colorIndex],
+      shape: ENEMY_SHAPES[(colorIndex + shapeCycle) % ENEMY_SHAPES.length],
+    };
+  });
+  const count = Math.min(
+    MEMORY_ARENA_CONFIG.waves.maximumIdentities,
+    MEMORY_ARENA_CONFIG.waves.initialIdentities + Math.floor((Math.max(1, wave) - 1) / 3),
+  );
   const start = (Math.max(1, Math.floor(wave)) - 1) % all.length;
+  // Adjacent slots have different colors, with all three shapes in the first four.
   return Array.from({ length: count }, (_, index) => all[(start + index) % all.length]);
 }
 
