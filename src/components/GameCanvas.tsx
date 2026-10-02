@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { spawnDestructionBurst, type BurstParticle } from '../game/visualEffects';
+import { createRoundOpening, getSpawnVisual, isRoundOpeningBlocked, ROUND_OPENING_MS, SPAWN_ANIMATION_MS, type RoundOpening } from '../game/roundOpening';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { io, Socket } from 'socket.io-client';
 import { Copy, Check, Shuffle } from 'lucide-react';
@@ -3099,6 +3100,12 @@ export default function GameCanvas() {
   const triggerEliminationRef = useRef<((x: number, y: number, colorIdx: number, label?: string) => void) | null>(null);
   const eliminateRemotePlayerRef = useRef<((victimId: string, impactPos: { x: number, y: number }, currentTime: number) => void) | null>(null);
   const bannerShowingRef = useRef(false);
+  const roundOpeningRef = useRef<RoundOpening | null>(null);
+  const entitySpawnTimesRef = useRef(new Map<string, number>());
+  const openingCueVisibleRef = useRef(false);
+  const isOpeningBlocked = (now = performance.now()) =>
+    uiRef.current.status === 'PLAYING' &&
+    isRoundOpeningBlocked(roundOpeningRef.current, now, bannerShowingRef.current || openingCueVisibleRef.current);
 
   const isMobileRef = useRef(typeof window !== 'undefined' && /Mobi|Android|iPhone|iPad|iPod|Windows Phone/i.test(navigator.userAgent));
   const [confirmResign, setConfirmResign] = useState(false);
@@ -3382,7 +3389,7 @@ export default function GameCanvas() {
     arenaCueTimerRef.current = setTimeout(() => {
       setArenaCue(null);
       arenaCueTimerRef.current = null;
-    }, 1150);
+    }, ROUND_OPENING_MS);
   }, []);
 
   const showChainFeedback = useCallback((feedback: 'reset' | 'level', upgradeNotice?: string) => {
@@ -4377,6 +4384,9 @@ export default function GameCanvas() {
     }
 
     state.lastEnemySpawn += pauseDuration;
+    for (const [id, spawnedAt] of entitySpawnTimesRef.current) {
+      entitySpawnTimesRef.current.set(id, spawnedAt + pauseDuration);
+    }
 
     if (state.spawners) {
       for (const spawner of state.spawners) {
@@ -4493,6 +4503,11 @@ export default function GameCanvas() {
 
     if (pauseStartRef.current === null) return;
     const pauseDuration = performance.now() - pauseStartRef.current;
+
+    if (roundOpeningRef.current && !roundOpeningRef.current.released) {
+      roundOpeningRef.current.startedAt += pauseDuration;
+      roundOpeningRef.current.readyAt += pauseDuration;
+    }
 
     shiftSinglePlayerTimestamps(pauseDuration);
     accumulatedPauseOffsetRef.current += pauseDuration;
@@ -5814,6 +5829,9 @@ export default function GameCanvas() {
   };
 
   const applyReconstructedSave = (reconstructed: ReturnType<typeof parseAndReconstructSave>) => {
+    roundOpeningRef.current = null;
+    openingCueVisibleRef.current = false;
+    entitySpawnTimesRef.current.clear();
     resetEndPresentation();
     // Set activeWalls from the reconstructed map
     activeWalls = reconstructed.walls;
@@ -6525,6 +6543,9 @@ export default function GameCanvas() {
     setChainFeedback(null);
     setLevelUpgradeNotice(null);
     const state = stateRef.current;
+    roundOpeningRef.current = createRoundOpening(performance.now());
+    openingCueVisibleRef.current = true;
+    entitySpawnTimesRef.current.clear();
     state.gameMode = selectedGameMode;
     state.hardMode = isHardMode;
     state.memoryMode = !isMultiplayer;
@@ -7271,6 +7292,7 @@ export default function GameCanvas() {
   }, []);
 
   const requestDamageActivation = useCallback((currentTime: number) => {
+    if (isOpeningBlocked(currentTime)) return;
     const state = stateRef.current;
     if (!state.memoryMode || mpRef.current.roomId || uiRef.current.status !== 'PLAYING') return;
     if (!state.abilityOwnership.damage) return;
@@ -7299,6 +7321,7 @@ export default function GameCanvas() {
   }, []);
 
   const requestConversionActivation = useCallback((currentTime: number) => {
+    if (isOpeningBlocked(currentTime)) return;
     const state = stateRef.current;
     if (!state.memoryMode || mpRef.current.roomId || uiRef.current.status !== 'PLAYING') return;
     if (!state.abilityOwnership.convert) return;
@@ -7420,6 +7443,7 @@ export default function GameCanvas() {
   }, []);
 
   const requestSpecialActivation = useCallback((currentTime: number) => {
+     if (isOpeningBlocked(currentTime)) return;
      if (mpRef.current.roomId && (!mpRef.current.isConnected || awaitingResumeSnapshotRef.current)) return;
      const isLocalMenuOpen = mpRef.current.roomId && (mpMenuOpenRef.current || confirmResignRef.current);
      if (isLocalMenuOpen) return;
@@ -7500,6 +7524,7 @@ export default function GameCanvas() {
   }, [applySpecialAbility, isGuestSpecialReady, trackGameplayForOwner]);
 
   const requestBuildActivation = useCallback((currentTime: number) => {
+     if (isOpeningBlocked(currentTime)) return;
      if (mpRef.current.roomId && (!mpRef.current.isConnected || awaitingResumeSnapshotRef.current)) return;
      const isLocalMenuOpen = mpRef.current.roomId && (mpMenuOpenRef.current || confirmResignRef.current);
      if (isLocalMenuOpen) return;
@@ -9725,12 +9750,23 @@ export default function GameCanvas() {
           : rawCurrentTime;
 
       const isMultiplayer = !!mpRef.current.roomId;
+      const openingBlocked = isOpeningBlocked(currentTime);
+      const opening = roundOpeningRef.current;
+      if (STATUS === 'PLAYING' && opening && !opening.released && !openingBlocked) {
+        const heldMs = currentTime - opening.startedAt;
+        // Guests receive host timestamps already mapped into their clock. Shifting
+        // an incoming snapshot again would delay its bullets and cooldowns twice.
+        if (!isMultiplayer || mpRef.current.isHost) shiftSinglePlayerTimestamps(heldMs);
+        accumulatedPauseOffsetRef.current += heldMs;
+        state.lastTime = currentTime;
+        opening.released = true;
+      }
       const worldPhaseTime = isMultiplayer
         ? getMultiplayerWorldPhaseTime(currentTime)
         : (currentTime - accumulatedPauseOffsetRef.current);
 
       const dt =
-        STATUS === 'PAUSED'
+        STATUS === 'PAUSED' || openingBlocked
           ? 0
           : Math.max(
               0,
@@ -9738,6 +9774,46 @@ export default function GameCanvas() {
             );
 
       state.lastTime = currentTime;
+
+      const registerSpawnTimes = () => {
+        if (openingBlocked || STATUS === 'PAUSED') return;
+        const liveIds = new Set<string>(['local-player']);
+        for (const enemy of state.enemies) if (enemy.id) liveIds.add(enemy.id);
+        for (const bouncer of state.bouncers) if (bouncer.id) liveIds.add(bouncer.id);
+        for (const pickup of state.abilityPickups) liveIds.add(`pickup:${pickup.id}`);
+        for (const id of Object.keys(state.multiplayerPlayers)) liveIds.add(`player:${id}`);
+        for (const id of liveIds) {
+          if (!entitySpawnTimesRef.current.has(id)) entitySpawnTimesRef.current.set(id, currentTime);
+        }
+        for (const id of entitySpawnTimesRef.current.keys()) {
+          if (!liveIds.has(id)) entitySpawnTimesRef.current.delete(id);
+        }
+      };
+      registerSpawnTimes();
+
+      // Surround an entire entity drawing so its body, glow and labels arrive together.
+      const beginSpawnDrawing = (id: string, x: number, y: number, radius: number, color: string) => {
+        ctx.save();
+        const spawnedAt = entitySpawnTimesRef.current.get(id);
+        if (spawnedAt === undefined) return;
+        const visual = getSpawnVisual(currentTime - spawnedAt, Boolean(shouldReduceMotion));
+        if (visual.ringAlpha > 0) {
+          ctx.save();
+          ctx.globalAlpha = visual.ringAlpha;
+          ctx.strokeStyle = color;
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 12;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(x, y, radius * visual.ringScale + 6, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+        ctx.translate(x, y);
+        ctx.scale(visual.scale, visual.scale);
+        ctx.translate(-x, -y);
+        ctx.globalAlpha *= visual.alpha;
+      };
 
       // Defensive timeout / cleanup for pending guest shots
       if (mpRef.current.roomId && !mpRef.current.isHost && pendingGuestShotsRef.current.size > 0) {
@@ -9757,7 +9833,7 @@ export default function GameCanvas() {
       }
 
       const isLocalMenuOpen = mpRef.current.roomId && (mpMenuOpenRef.current || confirmResignRef.current);
-      if (STATUS !== 'PLAYING' || isLocalMenuOpen) {
+      if (STATUS !== 'PLAYING' || isLocalMenuOpen || openingBlocked) {
         releaseAllInputs();
       }
 
@@ -9782,7 +9858,7 @@ export default function GameCanvas() {
         !isMultiplayerDisconnected &&
         !isAwaitingResumeSnapshot &&
         (
-          (STATUS === 'PLAYING' && !bannerShowingRef.current) ||
+          (STATUS === 'PLAYING' && !bannerShowingRef.current && !openingBlocked) ||
           (
             STATUS === 'GAME_OVER' &&
             mpRef.current.isConnected &&
@@ -10703,6 +10779,7 @@ export default function GameCanvas() {
           }
 
           const moveAngle = Math.random() * Math.PI * 2;
+          entitySpawnTimesRef.current.set('me_' + state.nextEntityId, currentTime);
           state.enemies.push({
             id: 'me_' + state.nextEntityId++,
             x: spawn.x,
@@ -11077,6 +11154,10 @@ export default function GameCanvas() {
         const enemiesDefeatedByFactions = new Set<MemoryEnemy>();
         for (let i = state.enemies.length - 1; i >= 0; i--) {
           const enemy = state.enemies[i];
+
+          // Let new enemies finish materializing before moving or starting an attack.
+          const spawnedAt = enemy.id ? entitySpawnTimesRef.current.get(enemy.id) : undefined;
+          if (spawnedAt !== undefined && currentTime - spawnedAt < SPAWN_ANIMATION_MS) continue;
 
           if (enemiesDefeatedByFactions.has(enemy)) continue;
 
@@ -11783,6 +11864,8 @@ export default function GameCanvas() {
         // Update Bouncers
         for (let i = state.bouncers.length - 1; i >= 0; i--) {
           const b = state.bouncers[i];
+          const spawnedAt = b.id ? entitySpawnTimesRef.current.get(b.id) : undefined;
+          if (spawnedAt !== undefined && currentTime - spawnedAt < SPAWN_ANIMATION_MS) continue;
 
           if (currentTime - b.lastDirChange > 3000) {
             if (Math.random() < 0.1) {
@@ -13610,7 +13693,9 @@ export default function GameCanvas() {
       }
 
       // Draw Bouncers
+      registerSpawnTimes();
       for (const b of state.bouncers) {
+        if (openingBlocked) continue;
         if (
           b.x + b.radius < state.camera.x ||
           b.x - b.radius > state.camera.x + state.camera.width ||
@@ -13618,8 +13703,9 @@ export default function GameCanvas() {
           b.y - b.radius > state.camera.y + state.camera.height
         ) continue;
 
+        beginSpawnDrawing(b.id ?? '', b.x, b.y, b.radius, '#ff3333');
         // Draw trail for bouncer
-        if (uiRef.current.status === 'PLAYING') {
+        if (shouldRunUpdates) {
           const bkb = Math.sqrt((b.kbvx || 0)**2 + (b.kbvy || 0)**2);
           if (bkb > 150) {
             state.trails.push({
@@ -13664,10 +13750,12 @@ export default function GameCanvas() {
         ctx.stroke();
 
         ctx.restore();
+        ctx.restore();
       }
 
       // Draw Enemies
       for (const enemy of state.enemies) {
+        if (openingBlocked) continue;
         if (
           enemy.x + enemy.radius < state.camera.x ||
           enemy.x - enemy.radius > state.camera.x + state.camera.width ||
@@ -13675,11 +13763,12 @@ export default function GameCanvas() {
           enemy.y - enemy.radius > state.camera.y + state.camera.height
         ) continue;
 
+        beginSpawnDrawing(enemy.id ?? '', enemy.x, enemy.y, enemy.radius, ENEMY_COLOR_HEX[enemy.factionColor ?? 'red']);
         if (enemy.shape && enemy.factionColor) {
           const enemyPalette = MEMORY_ARENA_PALETTE.factions[enemy.factionColor];
           const enemyColor = enemy.isPlayerAlly ? PLAYER_COLOR_HEX : enemyPalette.bright;
           const enemyBody = enemy.isPlayerAlly ? MEMORY_ARENA_PALETTE.player.allyBody : enemyPalette.body;
-          if (uiRef.current.status === 'PLAYING' && Math.random() > 0.72) {
+          if (shouldRunUpdates && Math.random() > 0.72) {
             state.trails.push({
               x: enemy.x,
               y: enemy.y,
@@ -13825,11 +13914,12 @@ export default function GameCanvas() {
             ctx.stroke();
             ctx.restore();
           }
+          ctx.restore();
           continue;
         }
 
         // Draw trail for enemy
-        if (uiRef.current.status === 'PLAYING') {
+        if (shouldRunUpdates) {
           const ekb = Math.sqrt((enemy.kbvx || 0)**2 + (enemy.kbvy || 0)**2);
           if (ekb > 150) {
             state.trails.push({
@@ -13870,6 +13960,7 @@ export default function GameCanvas() {
         ctx.strokeStyle = '#000';
         ctx.lineWidth = 2;
         ctx.stroke();
+        ctx.restore();
       }
 
       // Draw Trails
@@ -14265,12 +14356,14 @@ export default function GameCanvas() {
 
       // Draw Multiplayer Players
       for (const tId in state.multiplayerPlayers) {
+         if (openingBlocked) continue;
          const pData = state.multiplayerPlayers[tId];
          if (pData.isDead) continue;
          const pDef = PLAYER_COLORS[pData.colorIdx] || PLAYER_COLORS[0];
          const pColor = pDef.n;
          const pGlow = pDef.g;
          const pName = pData.name || 'PLAYER';
+         beginSpawnDrawing(`player:${tId}`, pData.x, pData.y, pData.radius, pColor);
 
          if (pData.isDash) {
            ctx.fillStyle = pGlow;
@@ -14312,11 +14405,13 @@ export default function GameCanvas() {
            ctx.stroke();
            ctx.restore();
          }
+         ctx.restore();
       }
 
       // Ability drops are persistent world pickups. They have no physics and
       // render above combat until the player collects them.
       for (const pickup of state.abilityPickups) {
+        if (openingBlocked) continue;
         const visualRadius = pickup.radius + 10;
         if (
           pickup.x + visualRadius < state.camera.x ||
@@ -14326,6 +14421,7 @@ export default function GameCanvas() {
         ) continue;
 
         const color = ENEMY_COLOR_HEX[pickup.factionColor];
+        beginSpawnDrawing(`pickup:${pickup.id}`, pickup.x, pickup.y, pickup.radius, color);
         const phase = currentTime * 0.004 + pickup.x * 0.01 + pickup.y * 0.006;
         const bobY = Math.sin(phase) * 2;
         const pulse = 1 + Math.sin(phase * 1.35) * 0.035;
@@ -14417,10 +14513,11 @@ export default function GameCanvas() {
           ctx.fill();
         }
         ctx.restore();
+        ctx.restore();
       }
 
       // Draw Player
-      if (uiRef.current.status !== 'GAME_OVER') {
+      if (uiRef.current.status !== 'GAME_OVER' && !openingBlocked) {
         const localId = socketRef.current?.id || 'local';
         const pDef = PLAYER_COLORS[state.memoryMode ? 0 : playerProfileRef.current.colorIdx] || PLAYER_COLORS[0];
         const pColor = state.memoryMode ? MEMORY_ARENA_PALETTE.player.body : pDef.n;
@@ -14428,6 +14525,7 @@ export default function GameCanvas() {
         const pName = playerProfileRef.current.name || 'PLAYER';
         const playerLevelStats = state.memoryMode ? getPlayerLevelStats(state.playerUpgradeRanks) : null;
         const visualRadius = playerLevelStats?.visualRadius ?? state.player.radius;
+        beginSpawnDrawing('local-player', state.player.x, state.player.y, visualRadius, pColor);
 
         const worldMouseX = state.mouse.x + state.camera.x;
         const worldMouseY = state.mouse.y + state.camera.y;
@@ -14593,6 +14691,7 @@ export default function GameCanvas() {
           ctx.textAlign = 'center';
           ctx.fillText(pName, state.player.x, state.player.y - state.player.radius - 8);
         }
+        ctx.restore();
       } else {
         // Local player is eliminated and invisible (burst into particles)
       }
@@ -14965,7 +15064,9 @@ export default function GameCanvas() {
 
       <canvas ref={canvasRef} className="w-full h-full block cursor-crosshair touch-none mix-blend-screen" />
 
-      <AnimatePresence>
+      <AnimatePresence onExitComplete={() => {
+        if (!arenaCue || uiRef.current.status !== 'PLAYING') openingCueVisibleRef.current = false;
+      }}>
         {arenaCue && uiState.status === 'PLAYING' && (
           <motion.div
             key={arenaCue.id}
