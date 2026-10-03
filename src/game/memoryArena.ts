@@ -1145,7 +1145,8 @@ export function registerPlayerEnemyKill(current: ChainState, killed: EnemyIdenti
         matchingShape: null,
         matchingColor: null,
         progress: 0,
-        level: current.level + 1,
+        // Player leveling is paused; streaks still advance the wave objective.
+        level: current.level,
         completedChains: current.completedChains + 1,
       },
     };

@@ -89,7 +89,6 @@ import {
   getSoloWaveSpeedMultiplier,
   getSoloWaveStreakTarget,
   getMissingEnemyCombinations,
-  grantPlayerLevelUpgrade,
   getWallFollowDirection,
   derivePlayerUpgradeRanks,
   isEnemyFactionColor,
@@ -3376,9 +3375,6 @@ export default function GameCanvas() {
     };
   }, []);
   const [flashScore, setFlashScore] = useState(false);
-  const [chainFeedback, setChainFeedback] = useState<'reset' | 'level' | null>(null);
-  const [levelUpgradeNotice, setLevelUpgradeNotice] = useState<string | null>(null);
-  const chainFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [arenaCue, setArenaCue] = useState<{ id: number; title: string; detail: string } | null>(null);
   const arenaCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const arenaCueIdRef = useRef(0);
@@ -3392,19 +3388,7 @@ export default function GameCanvas() {
     }, ROUND_OPENING_MS);
   }, []);
 
-  const showChainFeedback = useCallback((feedback: 'reset' | 'level', upgradeNotice?: string) => {
-    if (chainFeedbackTimerRef.current) clearTimeout(chainFeedbackTimerRef.current);
-    setChainFeedback(feedback);
-    setLevelUpgradeNotice(feedback === 'level' ? (upgradeNotice ?? null) : null);
-    chainFeedbackTimerRef.current = setTimeout(() => {
-      setChainFeedback(null);
-      setLevelUpgradeNotice(null);
-      chainFeedbackTimerRef.current = null;
-    }, feedback === 'level' ? 1200 : 700);
-  }, []);
-
   useEffect(() => () => {
-    if (chainFeedbackTimerRef.current) clearTimeout(chainFeedbackTimerRef.current);
     if (arenaCueTimerRef.current) clearTimeout(arenaCueTimerRef.current);
   }, []);
 
@@ -6536,12 +6520,6 @@ export default function GameCanvas() {
     setPulseSpawnerCounter(false);
     setPulseKey(0);
     spawnerPointerAnimRef.current = null;
-    if (chainFeedbackTimerRef.current) {
-      clearTimeout(chainFeedbackTimerRef.current);
-      chainFeedbackTimerRef.current = null;
-    }
-    setChainFeedback(null);
-    setLevelUpgradeNotice(null);
     const state = stateRef.current;
     roundOpeningRef.current = createRoundOpening(performance.now());
     openingCueVisibleRef.current = true;
@@ -10010,37 +9988,6 @@ export default function GameCanvas() {
           state.enemies = [];
         };
 
-        const applyCompletedPlayerLevelUpgrade = () => {
-          const previousStats = getPlayerLevelStats(state.playerUpgradeRanks);
-          const upgrade = grantPlayerLevelUpgrade(state.chain.level, state.playerUpgradeRanks);
-          state.playerUpgradeRanks = upgrade.ranks;
-          state.player.maxHp = upgrade.stats.maxHp;
-          if (upgrade.stat === 'maxHp') {
-            state.player.hp = Math.min(
-              upgrade.stats.maxHp,
-              state.player.hp + (upgrade.stats.maxHp - previousStats.maxHp),
-            );
-          }
-
-          const notice = upgrade.stat === 'fireRate'
-            ? `FIRE ${upgrade.stats.bulletsPerSecond.toFixed(2).replace(/\.?0+$/, '')}/S`
-            : upgrade.stat === 'maxHp'
-              ? `MAX HP ${upgrade.stats.maxHp}`
-              : upgrade.stat === 'regeneration'
-                ? `REGEN ${(upgrade.stats.regenerationPercentPerSecond * 100).toFixed(2).replace(/\.?0+$/, '')}%`
-                : `COOLDOWN ${upgrade.stats.cooldownSeconds}S`;
-          showChainFeedback('level', notice);
-          state.shockwaves.push({
-            x: state.player.x,
-            y: state.player.y,
-            color: PLAYER_COLOR_HEX,
-            maxRadius: 180,
-            age: 0,
-            maxAge: 0.5,
-            thickness: 12,
-          });
-        };
-
         const damageMemoryReplicaSpawner = (spawner: MemorySpawner, damage: number): boolean => {
           if (!state.memoryMode || spawner.isCore || !spawner.factionColor || damage <= 0) return false;
           spawner.hp = Math.max(0, spawner.hp - damage);
@@ -10174,10 +10121,7 @@ export default function GameCanvas() {
                   color: enemy.factionColor,
                 });
                 state.chain = chainTransition.state;
-                if (chainTransition.result === 'retargeted') {
-                  showChainFeedback('reset');
-                } else if (chainTransition.result === 'completed') {
-                  applyCompletedPlayerLevelUpgrade();
+                if (chainTransition.result === 'completed') {
                   state.soloWave = registerSoloWaveStreak(state.soloWave);
                   if (state.soloWave.phase === 'break') {
                     explodeRemainingWaveEnemies();
@@ -13344,10 +13288,7 @@ export default function GameCanvas() {
                     color: enemy.factionColor,
                   });
                   state.chain = chainTransition.state;
-                  if (chainTransition.result === 'retargeted') {
-                    showChainFeedback('reset');
-                  } else if (chainTransition.result === 'completed') {
-                    applyCompletedPlayerLevelUpgrade();
+                  if (chainTransition.result === 'completed') {
                     state.soloWave = registerSoloWaveStreak(state.soloWave);
                     if (state.soloWave.phase === 'break') {
                       explodeRemainingWaveEnemies();
@@ -16189,24 +16130,13 @@ export default function GameCanvas() {
                 {!mpState.roomId && (
                   <div
                     ref={hudTopLeftRef}
-                    className="absolute left-4 top-3 z-30 flex w-[calc(100vw-132px)] max-w-[380px] flex-col items-start gap-2 font-mono sm:left-7 sm:top-6 sm:w-[380px]"
+                    className="absolute left-4 top-3 z-30 w-[calc(100vw-100px)] max-w-[460px] font-mono sm:left-7 sm:top-6 sm:w-[460px]"
                     style={{
                       top: 'calc(0.75rem + env(safe-area-inset-top, 0px))',
                       left: 'calc(0.75rem + env(safe-area-inset-left, 0px))',
                     }}
                   >
-                    <div className="w-full border-2 border-[#00f0ff]/80 bg-[#07141d]/90 px-3 py-2 text-white shadow-[0_0_14px_rgba(0,240,255,0.22)] backdrop-blur-sm" aria-live="polite">
-                      <div className="flex items-center justify-between gap-2 text-[11px] font-black uppercase tracking-[0.12em] sm:text-sm">
-                        <span>WAVE {soloWaveUi.number}</span>
-                        <span>STREAKS {soloWaveUi.completedStreaks}/{getSoloWaveStreakTarget(soloWaveUi.number)}</span>
-                      </div>
-                      <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-[#a6f3ff] sm:text-[11px]">
-                        {soloWaveUi.phase === 'break'
-                          ? `WAVE CLEAR · NEXT IN ${Math.ceil(soloWaveUi.breakRemainingMs / 1000)}s`
-                          : 'MATCH 3 KILLS · SAME SHAPE + COLOR'}
-                      </div>
-                    </div>
-                    <div className="flex h-[48px] w-full items-stretch gap-2.5 sm:gap-3">
+                    <div className="flex h-[48px] w-full items-stretch gap-1.5 sm:gap-3">
                       <div
                         className="flex w-[58px] shrink-0 -skew-x-12 items-center justify-center border-2 text-[#F5F7FF] backdrop-blur-sm sm:w-[72px]"
                         style={{
@@ -16215,10 +16145,10 @@ export default function GameCanvas() {
                           boxShadow: '0 0 5px rgba(14, 165, 233, 0.24), 0 0 12px rgba(14, 165, 233, 0.08)',
                         }}
                       >
-                        <span className="skew-x-12 whitespace-nowrap">
-                          <span className="text-[8px] font-black tracking-[0.12em] text-white/75">LV</span>
-                          <span className="ml-1 text-lg font-black leading-none tabular-nums text-white sm:text-xl">
-                            {uiState.level.toString().padStart(2, '0')}
+                        <span className="flex skew-x-12 flex-col items-center gap-1 whitespace-nowrap" aria-label={`Wave ${soloWaveUi.number}`}>
+                          <span className="text-[8px] font-black tracking-[0.12em] text-white/75">WAVE</span>
+                          <span className="text-lg font-black leading-none tabular-nums text-white sm:text-xl">
+                            {soloWaveUi.number.toString().padStart(2, '0')}
                           </span>
                         </span>
                       </div>
@@ -16231,8 +16161,8 @@ export default function GameCanvas() {
                           boxShadow: '0 0 5px rgba(139, 92, 246, 0.24), 0 0 12px rgba(139, 92, 246, 0.08)',
                         }}
                       >
-                        <div className="flex h-full skew-x-12 items-center gap-2 px-3" aria-label={`Chain progress ${uiState.chainProgress} of ${MEMORY_ARENA_CONFIG.chain.requiredKills}`}>
-                          <span className="text-[9px] font-black tracking-wider">CHAIN</span>
+                        <div className="flex h-full skew-x-12 items-center gap-1 px-2 sm:gap-2 sm:px-3" aria-label={`Chain progress ${uiState.chainProgress} of ${MEMORY_ARENA_CONFIG.chain.requiredKills}`}>
+                          <span className="hidden text-[9px] font-black tracking-wider sm:inline">CHAIN</span>
                           <div className="grid min-w-0 flex-1 grid-cols-3 gap-1.5">
                             {Array.from({ length: MEMORY_ARENA_CONFIG.chain.requiredKills }, (_, index) => {
                               const isComplete = index < uiState.chainProgress;
@@ -16250,23 +16180,24 @@ export default function GameCanvas() {
                         </div>
                       </div>
 
-                    </div>
-                    {chainFeedback === 'level' && (
-                      <motion.div
-                        key={chainFeedback}
-                        initial={{ opacity: 0, y: -6, scale: 0.9 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: -8 }}
-                        className="border border-[#00f0ff] bg-black/80 px-3 py-1 text-xs font-black tracking-[0.25em] text-[#00f0ff]"
+                      <div
+                        className="flex w-[60px] shrink-0 -skew-x-12 items-center justify-center border-2 text-[#F5F7FF] backdrop-blur-sm sm:w-[80px]"
+                        style={{
+                          borderColor: '#C4B5FD',
+                          background: 'linear-gradient(rgba(139, 92, 246, 0.52), rgba(139, 92, 246, 0.52)), rgba(6, 8, 14, 0.90)',
+                          boxShadow: '0 0 5px rgba(139, 92, 246, 0.24), 0 0 12px rgba(139, 92, 246, 0.08)',
+                        }}
+                        aria-live="polite"
+                        aria-label={`${Math.max(0, getSoloWaveStreakTarget(soloWaveUi.number) - soloWaveUi.completedStreaks)} streaks left before the wave ends`}
                       >
-                        <span>LEVEL {uiState.level}</span>
-                        {levelUpgradeNotice && (
-                          <span className="ml-2 border-l border-[#00f0ff]/45 pl-2 tracking-[0.12em] text-white">
-                            {levelUpgradeNotice}
+                        <span className="flex skew-x-12 flex-col items-center gap-1 whitespace-nowrap">
+                          <span className="text-[7px] font-black tracking-wider text-white/75 sm:text-[8px]">STREAKS LEFT</span>
+                          <span className="text-lg font-black leading-none tabular-nums text-white sm:text-xl">
+                            {Math.max(0, getSoloWaveStreakTarget(soloWaveUi.number) - soloWaveUi.completedStreaks).toString().padStart(2, '0')}
                           </span>
-                        )}
-                      </motion.div>
-                    )}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 )}
 

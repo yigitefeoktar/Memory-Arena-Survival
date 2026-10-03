@@ -344,7 +344,7 @@ test('three enemies with the exact same color and shape complete a chain', () =>
   for (const enemy of [redCircle, redCircle, redCircle]) {
     state = registerPlayerEnemyKill(state, enemy).state;
   }
-  assert.equal(state.level, 2);
+  assert.equal(state.level, 1);
   assert.equal(state.completedChains, 1);
   assert.equal(state.progress, 0);
   assert.equal(state.target, null);
@@ -385,6 +385,7 @@ test('solo waves clear only after enough exact three-kill streaks and restart af
     if (transition.result === 'completed') wave = registerSoloWaveStreak(wave);
   }
   assert.equal(wave.completedStreaks, 1);
+  assert.equal(chain.level, 1);
   assert.equal(wave.phase, 'active');
   assert.equal(chain.progress, 0);
   for (let i = 0; i < 3; i++) {
@@ -394,6 +395,7 @@ test('solo waves clear only after enough exact three-kill streaks and restart af
   }
   assert.equal(wave.phase, 'break');
   assert.equal(wave.completedStreaks, 2);
+  assert.equal(chain.level, 1);
   assert.equal(registerSoloWaveStreak(wave), wave);
   assert.equal(advanceSoloWaveBreak(wave, 2999).phase, 'break');
   wave = advanceSoloWaveBreak(wave, 3000);
@@ -455,7 +457,7 @@ test('reinforcements arrive while one streak is still possible and stabilize the
   assert.deepEqual(getSoloWaveRescueSpawns({ ...activeWave, completedStreaks: 2, phase: 'break' }, createInitialChainState(), []), []);
 });
 
-test('levels have no artificial maximum and spawners are chain-neutral', () => {
+test('completing a streak preserves existing player levels and spawners are chain-neutral', () => {
   const original = {
     ...createInitialChainState(),
     level: 1_000_000,
@@ -465,7 +467,7 @@ test('levels have no artificial maximum and spawners are chain-neutral', () => {
     matchingColor: redCircle.color,
   };
   const completed = registerPlayerEnemyKill(original, redCircle).state;
-  assert.equal(completed.level, 1_000_001);
+  assert.equal(completed.level, original.level);
   assert.equal(preserveChainOnSpawnerDestroyed(original), original);
 });
 
