@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "branch": "main",
+  "frontend": {
+    "provider": "vercel",
+    "status": "migration-pending"
+  },
+  "backend": null
+}
