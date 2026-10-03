@@ -16130,7 +16130,7 @@ export default function GameCanvas() {
                 {!mpState.roomId && (
                   <div
                     ref={hudTopLeftRef}
-                    className="absolute left-4 top-3 z-30 w-[calc(100vw-100px)] max-w-[460px] font-mono sm:left-7 sm:top-6 sm:w-[460px]"
+                    className="absolute left-4 top-3 z-30 w-[calc(100vw-132px)] max-w-[460px] font-mono sm:left-7 sm:top-6 sm:w-[460px]"
                     style={{
                       top: 'calc(0.75rem + env(safe-area-inset-top, 0px))',
                       left: 'calc(0.75rem + env(safe-area-inset-left, 0px))',
@@ -16138,7 +16138,7 @@ export default function GameCanvas() {
                   >
                     <div className="flex h-[48px] w-full items-stretch gap-1.5 sm:gap-3">
                       <div
-                        className="flex w-[58px] shrink-0 -skew-x-12 items-center justify-center border-2 text-[#F5F7FF] backdrop-blur-sm sm:w-[72px]"
+                        className="flex w-[50px] shrink-0 -skew-x-12 items-center justify-center border-2 text-[#F5F7FF] backdrop-blur-sm sm:w-[72px]"
                         style={{
                           borderColor: '#67E8F9',
                           background: 'linear-gradient(rgba(14, 165, 233, 0.60), rgba(14, 165, 233, 0.60)), rgba(6, 8, 14, 0.90)',
