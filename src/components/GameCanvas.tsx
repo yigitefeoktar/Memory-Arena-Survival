@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { spawnDestructionBurst, type BurstParticle } from '../game/visualEffects';
+import { findClearArenaPosition, getSoloArenaFrame, getSoloArenaLayout, isArenaPositionClear, SOLO_ARENA_BOUNDARY, SOLO_ARENA_WIDTH, SOLO_ARENA_HEIGHT } from '../game/soloArena';
 import { createRoundOpening, getSpawnVisual, isRoundOpeningBlocked, ROUND_OPENING_MS, SPAWN_ANIMATION_MS, type RoundOpening } from '../game/roundOpening';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { io, Socket } from 'socket.io-client';
@@ -255,7 +256,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 12;
+const SAVE_VERSION = 13;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -1078,17 +1079,10 @@ const MEMORY_MAPS: Record<string, MapDefinition> = Object.fromEntries(
 MEMORY_MAPS.wave_arena = {
   name: 'Wave Arena',
   difficulty: 'EASY',
-  description: 'A compact arena with two cover blocks and instant enemy waves.',
-  width: 1200,
-  height: 900,
-  walls: [
-    { x: 0, y: 0, w: 1200, h: 40 },
-    { x: 0, y: 0, w: 40, h: 900 },
-    { x: 1160, y: 0, w: 40, h: 900 },
-    { x: 0, y: 860, w: 1200, h: 40 },
-    { x: 340, y: 260, w: 90, h: 90 },
-    { x: 770, y: 550, w: 90, h: 90 },
-  ],
+  description: 'A compact arena with four rotating cover layouts that reconstruct between waves.',
+  width: SOLO_ARENA_WIDTH,
+  height: SOLO_ARENA_HEIGHT,
+  walls: getSoloArenaLayout(1).walls,
   spawners: [],
   spawnPoint: { x: 600, y: 450 },
 };
@@ -5803,10 +5797,21 @@ export default function GameCanvas() {
       cleanState.chain = { ...cleanState.chain, target: null, matchingShape: null, matchingColor: null, progress: 0 };
     }
     const loadedMap = isMemorySave && version < 12 ? MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID] : mapDef;
+    const loadedWalls = isMemorySave ? getSoloArenaFrame(cleanState.soloWave).walls : loadedMap.walls;
+    if (isMemorySave) {
+      Object.assign(cleanState.player, findClearArenaPosition(cleanState.player, loadedWalls));
+      for (const pickup of cleanState.abilityPickups) Object.assign(pickup, findClearArenaPosition(pickup, loadedWalls));
+      // Older saves always used Twin Cover, even on later waves.
+      if (version < 13) {
+        cleanState.enemies = cleanState.enemies.filter(enemy => isArenaPositionClear(enemy.x, enemy.y, enemy.radius, loadedWalls));
+        cleanState.bullets = cleanState.bullets.filter(bullet => isArenaPositionClear(bullet.x, bullet.y, bullet.radius, loadedWalls));
+        cleanState.blocks = cleanState.blocks.filter(block => isArenaPositionClear(block.x, block.y, block.size / Math.SQRT2, loadedWalls));
+      }
+    }
     return {
       cleanUi,
       cleanState,
-      walls: loadedMap.walls,
+      walls: loadedWalls,
       width: getMapWidth(loadedMap),
       height: getMapHeight(loadedMap),
     };
@@ -9876,6 +9881,13 @@ export default function GameCanvas() {
             state.bullets = [];
             const previousSeconds = Math.ceil(state.soloWave.breakRemainingMs / 1000);
             state.soloWave = advanceSoloWaveBreak(state.soloWave, dt * 1000);
+            const nextWalls = getSoloArenaFrame(state.soloWave).walls;
+            if (activeWalls !== nextWalls) {
+              activeWalls = nextWalls;
+              Object.assign(state.player, findClearArenaPosition(state.player, activeWalls));
+              for (const pickup of state.abilityPickups) Object.assign(pickup, findClearArenaPosition(pickup, activeWalls));
+              state.blocks = state.blocks.filter(block => isArenaPositionClear(block.x, block.y, block.size / Math.SQRT2, activeWalls));
+            }
             if (state.soloWave.phase === 'active') {
               showArenaCue(`WAVE ${String(state.soloWave.number).padStart(2, '0')}`, 'INCOMING // SURVIVE');
             }
@@ -13610,7 +13622,11 @@ export default function GameCanvas() {
       ctx.fillStyle = state.memoryMode ? MEMORY_ARENA_PALETTE.walls.fill : '#050508';
       ctx.strokeStyle = state.memoryMode ? MEMORY_ARENA_PALETTE.walls.stroke : '#00f0ff';
       ctx.lineWidth = 2;
-      for (const wall of activeWalls) {
+      const arenaFrame = state.memoryMode ? getSoloArenaFrame(state.soloWave, Boolean(shouldReduceMotion)) : null;
+      const drawnWalls = arenaFrame
+        ? [...SOLO_ARENA_BOUNDARY.map(wall => ({ wall, visual: null })), ...arenaFrame.interior]
+        : activeWalls.map(wall => ({ wall, visual: null }));
+      for (const { wall, visual } of drawnWalls) {
         if (
           wall.x + wall.w < state.camera.x ||
           wall.x > state.camera.x + state.camera.width ||
@@ -13618,14 +13634,32 @@ export default function GameCanvas() {
           wall.y > state.camera.y + state.camera.height
         ) continue;
 
-        ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
-
         ctx.save();
+        const centerX = wall.x + wall.w / 2;
+        const centerY = wall.y + wall.h / 2;
+        if (visual) {
+          if (visual.ringAlpha > 0) {
+            ctx.save();
+            ctx.globalAlpha = visual.ringAlpha;
+            ctx.strokeStyle = MEMORY_ARENA_PALETTE.walls.highlight;
+            ctx.shadowColor = MEMORY_ARENA_PALETTE.walls.highlight;
+            ctx.shadowBlur = 12;
+            const pulseWidth = wall.w * visual.ringScale + 12;
+            const pulseHeight = wall.h * visual.ringScale + 12;
+            ctx.strokeRect(centerX - pulseWidth / 2, centerY - pulseHeight / 2, pulseWidth, pulseHeight);
+            ctx.restore();
+          }
+          ctx.translate(centerX, centerY);
+          ctx.scale(visual.scale, visual.scale);
+          ctx.translate(-centerX, -centerY);
+          ctx.globalAlpha *= visual.alpha;
+        }
+        ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
         ctx.shadowColor = state.memoryMode ? MEMORY_ARENA_PALETTE.walls.glow : '#00f0ff';
         ctx.shadowBlur = state.memoryMode ? 4 : 8;
         ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
         if (state.memoryMode) {
-          ctx.globalAlpha = 0.42;
+          ctx.globalAlpha *= 0.42;
           ctx.strokeStyle = MEMORY_ARENA_PALETTE.walls.highlight;
           ctx.lineWidth = 1;
           ctx.strokeRect(wall.x + 2, wall.y + 2, Math.max(0, wall.w - 4), Math.max(0, wall.h - 4));
