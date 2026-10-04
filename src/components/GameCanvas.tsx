@@ -7673,6 +7673,7 @@ export default function GameCanvas() {
   handleHostRoleTransitionRef.current = handleHostRoleTransition;
 
   useEffect(() => {
+    if (import.meta.env.VITE_MULTIPLAYER_ENABLED === 'false') return;
     const socket = io();
     socketRef.current = socket;
 
@@ -16001,6 +16002,11 @@ export default function GameCanvas() {
               ) : (
                 <>
                   <p className="text-[#ffcc00]/80 font-bold tracking-widest text-xs uppercase mb-2 w-full text-left">JOIN A ROOM</p>
+                  {import.meta.env.VITE_MULTIPLAYER_ENABLED === 'false' && (
+                    <p role="status" className="text-white/60 text-xs mb-4">
+                      Multiplayer is not available in this version. You can play single-player.
+                    </p>
+                  )}
                   <input
                     type="text"
                     value={mpState.joinCode}

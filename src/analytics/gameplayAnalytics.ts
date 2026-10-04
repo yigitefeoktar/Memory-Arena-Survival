@@ -196,6 +196,7 @@ function createBrowserId(): string {
 }
 
 async function loadByteBrewConfig(): Promise<ByteBrewConfig> {
+  if (import.meta.env?.VITE_ANALYTICS_ENABLED === 'false') return { enabled: false };
   const response = await fetch('/api/analytics-config', {
     cache: 'no-store',
     credentials: 'same-origin',

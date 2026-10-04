@@ -3,7 +3,12 @@
   "branch": "main",
   "frontend": {
     "provider": "vercel",
-    "status": "migration-pending"
+    "project": "memory-arena-survival",
+    "projectId": "prj_0W2mJ2sohdbT1eRyF8Qwb28e40mH",
+    "teamId": "team_xVwirII3Qvw8wj4rshxpfiL4",
+    "productionUrl": "https://memory-arena-survival.vercel.app/",
+    "buildCommand": "npm run build:frontend",
+    "outputDirectory": "dist/frontend"
   },
   "backend": null
 }
