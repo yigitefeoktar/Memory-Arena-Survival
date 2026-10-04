@@ -13,11 +13,13 @@ Use the `game-deployment` skill. Its canonical version is [in Ricochet's GitHub 
 - Do not start a local development server unless asked. A bounded production smoke test may verify a release. Check the published menu, single-player, multiplayer notice and console errors. For rollback, promote a verified previous Vercel deployment and reconcile main so the next release retains the fix; keep this stable URL.
 - Free services only; no domain purchase. Updates may end multiplayer matches once a backend is explicitly enabled; the user updates when nobody is playing.
 
-## Frozen Google Cloud fallback
+## Google Cloud historical recovery
+
+Billing was disabled on both game projects (`gen-lang-client-0375824487` and `arena-growth-io`) on 2026-10-04. The Cloud URLs below are historical; do not assume they still serve a running fallback. Preserve remaining resources, and never re-enable billing or triggers without a specific user request. Current Vercel releases do not depend on Google Cloud.
 
 - Existing URL retained: https://memory-arena-survival-823233237078.us-west1.run.app
 - Project `gen-lang-client-0375824487`, service `memory-arena-survival`, region `us-west1`.
 - Cloud Build trigger `88a7d0a8-87cc-4d92-ba8a-efa88a989b0b` was disabled on 2026-10-03. Main pushes must not update Cloud Run. Do not re-enable/redeploy, change traffic/settings/secrets/domains, or delete it unless specifically requested.
 - Historical configuration: `deployment/historical-cloud-instructions.md`, recovery reference only. Its old release steps are superseded by this file. Build/start scripts may remain as legacy material; do not use their Cloud deployment workflow.
 
-For completed releases, report the verified frontend URL, short SHA and checks/deployment result. The Cloud URL serves its saved fallback version and is not evidence of a new deployment.
+For completed releases, report the verified frontend URL, short SHA and checks/deployment result. Cloud configuration is historical recovery material and is not evidence of a new deployment.

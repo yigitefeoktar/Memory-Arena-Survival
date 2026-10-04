@@ -17,6 +17,6 @@ Vercel reads `vercel.json` and publishes only `dist/frontend`. Verify the produc
 
 `deployment.json` explicitly declares `backend: null`. Frontend mode disables Socket.IO and server-provided analytics configuration. Do not deploy Express, create PC tasks/tunnels, or add another game's backend URL. Future multiplayer requires an explicitly authorized and tested backend.
 
-Google Cloud remains a frozen fallback. Keep its disabled trigger, running revision and settings as they are.
+Google Cloud billing was disabled on 2026-10-04. Its configuration is historical recovery material, not an available running fallback. Preserve remaining resources/settings and keep billing and deployment triggers disabled.
 
 For recovery, promote a previously verified Vercel deployment and fix/revert the affected commit on main before the next push. Preserve the production alias so website links keep working.
