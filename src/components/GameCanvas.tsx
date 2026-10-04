@@ -61,7 +61,7 @@ import {
   MEMORY_MAP_CORE_INDICES,
   PLAYER_COLOR_HEX,
   PLAYER_UPGRADE_STATS,
-  regeneratePlayerHealth,
+  restorePlayerHealthOnWaveClear,
   registerPlayerEnemyKill,
   registerSoloWaveStreak,
   resolveEnemyOverlaps,
@@ -3704,7 +3704,7 @@ export default function GameCanvas() {
 
   const damageMemoryPlayer = useCallback((damage: number, impactX: number, impactY: number, label: string) => {
     const state = stateRef.current;
-    if (!state.memoryMode || uiRef.current.status !== 'PLAYING' || state.player.hp <= 0) return;
+    if (!state.memoryMode || state.soloWave.phase !== 'active' || uiRef.current.status !== 'PLAYING' || state.player.hp <= 0) return;
     const nextHp = applyPlayerDamage(state.player.hp, damage);
     state.player.hp = nextHp;
     state.shake = Math.max(state.shake, 8);
@@ -9954,22 +9954,6 @@ export default function GameCanvas() {
         // Host ONLY logic from here down
         if (!mpRef.current.roomId || mpRef.current.isHost) {
 
-          if (state.memoryMode && STATUS === 'PLAYING' && state.player.hp > 0) {
-            const previousHp = state.player.hp;
-            const regenerationPercent = getPlayerLevelStats(state.playerUpgradeRanks).regenerationPercentPerSecond;
-            state.player.hp = regeneratePlayerHealth(
-              state.player.hp,
-              state.player.maxHp,
-              regenerationPercent,
-              dt,
-            );
-            if (Math.floor(previousHp) !== Math.floor(state.player.hp)) {
-              const nextUi = { ...uiRef.current, hp: state.player.hp };
-              uiRef.current = nextUi;
-              setUiState(nextUi);
-            }
-          }
-
           // Block Physics (Player / Enemies vs Blocks)
           for (let b = state.blocks.length - 1; b >= 0; b--) {
             const block = state.blocks[b];
@@ -12407,10 +12391,14 @@ export default function GameCanvas() {
                   });
                   state.chain = chainTransition.state;
                   if (chainTransition.result === 'completed') {
+                    const previousWave = state.soloWave;
                     state.soloWave = registerSoloWaveStreak(state.soloWave);
+                    state.player.hp = restorePlayerHealthOnWaveClear(
+                      state.player.hp, state.player.maxHp, previousWave, state.soloWave,
+                    );
                     if (state.soloWave.phase === 'break') {
                       explodeRemainingWaveEnemies();
-                      showArenaCue('WAVE CLEAR', 'ARENA RECONSTRUCTING');
+                      showArenaCue('WAVE CLEAR', 'HEALTH RESTORED // ARENA RECONSTRUCTING');
                     }
                     setSoloWaveUi({ ...state.soloWave });
                   }
@@ -13448,23 +13436,31 @@ export default function GameCanvas() {
         }
 
         if (state.memoryMode && playerLevelStats) {
-          const regenerationVisualRank = Math.min(8, state.playerUpgradeRanks.regeneration);
-          const isRegenerating = state.player.hp > 0 && state.player.hp < state.player.maxHp;
-          const auraPulse = Math.sin(currentTime * (0.004 + regenerationVisualRank * 0.00035));
+          const healthRestored = state.soloWave.phase === 'break' && state.player.hp > 0;
+          const healProgress = 1 - state.soloWave.breakRemainingMs / MEMORY_ARENA_CONFIG.waves.breakMs;
+          const auraColor = healthRestored ? MEMORY_ARENA_PALETTE.factions.green.bright : PLAYER_COLOR_HEX;
           ctx.save();
-          ctx.globalAlpha = 0.08 + regenerationVisualRank * 0.018 + (isRegenerating ? 0.08 : 0);
-          ctx.fillStyle = PLAYER_COLOR_HEX;
-          ctx.shadowColor = PLAYER_COLOR_HEX;
-          ctx.shadowBlur = 12 + regenerationVisualRank * 3 + (isRegenerating ? 8 : 0);
+          ctx.globalAlpha = healthRestored ? 0.25 : 0.08;
+          ctx.fillStyle = auraColor;
+          ctx.shadowColor = auraColor;
+          ctx.shadowBlur = healthRestored ? 20 : 12;
           ctx.beginPath();
           ctx.arc(
             state.player.x,
             state.player.y,
-            visualRadius + 8 + regenerationVisualRank * 1.5 + auraPulse * (1 + regenerationVisualRank * 0.2),
+            visualRadius + 8,
             0,
             Math.PI * 2,
           );
           ctx.fill();
+          if (healthRestored) {
+            ctx.globalAlpha = shouldReduceMotion ? 0.55 : 0.65 * (1 - healProgress);
+            ctx.strokeStyle = auraColor;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(state.player.x, state.player.y, visualRadius + 12 + (shouldReduceMotion ? 0 : healProgress * 26), 0, Math.PI * 2);
+            ctx.stroke();
+          }
           ctx.restore();
         }
 

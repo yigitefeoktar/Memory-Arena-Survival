@@ -1415,16 +1415,15 @@ export function applyPlayerDamage(hp: number, damage: number): number {
   return Math.max(0, hp - Math.max(0, damage));
 }
 
-export function regeneratePlayerHealth(
+export function restorePlayerHealthOnWaveClear(
   hp: number,
   maxHp: number,
-  regenerationPercentPerSecond: number,
-  deltaSeconds: number,
+  previousWave: SoloWaveState,
+  nextWave: SoloWaveState,
 ): number {
-  return Math.min(
-    maxHp,
-    hp + maxHp * Math.max(0, regenerationPercentPerSecond) * Math.max(0, deltaSeconds),
-  );
+  // Heal once at the clear boundary; resuming a break must not grant a second heal.
+  return hp > 0 && previousWave.phase === 'active' && nextWave.phase === 'break' &&
+    previousWave.number === nextWave.number ? maxHp : hp;
 }
 
 export function isValidChainState(value: unknown): value is ChainState {

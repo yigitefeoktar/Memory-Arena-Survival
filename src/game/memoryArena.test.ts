@@ -53,7 +53,7 @@ import {
   MEMORY_ARENA_CONFIG,
   MEMORY_MAP_CORE_INDICES,
   preserveChainOnSpawnerDestroyed,
-  regeneratePlayerHealth,
+  restorePlayerHealthOnWaveClear,
   registerAbilityDropKill,
   registerPlayerEnemyKill,
   registerSoloWaveStreak,
@@ -624,13 +624,30 @@ test('triangle warning turns smoothly using the shortest angular path', () => {
   assert.ok(Math.abs(acrossWrap - (-Math.PI + 0.05)) < 1e-10);
 });
 
-test('damage stacks and continuous regeneration clamps to maximum health', () => {
+test('damage persists through unfinished streaks and fully heals on wave clear', () => {
   let hp = applyPlayerDamage(100, 30);
   hp = applyPlayerDamage(hp, 12);
   hp = applyPlayerDamage(hp, 12);
   assert.equal(hp, 46);
-  assert.equal(regeneratePlayerHealth(hp, 100, 0.02, 2), 50);
-  assert.equal(regeneratePlayerHealth(99, 100, 0.02, 10), 100);
+  const openingWave = createInitialSoloWaveState();
+  assert.equal(restorePlayerHealthOnWaveClear(hp, 100, openingWave, openingWave), 46);
+  const unfinishedWave = registerSoloWaveStreak(openingWave);
+  hp = restorePlayerHealthOnWaveClear(hp, 100, openingWave, unfinishedWave);
+  assert.equal(hp, 46);
+  const clearedWave = registerSoloWaveStreak(unfinishedWave);
+  assert.equal(clearedWave.phase, 'break');
+  assert.equal(restorePlayerHealthOnWaveClear(hp, 100, unfinishedWave, clearedWave), 100);
+  assert.equal(restorePlayerHealthOnWaveClear(1, 140, unfinishedWave, clearedWave), 140);
+});
+
+test('wave healing never revives a defeated player or repeats on a resumed break', () => {
+  const active = registerSoloWaveStreak(createInitialSoloWaveState());
+  const cleared = registerSoloWaveStreak(active);
+  assert.equal(restorePlayerHealthOnWaveClear(0, 100, active, cleared), 0);
+  assert.equal(restorePlayerHealthOnWaveClear(46, 100, cleared, cleared), 46);
+  const nextWave = advanceSoloWaveBreak(cleared, MEMORY_ARENA_CONFIG.waves.breakMs);
+  assert.equal(restorePlayerHealthOnWaveClear(46, 100, cleared, nextWave), 46);
+  assert.equal(restorePlayerHealthOnWaveClear(46, 100, active, { ...cleared, number: 2 }), 46);
 });
 
 test('high fire rate becomes three streams while preserving total bullet output', () => {
