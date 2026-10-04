@@ -450,7 +450,7 @@ export function resolveEnemyOverlaps<T extends EnemySeparationBody>(
   return { correctedPairs, maximumRemainingOverlap };
 }
 
-export const PLAYER_UPGRADE_STATS = ['fireRate', 'maxHp', 'regeneration', 'cooldown'] as const;
+export const PLAYER_UPGRADE_STATS = ['fireRate', 'maxHp', 'regeneration'] as const;
 export type PlayerUpgradeStat = (typeof PLAYER_UPGRADE_STATS)[number];
 
 export interface PlayerUpgradeRanks {
@@ -483,7 +483,7 @@ export function createInitialPlayerUpgradeRanks(): PlayerUpgradeRanks {
 export function isValidPlayerUpgradeRanks(value: unknown): value is PlayerUpgradeRanks {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const candidate = value as Partial<PlayerUpgradeRanks>;
-  return PLAYER_UPGRADE_STATS.every(stat => (
+  return [...PLAYER_UPGRADE_STATS, 'cooldown' as const].every(stat => (
     Number.isInteger(candidate[stat]) &&
     (candidate[stat] as number) >= 0 &&
     (candidate[stat] as number) <= 1_000_000_000
@@ -521,9 +521,6 @@ function isPlayerUpgradeStatCapped(stat: PlayerUpgradeStat, ranks: PlayerUpgrade
   if (stat === 'fireRate') {
     return stats.bulletsPerSecond >= MEMORY_ARENA_CONFIG.progression.maximumBulletsPerSecond;
   }
-  if (stat === 'cooldown') {
-    return stats.cooldownSeconds <= MEMORY_ARENA_CONFIG.progression.minimumCooldownSeconds;
-  }
   return false;
 }
 
@@ -551,17 +548,18 @@ export function derivePlayerUpgradeRanks(level: number): PlayerUpgradeRanks {
   if (boundedLevel <= exactEnd) return ranks;
 
   let remaining = boundedLevel - exactEnd;
-  const completeCycles = Math.floor(remaining / 4);
+  // Once fire rate caps, six levels add three HP and three regeneration ranks.
+  const completeCycles = Math.floor(remaining / 6);
   if (completeCycles > 0) {
     ranks = {
       ...ranks,
-      maxHp: ranks.maxHp + completeCycles * 2,
-      regeneration: ranks.regeneration + completeCycles * 2,
+      maxHp: ranks.maxHp + completeCycles * 3,
+      regeneration: ranks.regeneration + completeCycles * 3,
     };
-    remaining -= completeCycles * 4;
+    remaining -= completeCycles * 6;
   }
   for (let offset = 1; offset <= remaining; offset++) {
-    ranks = grantPlayerLevelUpgrade(exactEnd + completeCycles * 4 + offset, ranks).ranks;
+    ranks = grantPlayerLevelUpgrade(exactEnd + completeCycles * 6 + offset, ranks).ranks;
   }
   return ranks;
 }
@@ -571,7 +569,7 @@ export function createEmptyAbilityOwnership(): AbilityOwnership {
 }
 
 export function createFullAbilityOwnership(): AbilityOwnership {
-  return { damage: true, special: true, build: true, convert: true };
+  return createEmptyAbilityOwnership();
 }
 
 export function createInitialAbilityDropProgress(): AbilityDropProgress {
@@ -584,7 +582,7 @@ export function collectAbilityPickup(
   abilityLastUsed: number,
 ): { ownership: AbilityOwnership; abilityLastUsed: number } {
   return {
-    ownership: ownership[abilityId] ? ownership : { ...ownership, [abilityId]: true },
+    ownership: createEmptyAbilityOwnership(),
     abilityLastUsed,
   };
 }
@@ -623,27 +621,7 @@ export interface AbilityDropKillResult {
 
 export function registerAbilityDropKill(input: AbilityDropKillInput): AbilityDropKillResult {
   const abilityId = ABILITY_BY_FACTION[input.factionColor];
-  const eligibleCredit = input.credit === 'player' || input.credit === 'ally';
-  if (
-    !eligibleCredit ||
-    input.defeatedWasPlayerAlly ||
-    input.ownership[abilityId] ||
-    input.hasActivePickup
-  ) {
-    return { abilityId, shouldDrop: false, progress: input.progress };
-  }
-
-  const nextCount = input.progress[input.factionColor] + 1;
-  const shouldDrop = nextCount >= MEMORY_ARENA_CONFIG.abilityDrops.pityKills ||
-    input.randomValue < MEMORY_ARENA_CONFIG.abilityDrops.chance;
-  return {
-    abilityId,
-    shouldDrop,
-    progress: {
-      ...input.progress,
-      [input.factionColor]: shouldDrop ? 0 : nextCount,
-    },
-  };
+  return { abilityId, shouldDrop: false, progress: input.progress };
 }
 
 export interface EnemyIdentity {

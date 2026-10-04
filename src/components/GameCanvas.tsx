@@ -1,16 +1,97 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { spawnDestructionBurst, type BurstParticle } from '../game/visualEffects';
-import { findClearArenaPosition, getSoloArenaFrame, getSoloArenaLayout, isArenaPositionClear, SOLO_ARENA_BOUNDARY, SOLO_ARENA_WIDTH, SOLO_ARENA_HEIGHT } from '../game/soloArena';
-import { createRoundOpening, getSpawnVisual, isRoundOpeningBlocked, ROUND_OPENING_MS, SPAWN_ANIMATION_MS, type RoundOpening } from '../game/roundOpening';
-import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
+import { Check, Copy, Shuffle } from 'lucide-react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { Copy, Check, Shuffle } from 'lucide-react';
 import {
-  GameMode,
-  MatchSettings,
+  gameplayAnalytics,
+  type GameplayAnalyticsEventName,
+  type GameplayAnalyticsFields,
+  type GameplayRunOrigin,
+} from '../analytics/gameplayAnalytics';
+import { clearLegacyAbilities } from '../game/legacyAbilities';
+import {
+  ABILITY_BY_FACTION,
+  addFactionEmergencyPressure,
+  advanceSoloWaveBreak,
+  advanceTriangleAi,
+  applyPlayerDamage,
+  areEnemyFactionsHostile,
+  calculateEnemySeparationSteering,
+  canEnemyFactionDamageSpawner,
+  canMemoryProjectileDamageEnemies,
+  composeThreeByThreeArena,
+  countRemainingCoreSpawners,
+  createEmptyAbilityOwnership,
+  createFullAbilityOwnership,
+  createInitialAbilityDropProgress,
+  createInitialChainState,
+  createInitialFactionEmergencyStates,
+  createInitialFactionRaidStates,
+  createInitialPlayerUpgradeRanks,
+  createInitialSoloWaveState,
+  createMemoryCoreSpawners,
+  createTriangleAiState,
+  derivePlayerUpgradeRanks,
+  ENEMY_COLOR_HEX,
+  ENEMY_FACTIONS,
+  getMemoryThreatStats,
+  getMissingEnemyCombinations,
+  getPlayerLevelStats,
+  getRaidFormationOffset,
+  getSoloWaveRescueSpawns,
+  getSoloWaveSpeedMultiplier,
+  getSoloWaveStreakTarget,
+  getSquareVolleyDirections,
+  getTriangleTelegraphVisual,
+  getWallFollowDirection,
+  isEnemyFactionColor,
+  isEnemyShape,
+  isFactionEnemyAbilityId,
+  isValidAbilityDropProgress,
+  isValidAbilityOwnership,
+  isValidChainState,
+  isValidFactionEmergencyStates,
+  isValidFactionRaidStates,
+  isValidPlayerUpgradeRanks,
+  isValidSoloWaveState,
+  markTrianglePlayerHit,
+  MEMORY_ARENA_CONFIG,
+  MEMORY_ARENA_PALETTE,
+  MEMORY_MAP_CORE_INDICES,
+  PLAYER_COLOR_HEX,
+  PLAYER_UPGRADE_STATS,
+  regeneratePlayerHealth,
+  registerPlayerEnemyKill,
+  registerSoloWaveStreak,
+  resolveEnemyOverlaps,
+  turnAngleTowards,
+  type AbilityDropProgress,
+  type AbilityOwnership,
+  type AbilityPickup,
+  type ChainState,
+  type EnemyFactionColor,
+  type EnemyShape,
+  type FactionEmergencyStates,
+  type FactionEnemyAbilityId,
+  type FactionRaidStates,
+  type PlayerUpgradeRanks,
+  type SoloWaveState,
+  type TriangleAiState
+} from '../game/memoryArena';
+import { createRoundOpening, getSpawnVisual, isRoundOpeningBlocked, ROUND_OPENING_MS, SPAWN_ANIMATION_MS, type RoundOpening } from '../game/roundOpening';
+import { findClearArenaPosition, getSoloArenaFrame, getSoloArenaLayout, isArenaPositionClear, SOLO_ARENA_BOUNDARY, SOLO_ARENA_HEIGHT, SOLO_ARENA_WIDTH } from '../game/soloArena';
+import { spawnDestructionBurst, type BurstParticle } from '../game/visualEffects';
+import {
+  acceptRelayedGameplayEventId,
+  parseRelayedGameplayEvent,
+  type WorldRelayedGameplayEventName,
+} from '../shared/gameplayAnalyticsRelay';
+import {
   DEFAULT_MATCH_SETTINGS,
+  GameMode,
   isValidGameMode,
   isValidMapId,
+  MatchSettings,
 } from '../shared/matchSettings';
 import {
   findEarliestCircleTargetHit,
@@ -36,94 +117,6 @@ import {
   GUEST_SHOT_VISUAL_END_FADE_MS,
   type GuestShotVisualState,
 } from '../shared/multiplayerShotPreview';
-import {
-  gameplayAnalytics,
-  type GameplayAnalyticsEventName,
-  type GameplayAnalyticsFields,
-  type GameplayRunOrigin,
-} from '../analytics/gameplayAnalytics';
-import {
-  acceptRelayedGameplayEventId,
-  parseRelayedGameplayEvent,
-  type WorldRelayedGameplayEventName,
-} from '../shared/gameplayAnalyticsRelay';
-import {
-  ABILITY_BY_FACTION,
-  ENEMY_COLOR_HEX,
-  ENEMY_FACTIONS,
-  FACTION_EMERGENCY_ABILITY_BY_FACTION,
-  MEMORY_ARENA_CONFIG,
-  MEMORY_ARENA_PALETTE,
-  MEMORY_MAP_CORE_INDICES,
-  PLAYER_COLOR_HEX,
-  PLAYER_UPGRADE_STATS,
-  advanceTriangleAi,
-  advanceSoloWaveBreak,
-  advanceFactionEmergencyState,
-  addFactionEmergencyPressure,
-  applyPlayerDamage,
-  areEnemyFactionsHostile,
-  calculateEnemySeparationSteering,
-  canEnemyFactionDamageSpawner,
-  canMemoryProjectileDamageEnemies,
-  collectAbilityPickup,
-  createInitialChainState,
-  createInitialSoloWaveState,
-  createEmptyAbilityOwnership,
-  createFullAbilityOwnership,
-  createInitialAbilityDropProgress,
-  createInitialFactionRaidStates,
-  createInitialFactionEmergencyStates,
-  createInitialPlayerUpgradeRanks,
-  createMemoryCoreSpawners,
-  composeThreeByThreeArena,
-  createShuffledShapeBag,
-  createTriangleAiState,
-  countRemainingCoreSpawners,
-  findNearestSpawnerReplicationPosition,
-  getSquareVolleyDirections,
-  getRaidFormationOffset,
-  getTriangleTelegraphVisual,
-  getPlayerLevelStats,
-  getMemoryThreatStats,
-  getSoloWaveRescueSpawns,
-  getSoloWaveSpeedMultiplier,
-  getSoloWaveStreakTarget,
-  getMissingEnemyCombinations,
-  getWallFollowDirection,
-  derivePlayerUpgradeRanks,
-  isEnemyFactionColor,
-  isEnemyShape,
-  isFactionEnemyAbilityId,
-  isValidChainState,
-  isValidSoloWaveState,
-  isValidAbilityDropProgress,
-  isValidAbilityOwnership,
-  isValidFactionRaidStates,
-  isValidFactionEmergencyStates,
-  isValidPlayerUpgradeRanks,
-  markTrianglePlayerHit,
-  regeneratePlayerHealth,
-  registerPlayerEnemyKill,
-  registerSoloWaveStreak,
-  registerAbilityDropKill,
-  resolveEnemyOverlaps,
-  takeShapeFromBag,
-  turnAngleTowards,
-  type AbilityDropProgress,
-  type AbilityKillCredit,
-  type AbilityOwnership,
-  type AbilityPickup,
-  type ChainState,
-  type SoloWaveState,
-  type EnemyFactionColor,
-  type EnemyShape,
-  type FactionEnemyAbilityId,
-  type FactionRaidStates,
-  type FactionEmergencyStates,
-  type PlayerUpgradeRanks,
-  type TriangleAiState,
-} from '../game/memoryArena';
 
 interface ActiveMatchSettingsRequest {
   seq: number;
@@ -256,7 +249,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 13;
+const SAVE_VERSION = 14;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -1378,7 +1371,7 @@ function sweptMultiplayerPlayerResolve(
 
   // First check whether the starting position is embedded in a wall using resolveWallCollisions.
   const resolvedStart = resolveWallCollisions(startX, startY, radius, walls);
-  
+
   // If the starting position required recovery, return the recovered position for this update instead of continuing the movement.
   let isEmbedded = false;
   for (const wall of walls) {
@@ -1387,7 +1380,7 @@ function sweptMultiplayerPlayerResolve(
       break;
     }
   }
-  
+
   if (isEmbedded || Math.hypot(resolvedStart.x - startX, resolvedStart.y - startY) > 0.01 || resolvedStart.collided) {
     return {
       x: resolvedStart.x,
@@ -1402,7 +1395,7 @@ function sweptMultiplayerPlayerResolve(
   const dx = targetX - startX;
   const dy = targetY - startY;
   const dist = Math.hypot(dx, dy);
-  
+
   let clamped = false;
   let endX = targetX;
   let endY = targetY;
@@ -1416,7 +1409,7 @@ function sweptMultiplayerPlayerResolve(
 
   // Split the resulting movement into substeps no larger than max(2, radius * 0.5)
   const maxSubstep = Math.max(2, radius * 0.5);
-  
+
   if (segmentDist <= 0.001) {
     return {
       x: startX,
@@ -2473,62 +2466,6 @@ function sweptMultiplayerBulletRelicCollision(
   return null;
 }
 
-const DashStatus = ({ stateRef }: { stateRef: any }) => {
-  const [text, setText] = useState('READY');
-  const [color, setColor] = useState('#fff');
-  const [shadow, setShadow] = useState('0 0 10px rgba(181,0,255,0.8)');
-
-  useEffect(() => {
-    let animationFrameId: number;
-    let wasReady = true;
-
-    const loop = () => {
-      const currentTime = performance.now();
-      const dashRemaining = DASH_COOLDOWN - (currentTime - stateRef.current.player.dash.lastTime);
-
-      if (dashRemaining > 0) {
-        setText((dashRemaining / 1000).toFixed(1) + 'S');
-        setColor('rgba(181, 0, 255, 0.5)');
-        setShadow('none');
-        wasReady = false;
-      } else {
-        if (!wasReady) {
-          setText('READY');
-          setColor('#fff');
-          setShadow('0 0 10px rgba(181,0,255,0.8)');
-          wasReady = true;
-
-          const specialBtn = document.getElementById('tool-btn-special');
-          if (specialBtn) {
-            specialBtn.animate([
-              { transform: 'scale(1)', boxShadow: '0 0px 0px #b500ff' },
-              { transform: 'scale(1.1)', boxShadow: '0 0 30px #b500ff' },
-              { transform: 'scale(1)', boxShadow: '0 0px 0px #b500ff' }
-            ], { duration: 400, easing: 'ease-out' });
-          }
-        }
-      }
-      animationFrameId = requestAnimationFrame(loop);
-    };
-    loop();
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [stateRef]);
-
-  return (
-    <div className="text-white font-black tracking-tighter text-2xl sm:text-4xl leading-none"
-         style={{
-           fontFamily: 'var(--font-display, Anton, sans-serif)',
-           minWidth: '60px',
-           textAlign: 'right',
-           color: color,
-           textShadow: shadow
-         }}
-    >
-      {text}
-    </div>
-  );
-};
-
 // Helper functions for spawner direction indicator and offscreen pointer calculations
 function isSpawnerVisible(
   spawner: { x: number; y: number; radius?: number },
@@ -2652,7 +2589,6 @@ export default function GameCanvas() {
   const hudTopLeftRef = useRef<HTMLDivElement>(null);
   const hudTopRightRef = useRef<HTMLDivElement>(null);
   const hudTopCenterRef = useRef<HTMLDivElement>(null);
-  const hudBottomCenterRef = useRef<HTMLDivElement>(null);
   const hudBottomLeftRef = useRef<HTMLDivElement>(null);
   const hudBottomRightRef = useRef<HTMLDivElement>(null);
   const pointerSafeRectRef = useRef<PointerSafeRect | null>(null);
@@ -2691,7 +2627,7 @@ export default function GameCanvas() {
       }
     }
 
-    const bottomRefs = [hudBottomCenterRef, hudBottomLeftRef, hudBottomRightRef];
+    const bottomRefs = [hudBottomLeftRef, hudBottomRightRef];
     for (const r of bottomRefs) {
       if (r.current) {
         const domRect = r.current.getBoundingClientRect();
@@ -2886,7 +2822,7 @@ export default function GameCanvas() {
     return true;
   }, []);
 
-  const [uiState, setUiState] = useState<{ status: 'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER' | 'VICTORY' | 'LOBBY'; score: number; deviceType: 'desktop' | 'mobile'; activeTool: 'weapon' | 'special' | 'build'; blocks: number; spawnersLeft: number; mapId: string; hardMode: boolean; gameMode: GameMode; hp: number; maxHp: number; level: number; chainProgress: number; ownedAbilities: AbilityOwnership; buttonCounters: { damage: number; special: number; build: number; convert: number } }>({ status: 'MENU', score: 0, deviceType: 'desktop', activeTool: 'special', blocks: 50, spawnersLeft: 0, mapId: MEMORY_DEFAULT_MAP_ID, hardMode: false, gameMode: 'normal', hp: MEMORY_ARENA_CONFIG.player.maxHp, maxHp: MEMORY_ARENA_CONFIG.player.maxHp, level: 1, chainProgress: 0, ownedAbilities: createEmptyAbilityOwnership(), buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 } });
+  const [uiState, setUiState] = useState<{ status: 'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER' | 'VICTORY' | 'LOBBY'; score: number; deviceType: 'desktop' | 'mobile'; activeTool: 'weapon' | 'special' | 'build'; blocks: number; spawnersLeft: number; mapId: string; hardMode: boolean; gameMode: GameMode; hp: number; maxHp: number; level: number; chainProgress: number; ownedAbilities: AbilityOwnership; buttonCounters: { damage: number; special: number; build: number; convert: number } }>({ status: 'MENU', score: 0, deviceType: 'desktop', activeTool: 'weapon', blocks: 50, spawnersLeft: 0, mapId: MEMORY_DEFAULT_MAP_ID, hardMode: false, gameMode: 'normal', hp: MEMORY_ARENA_CONFIG.player.maxHp, maxHp: MEMORY_ARENA_CONFIG.player.maxHp, level: 1, chainProgress: 0, ownedAbilities: createEmptyAbilityOwnership(), buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 } });
   const [soloWaveUi, setSoloWaveUi] = useState<SoloWaveState>(createInitialSoloWaveState);
   const uiRef = useRef(uiState);
   uiRef.current = uiState;
@@ -4876,7 +4812,7 @@ export default function GameCanvas() {
         }
         const upgradeRankTotal = PLAYER_UPGRADE_STATS.reduce(
           (total, stat) => total + rawState.playerUpgradeRanks[stat],
-          0,
+          version < 14 ? rawState.playerUpgradeRanks.cooldown : 0,
         );
         if (upgradeRankTotal !== rawState.chain.level - 1) {
           throw new Error("INVALID SAVE FILE");
@@ -5654,39 +5590,11 @@ export default function GameCanvas() {
         ])) as FactionEmergencyStates
       : createInitialFactionEmergencyStates(loadNow);
 
-    let specialCooldown = 0;
-    if (reconstructedDash.active) {
-      specialCooldown = Math.max(0, Math.ceil((reconstructedDash.endTime - loadNow) / 1000));
-    } else if (reconstructedDash.endTime > 0) {
-      specialCooldown = Math.max(0, Math.ceil((DASH_COOLDOWN - (loadNow - reconstructedDash.endTime)) / 1000));
-    } else {
-      specialCooldown = Math.max(0, Math.ceil((DASH_COOLDOWN - (loadNow - reconstructedDash.lastTime)) / 1000));
-    }
-
-    let buildCooldown = 0;
-    if (reconstructedBuild.active) {
-      buildCooldown = Math.max(0, Math.ceil((reconstructedBuild.endTime - loadNow) / 1000));
-    } else if (reconstructedBuild.endTime > 0) {
-      buildCooldown = Math.max(0, Math.ceil((BUILD_COOLDOWN - (loadNow - reconstructedBuild.endTime)) / 1000));
-    } else {
-      buildCooldown = Math.max(0, Math.ceil((BUILD_COOLDOWN - (loadNow - reconstructedBuild.lastTime)) / 1000));
-    }
-
-    const memorySharedCooldownMs = reconstructedPlayerLevelStats.cooldownSeconds * 1000;
-    const memorySharedCooldown = Math.max(
-      0,
-      Math.ceil((memorySharedCooldownMs - (loadNow - reconstructedAbilityLastUsed)) / 1000),
-    );
-    if (isMemorySave) {
-      specialCooldown = memorySharedCooldown;
-      buildCooldown = memorySharedCooldown;
-    }
-
     const cleanUi = {
       status: 'PAUSED' as const,
       score: rawUi.score !== undefined ? rawUi.score : 0,
       deviceType: isMobileRef.current ? ('mobile' as const) : ('desktop' as const),
-      activeTool: rawUi.activeTool === 'build' ? ('build' as const) : ('special' as const),
+      activeTool: 'weapon' as const,
       blocks: rawUi.blocks !== undefined ? rawUi.blocks : 50,
       spawnersLeft: 0,
       mapId: mapId,
@@ -5697,10 +5605,10 @@ export default function GameCanvas() {
       level: reconstructedChain.level,
       chainProgress: reconstructedChain.progress,
       buttonCounters: {
-        damage: isMemorySave ? memorySharedCooldown : 0,
-        special: specialCooldown,
-        build: buildCooldown,
-        convert: isMemorySave ? memorySharedCooldown : 0,
+        damage: 0,
+        special: 0,
+        build: 0,
+        convert: 0,
       },
       ownedAbilities: { ...reconstructedAbilityOwnership },
     };
@@ -5796,6 +5704,9 @@ export default function GameCanvas() {
       cleanState.camera.y = Math.max(0, cleanState.player.y - cleanState.camera.height / 2);
       cleanState.chain = { ...cleanState.chain, target: null, matchingShape: null, matchingColor: null, progress: 0 };
     }
+    clearLegacyAbilities(cleanState);
+    cleanUi.ownedAbilities = createEmptyAbilityOwnership();
+    cleanUi.buttonCounters = { damage: 0, special: 0, build: 0, convert: 0 };
     const loadedMap = isMemorySave && version < 12 ? MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID] : mapDef;
     const loadedWalls = isMemorySave ? getSoloArenaFrame(cleanState.soloWave).walls : loadedMap.walls;
     if (isMemorySave) {
@@ -6608,7 +6519,7 @@ export default function GameCanvas() {
 
     const uiHardMode = isMultiplayer ? (selectedGameMode !== 'normal') : isHardMode;
     const objectiveSpawnersLeft = 0;
-    const newUi = { status: 'PLAYING' as const, score: 0, deviceType: dType, activeTool: 'special' as const, blocks: 50, spawnersLeft: objectiveSpawnersLeft, mapId: selectedMapId, hardMode: uiHardMode, gameMode: selectedGameMode, hp: state.player.hp, maxHp: state.player.maxHp, level: state.chain.level, chainProgress: state.chain.progress, ownedAbilities: { ...state.abilityOwnership }, buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 } };
+    const newUi = { status: 'PLAYING' as const, score: 0, deviceType: dType, activeTool: 'weapon' as const, blocks: 50, spawnersLeft: objectiveSpawnersLeft, mapId: selectedMapId, hardMode: uiHardMode, gameMode: selectedGameMode, hp: state.player.hp, maxHp: state.player.maxHp, level: state.chain.level, chainProgress: state.chain.progress, ownedAbilities: { ...state.abilityOwnership }, buttonCounters: { damage: 0, special: 0, build: 0, convert: 0 } };
     uiRef.current = newUi;
     setUiState(newUi);
 
@@ -6792,7 +6703,7 @@ export default function GameCanvas() {
       state.enemies = [];
       state.bouncers = [];
       state.zones = [];
-      
+
       const mapDef = MEMORY_MAPS[selectedMapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID];
       const resetTime = performance.now();
       state.memoryMode = true;
@@ -6868,7 +6779,7 @@ export default function GameCanvas() {
         status: 'PLAYING' as const,
         score: 0,
         deviceType: dType,
-        activeTool: 'special' as const,
+        activeTool: 'weapon' as const,
         blocks: 50,
         spawnersLeft: 0,
         mapId: selectedMapId,
@@ -7037,7 +6948,7 @@ export default function GameCanvas() {
 
          // 2. builder is alive and connected
          if (matchPlayer.isDead || matchPlayer.isDisconnected) return false;
-         
+
          // If guest, check s.multiplayerPlayers[builderId].isDead
          if (builderId !== hostId) {
              const clientPlayer = s.multiplayerPlayers[builderId];
@@ -7252,345 +7163,6 @@ export default function GameCanvas() {
          console.error("Error in tryPlaceBuildBlock:", e);
      }
   }, [authMultiplayerPlaceBlock]);
-
-  const applySpecialAbility = useCallback((x: number, y: number, colorIdx: number, ownerId: string) => {
-     if (isOpeningProtectionActiveLocal()) return;
-     const radius = 240;
-     const s = stateRef.current;
-
-     s.zones.push({
-         x: x,
-         y: y,
-         innerRadius: 0,
-         outerRadius: radius,
-         duration: 6000,
-         spawnTime: performance.now(),
-         ownerId: ownerId,
-         colorIdx: colorIdx,
-         type: 'repel'
-     });
-     const pDef = PLAYER_COLORS[colorIdx !== undefined ? colorIdx : 0] || PLAYER_COLORS[0];
-     s.shockwaves.push({ x: x, y: y, color: pDef.n, maxRadius: radius, age: 0, maxAge: 0.5, thickness: 30 });
-     s.shockwaves.push({ x: x, y: y, color: '#ffffff', maxRadius: radius * 0.8, age: 0, maxAge: 0.3, thickness: 10 });
-  }, []);
-
-  const requestDamageActivation = useCallback((currentTime: number) => {
-    if (isOpeningBlocked(currentTime)) return;
-    const state = stateRef.current;
-    if (!state.memoryMode || mpRef.current.roomId || uiRef.current.status !== 'PLAYING') return;
-    if (!state.abilityOwnership.damage) return;
-    const cooldownMs = getPlayerLevelStats(state.playerUpgradeRanks).cooldownSeconds * 1000;
-    if (currentTime - state.player.abilityLastUsed < cooldownMs) return;
-
-    state.player.abilityLastUsed = currentTime;
-    state.damageWaves.push({
-      x: state.player.x,
-      y: state.player.y,
-      age: 0,
-      maxAge: DAMAGE_WAVE_DURATION,
-      maxRadius: DAMAGE_WAVE_RADIUS,
-      previousRadius: 0,
-    });
-    state.shockwaves.push({
-      x: state.player.x,
-      y: state.player.y,
-      color: MEMORY_ARENA_PALETTE.factions.red.bright,
-      maxRadius: 95,
-      age: 0,
-      maxAge: 0.22,
-      thickness: 24,
-    });
-    state.shake = Math.max(state.shake, 12);
-  }, []);
-
-  const requestConversionActivation = useCallback((currentTime: number) => {
-    if (isOpeningBlocked(currentTime)) return;
-    const state = stateRef.current;
-    if (!state.memoryMode || mpRef.current.roomId || uiRef.current.status !== 'PLAYING') return;
-    if (!state.abilityOwnership.convert) return;
-    const cooldownMs = getPlayerLevelStats(state.playerUpgradeRanks).cooldownSeconds * 1000;
-    if (currentTime - state.player.abilityLastUsed < cooldownMs) return;
-
-    state.player.abilityLastUsed = currentTime;
-    let convertedCount = 0;
-    let convertedBulletCount = 0;
-
-    for (const enemy of state.enemies) {
-      if (enemy.isPlayerAlly) continue;
-      if (Math.hypot(enemy.x - state.player.x, enemy.y - state.player.y) > CONVERSION_RADIUS) continue;
-
-      enemy.isPlayerAlly = true;
-      enemy.conversionPullUntil = currentTime + CONVERSION_PULL_DURATION_MS;
-      enemy.lastShoot = currentTime;
-      enemy.dashDx = 0;
-      enemy.dashDy = 0;
-      if (enemy.shape === 'triangle') {
-        enemy.triangleAi = createTriangleAiState(currentTime);
-      }
-      convertedCount++;
-
-      for (let particleIndex = 0; particleIndex < 8; particleIndex++) {
-        const angle = Math.random() * Math.PI * 2;
-        const speed = 45 + Math.random() * 90;
-        state.particles.push({
-          x: enemy.x,
-          y: enemy.y,
-          vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed,
-          life: 0,
-          maxLife: 0.3 + Math.random() * 0.3,
-          color: PLAYER_COLOR_HEX,
-          radius: 1.5 + Math.random() * 2.5,
-        });
-      }
-    }
-
-    for (const bullet of state.bullets) {
-      if (Math.hypot(bullet.x - state.player.x, bullet.y - state.player.y) > CONVERSION_RADIUS) continue;
-      if (bullet.isPlayer && !bullet.isNeutral) continue;
-
-      bullet.isPlayer = true;
-      bullet.isPlayerAlly = false;
-      bullet.isNeutral = false;
-      bullet.ownerId = 'local';
-      bullet.colorIdx = 0;
-      bullet.factionColor = undefined;
-      convertedBulletCount++;
-
-      for (let particleIndex = 0; particleIndex < 3; particleIndex++) {
-        const angle = Math.random() * Math.PI * 2;
-        const speed = 25 + Math.random() * 55;
-        state.particles.push({
-          x: bullet.x,
-          y: bullet.y,
-          vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed,
-          life: 0,
-          maxLife: 0.18 + Math.random() * 0.16,
-          color: PLAYER_COLOR_HEX,
-          radius: 1 + Math.random() * 1.5,
-        });
-      }
-    }
-
-    state.shockwaves.push({
-      x: state.player.x,
-      y: state.player.y,
-      color: MEMORY_ARENA_PALETTE.factions.green.bright,
-      maxRadius: CONVERSION_RADIUS,
-      age: 0,
-      maxAge: 0.75,
-      thickness: 18,
-    });
-    state.shockwaves.push({
-      x: state.player.x,
-      y: state.player.y,
-      color: PLAYER_COLOR_HEX,
-      maxRadius: CONVERSION_RADIUS * 0.82,
-      age: 0,
-      maxAge: 0.58,
-      thickness: 7,
-    });
-    state.floatingTexts.push({
-      x: state.player.x,
-      y: state.player.y - 38,
-      text: convertedCount + convertedBulletCount > 0
-        ? `${convertedCount} ALLIES // ${convertedBulletCount} BULLETS`
-        : 'NO TARGETS',
-      age: 0,
-      maxAge: 1.15,
-      color: PLAYER_COLOR_HEX,
-      vy: -32,
-    });
-    state.shake = Math.max(state.shake, convertedCount + convertedBulletCount > 0 ? 14 : 6);
-  }, []);
-
-  const isGuestSpecialReady = useCallback((currentTime: number) => {
-     const socketId = socketRef.current?.id;
-     if (!socketId) return false;
-     const auth = stateRef.current.playerActionAuthority?.[socketId];
-     if (!auth) return false;
-     if (typeof auth.specialActiveUntil !== 'number' || !Number.isFinite(auth.specialActiveUntil)) return false;
-     if (typeof auth.specialReadyAt !== 'number' || !Number.isFinite(auth.specialReadyAt)) return false;
-     return currentTime >= auth.specialReadyAt && currentTime >= auth.specialActiveUntil;
-  }, []);
-
-  const isGuestBuildReady = useCallback((currentTime: number) => {
-     const socketId = socketRef.current?.id;
-     if (!socketId) return false;
-     const auth = stateRef.current.playerActionAuthority?.[socketId];
-     if (!auth) return false;
-     if (typeof auth.buildActiveUntil !== 'number' || !Number.isFinite(auth.buildActiveUntil)) return false;
-     if (typeof auth.buildReadyAt !== 'number' || !Number.isFinite(auth.buildReadyAt)) return false;
-     return currentTime >= auth.buildReadyAt && currentTime >= auth.buildActiveUntil;
-  }, []);
-
-  const requestSpecialActivation = useCallback((currentTime: number) => {
-     if (isOpeningBlocked(currentTime)) return;
-     if (mpRef.current.roomId && (!mpRef.current.isConnected || awaitingResumeSnapshotRef.current)) return;
-     const isLocalMenuOpen = mpRef.current.roomId && (mpMenuOpenRef.current || confirmResignRef.current);
-     if (isLocalMenuOpen) return;
-
-     if (isOpeningProtectionActiveLocal(currentTime)) return;
-
-     const isMultiplayer = Boolean(mpRef.current.roomId);
-     const isHost = mpRef.current.isHost;
-
-     if (!isMultiplayer) {
-         const dash = stateRef.current.player.dash;
-         const endTime = dash.endTime || 0;
-         const memoryCooldownMs = getPlayerLevelStats(stateRef.current.playerUpgradeRanks).cooldownSeconds * 1000;
-         const memoryAbilityReady = currentTime - stateRef.current.player.abilityLastUsed >= memoryCooldownMs;
-         const canActivate = stateRef.current.memoryMode
-           ? stateRef.current.abilityOwnership.special && !dash.active && memoryAbilityReady
-           : !dash.active && (endTime === 0 || currentTime - endTime >= DASH_COOLDOWN);
-         if (canActivate) {
-             dash.active = true;
-             dash.endTime = currentTime + 6000;
-             dash.lastTime = currentTime;
-             if (stateRef.current.memoryMode) stateRef.current.player.abilityLastUsed = currentTime;
-
-             const finalX = stateRef.current.player.x;
-             const finalY = stateRef.current.player.y;
-             const cIdx = playerProfileRef.current.colorIdx;
-             applySpecialAbility(finalX, finalY, cIdx, 'local');
-             trackGameplayForOwner('local', 'special_activated', {});
-         }
-     } else if (isHost) {
-         const dash = stateRef.current.player.dash;
-         const endTime = dash.endTime || 0;
-         if (!dash.active && (endTime === 0 || currentTime - endTime >= DASH_COOLDOWN)) {
-             dash.active = true;
-             dash.endTime = currentTime + 6000;
-             dash.lastTime = currentTime;
-
-             const myId = socketRef.current?.id || 'host';
-             const finalX = stateRef.current.player.x;
-             const finalY = stateRef.current.player.y;
-             const cIdx = playerProfileRef.current.colorIdx;
-
-             applySpecialAbility(finalX, finalY, cIdx, myId);
-
-             const auth = getOrInitializeAuthority(myId);
-             auth.specialActiveUntil = currentTime + 6000;
-             auth.specialReadyAt = currentTime + 6000 + DASH_COOLDOWN;
-
-             stateRef.current.forceBroadcast = true;
-             trackGameplayForOwner(myId, 'special_activated', {});
-         }
-     } else {
-         const socket = socketRef.current;
-         const roundId = activeMultiplayerRoundIdRef.current;
-         const isRoundValid = typeof roundId === 'number' && Number.isFinite(roundId) && Number.isInteger(roundId) && roundId > 0;
-         const socketId = socket?.id;
-
-         if (socket && socket.connected && socketId && socketId !== '' &&
-             isRoundValid && uiRef.current.status === 'PLAYING') {
-
-             const isReady = isGuestSpecialReady(currentTime);
-             if (isReady) {
-                 const p = pendingSpecialRequestRef.current;
-                 const isSpam = p && p.roundId === roundId && (currentTime - p.requestedAt < 1500);
-                 if (!isSpam) {
-                     pendingSpecialRequestRef.current = {
-                         roundId,
-                         requestedAt: currentTime
-                     };
-                     socket.emit('client_action', mpRef.current.roomId, {
-                         roundId,
-                         type: 'special'
-                     });
-                 }
-             }
-         }
-     }
-  }, [applySpecialAbility, isGuestSpecialReady, trackGameplayForOwner]);
-
-  const requestBuildActivation = useCallback((currentTime: number) => {
-     if (isOpeningBlocked(currentTime)) return;
-     if (mpRef.current.roomId && (!mpRef.current.isConnected || awaitingResumeSnapshotRef.current)) return;
-     const isLocalMenuOpen = mpRef.current.roomId && (mpMenuOpenRef.current || confirmResignRef.current);
-     if (isLocalMenuOpen) return;
-
-     if (isOpeningProtectionActiveLocal(currentTime)) return;
-
-     const isMultiplayer = Boolean(mpRef.current.roomId);
-     const isHost = mpRef.current.isHost;
-
-     if (!isMultiplayer) {
-         const build = stateRef.current.player.build;
-         const endTime = build.endTime || 0;
-         const memoryCooldownMs = getPlayerLevelStats(stateRef.current.playerUpgradeRanks).cooldownSeconds * 1000;
-         const memoryAbilityReady = currentTime - stateRef.current.player.abilityLastUsed >= memoryCooldownMs;
-         const canActivate = stateRef.current.memoryMode
-           ? stateRef.current.abilityOwnership.build && !build.active && memoryAbilityReady
-           : !build.active && (endTime === 0 || currentTime - endTime >= BUILD_COOLDOWN);
-         if (canActivate) {
-             build.active = true;
-             build.endTime = currentTime + 8000;
-             build.lastTime = currentTime;
-             if (stateRef.current.memoryMode) stateRef.current.player.abilityLastUsed = currentTime;
-
-             const gridX = Math.round(stateRef.current.player.x / 40) * 40;
-             const gridY = Math.round(stateRef.current.player.y / 40) * 40;
-             build.lastBlockX = gridX;
-             build.lastBlockY = gridY;
-
-             const cIdx = playerProfileRef.current.colorIdx;
-             tryPlaceBuildBlock(currentTime, gridX, gridY, cIdx);
-             trackGameplayForOwner('local', 'build_activated', {});
-         }
-     } else if (isHost) {
-         const build = stateRef.current.player.build;
-         const endTime = build.endTime || 0;
-         if (!build.active && (endTime === 0 || currentTime - endTime >= BUILD_COOLDOWN)) {
-             build.active = true;
-             build.endTime = currentTime + 8000;
-             build.lastTime = currentTime;
-
-             const myId = socketRef.current?.id || 'host';
-             const gridX = Math.round(stateRef.current.player.x / 40) * 40;
-             const gridY = Math.round(stateRef.current.player.y / 40) * 40;
-             build.lastBlockX = gridX;
-             build.lastBlockY = gridY;
-
-             const cIdx = playerProfileRef.current.colorIdx;
-             authMultiplayerPlaceBlock(myId, { x: stateRef.current.player.x, y: stateRef.current.player.y }, gridX, gridY, cIdx, currentTime);
-
-             const auth = getOrInitializeAuthority(myId);
-             auth.buildActiveUntil = currentTime + 8000;
-             auth.buildReadyAt = currentTime + 8000 + BUILD_COOLDOWN;
-
-             stateRef.current.forceBroadcast = true;
-             trackGameplayForOwner(myId, 'build_activated', {});
-         }
-     } else {
-         const socket = socketRef.current;
-         const roundId = activeMultiplayerRoundIdRef.current;
-         const isRoundValid = typeof roundId === 'number' && Number.isFinite(roundId) && Number.isInteger(roundId) && roundId > 0;
-         const socketId = socket?.id;
-
-         if (socket && socket.connected && socketId && socketId !== '' &&
-             isRoundValid && uiRef.current.status === 'PLAYING') {
-
-             const isReady = isGuestBuildReady(currentTime);
-             if (isReady) {
-                 const p = pendingBuildRequestRef.current;
-                 const isSpam = p && p.roundId === roundId && (currentTime - p.requestedAt < 1500);
-                 if (!isSpam) {
-                     pendingBuildRequestRef.current = {
-                         roundId,
-                         requestedAt: currentTime
-                     };
-                     socket.emit('client_action', mpRef.current.roomId, {
-                         roundId,
-                         type: 'build_start'
-                     });
-                 }
-             }
-         }
-     }
-  }, [tryPlaceBuildBlock, authMultiplayerPlaceBlock, isGuestBuildReady, trackGameplayForOwner]);
 
   const handleHostRoleTransition = useCallback((newIsHost: boolean) => {
     const oldIsHost = mpRef.current.isHost;
@@ -9101,49 +8673,7 @@ export default function GameCanvas() {
                  status: 'accepted',
                  authoritativeBulletId
                });
-          } else if (action.type === 'special') {
-              const currentTime = performance.now();
-              const auth = getOrInitializeAuthority(clientId);
-
-              if (currentTime >= auth.specialReadyAt) {
-                  auth.specialActiveUntil = currentTime + 6000;
-                  auth.specialReadyAt = currentTime + 6000 + DASH_COOLDOWN;
-                  clientPlayer.isDash = true;
-
-                  // Use authoritative player position and frozen color
-                  applySpecialAbility(clientPlayer.x, clientPlayer.y, matchPlayer.colorIdx, clientId);
-                  trackGameplayForOwner(clientId, 'special_activated', {});
-              }
-              stateRef.current.forceBroadcast = true;
-          } else if (action.type === 'build_start') {
-              const currentTime = performance.now();
-              const auth = getOrInitializeAuthority(clientId);
-
-              if (currentTime >= auth.buildReadyAt) {
-                  auth.buildActiveUntil = currentTime + 8000;
-                  auth.buildReadyAt = currentTime + 8000 + BUILD_COOLDOWN;
-                  trackGameplayForOwner(clientId, 'build_activated', {});
-              }
-              stateRef.current.forceBroadcast = true;
-          } else if (action.type === 'build') {
-              const currentTime = performance.now();
-              const auth = getOrInitializeAuthority(clientId);
-              if (currentTime >= auth.buildActiveUntil) return;
-
-              if (action.x === undefined || typeof action.x !== 'number' || !Number.isFinite(action.x) ||
-                  action.y === undefined || typeof action.y !== 'number' || !Number.isFinite(action.y)) return;
-
-              authMultiplayerPlaceBlock(
-                  clientId,
-                  clientPlayer,
-                  action.x,
-                  action.y,
-                  matchPlayer.colorIdx,
-                  currentTime
-              );
-          } else if (action.type === 'build_remove') {
-              // Harmless ignored legacy action: do not mutate authoritative game state
-          }
+          } else {}
         }
     });
 
@@ -9334,27 +8864,6 @@ export default function GameCanvas() {
       if (key === 'd') state.keys.d = true;
 
       const currentTime = performance.now();
-
-      if (key === '1') {
-         if (uiRef.current.status === 'PLAYING') {
-            requestSpecialActivation(currentTime);
-         }
-      }
-      if (key === '2') {
-         if (uiRef.current.status === 'PLAYING') {
-            requestBuildActivation(currentTime);
-         }
-      }
-      if (key === '3') {
-         if (uiRef.current.status === 'PLAYING') {
-            requestDamageActivation(currentTime);
-         }
-      }
-      if (key === '4') {
-         if (uiRef.current.status === 'PLAYING') {
-            requestConversionActivation(currentTime);
-         }
-      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -9764,7 +9273,6 @@ export default function GameCanvas() {
         const liveIds = new Set<string>(['local-player']);
         for (const enemy of state.enemies) if (enemy.id) liveIds.add(enemy.id);
         for (const bouncer of state.bouncers) if (bouncer.id) liveIds.add(bouncer.id);
-        for (const pickup of state.abilityPickups) liveIds.add(`pickup:${pickup.id}`);
         for (const id of Object.keys(state.multiplayerPlayers)) liveIds.add(`player:${id}`);
         for (const id of liveIds) {
           if (!entitySpawnTimesRef.current.has(id)) entitySpawnTimesRef.current.set(id, currentTime);
@@ -9886,7 +9394,6 @@ export default function GameCanvas() {
             if (activeWalls !== nextWalls) {
               activeWalls = nextWalls;
               Object.assign(state.player, findClearArenaPosition(state.player, activeWalls));
-              for (const pickup of state.abilityPickups) Object.assign(pickup, findClearArenaPosition(pickup, activeWalls));
               state.blocks = state.blocks.filter(block => isArenaPositionClear(block.x, block.y, block.size / Math.SQRT2, activeWalls));
             }
             if (state.soloWave.phase === 'active') {
@@ -10017,161 +9524,6 @@ export default function GameCanvas() {
           }
           return true;
         };
-
-        const maybeSpawnAbilityDrop = (enemy: MemoryEnemy, credit: AbilityKillCredit) => {
-          if (!state.memoryMode || !enemy.factionColor) return;
-          const result = registerAbilityDropKill({
-            factionColor: enemy.factionColor,
-            credit,
-            defeatedWasPlayerAlly: Boolean(enemy.isPlayerAlly),
-            ownership: state.abilityOwnership,
-            progress: state.abilityDropProgress,
-            hasActivePickup: state.abilityPickups.some(pickup => pickup.factionColor === enemy.factionColor),
-            randomValue: Math.random(),
-          });
-          state.abilityDropProgress = result.progress;
-          if (!result.shouldDrop) return;
-
-          state.abilityPickups.push({
-            id: `ability_${state.nextEntityId++}`,
-            x: enemy.x,
-            y: enemy.y,
-            radius: MEMORY_ARENA_CONFIG.abilityDrops.pickupRadius,
-            factionColor: enemy.factionColor,
-            abilityId: result.abilityId,
-          });
-          const color = ENEMY_COLOR_HEX[enemy.factionColor];
-          state.shockwaves.push({
-            x: enemy.x,
-            y: enemy.y,
-            color,
-            maxRadius: 92,
-            age: 0,
-            maxAge: 0.45,
-            thickness: 8,
-          });
-        };
-
-        // --- LOGIC UPDATES ---
-
-        if (state.memoryMode && STATUS === 'PLAYING' && state.abilityPickups.length > 0) {
-          let ownershipChanged = false;
-          for (let pickupIndex = state.abilityPickups.length - 1; pickupIndex >= 0; pickupIndex--) {
-            const pickup = state.abilityPickups[pickupIndex];
-            if (
-              Math.hypot(state.player.x - pickup.x, state.player.y - pickup.y) >
-              state.player.radius + pickup.radius + MEMORY_ARENA_CONFIG.abilityDrops.collectionPadding
-            ) continue;
-
-            state.abilityPickups.splice(pickupIndex, 1);
-            const collected = collectAbilityPickup(
-              state.abilityOwnership,
-              pickup.abilityId,
-              state.player.abilityLastUsed,
-            );
-            state.abilityOwnership = collected.ownership;
-            state.player.abilityLastUsed = collected.abilityLastUsed;
-            ownershipChanged = true;
-            const color = ENEMY_COLOR_HEX[pickup.factionColor];
-            spawnParticles(pickup.x, pickup.y, color, 28);
-            state.shockwaves.push({
-              x: pickup.x,
-              y: pickup.y,
-              color,
-              maxRadius: 125,
-              age: 0,
-              maxAge: 0.5,
-              thickness: 12,
-            });
-          }
-          if (ownershipChanged) {
-            const nextUi = { ...uiRef.current, ownedAbilities: { ...state.abilityOwnership } };
-            uiRef.current = nextUi;
-            setUiState(nextUi);
-          }
-        }
-
-        // The red damage ability is a moving blast front. It removes entities
-        // only when the visible ring reaches them; spawners are never queried.
-        for (let waveIndex = state.damageWaves.length - 1; waveIndex >= 0; waveIndex--) {
-          const wave = state.damageWaves[waveIndex];
-          const previousRadius = wave.previousRadius;
-          wave.age = Math.min(wave.maxAge, wave.age + dt);
-          const progress = Math.min(1, wave.age / wave.maxAge);
-          const currentRadius = wave.maxRadius * (1 - Math.pow(1 - progress, 3));
-
-          state.bullets = state.bullets.filter((bullet) => {
-            const distance = Math.hypot(bullet.x - wave.x, bullet.y - wave.y);
-            const crossedByWave = distance - bullet.radius <= currentRadius && distance + bullet.radius >= previousRadius;
-            if (crossedByWave) {
-              spawnParticles(bullet.x, bullet.y, MEMORY_ARENA_PALETTE.factions.red.bright, 5);
-            }
-            return !crossedByWave;
-          });
-
-          const crossedEnemies = state.enemies
-            .map((enemy) => ({
-              enemy,
-              distance: Math.hypot(enemy.x - wave.x, enemy.y - wave.y),
-            }))
-            .filter(({ enemy, distance }) =>
-              !enemy.isPlayerAlly &&
-              distance - enemy.radius <= currentRadius && distance + enemy.radius >= previousRadius)
-            .sort((a, b) => a.distance - b.distance);
-
-          if (crossedEnemies.length > 0) {
-            const defeatedEnemies = new Set(crossedEnemies.map(({ enemy }) => enemy));
-            state.enemies = state.enemies.filter((enemy) => !defeatedEnemies.has(enemy));
-
-            for (const { enemy } of crossedEnemies) {
-              maybeSpawnAbilityDrop(enemy, 'player');
-              const defeatedColor = enemy.factionColor ? ENEMY_COLOR_HEX[enemy.factionColor] : '#ff3333';
-              spawnDestructionBurst(state, enemy.x, enemy.y, defeatedColor, 1, Boolean(shouldReduceMotion));
-
-              if (state.memoryMode && state.soloWave.phase === 'active' && enemy.shape && enemy.factionColor) {
-                const chainTransition = registerPlayerEnemyKill(state.chain, {
-                  shape: enemy.shape,
-                  color: enemy.factionColor,
-                });
-                state.chain = chainTransition.state;
-                if (chainTransition.result === 'completed') {
-                  state.soloWave = registerSoloWaveStreak(state.soloWave);
-                  if (state.soloWave.phase === 'break') {
-                    explodeRemainingWaveEnemies();
-                    showArenaCue('WAVE CLEAR', 'ARENA RECONSTRUCTING');
-                  }
-                  setSoloWaveUi({ ...state.soloWave });
-                }
-              }
-            }
-
-            state.shake = Math.max(state.shake, 10);
-            setUiState((previousUi) => {
-              const newScore = previousUi.score + crossedEnemies.length * 100;
-              let newBlocks = previousUi.blocks;
-              while (newScore >= state.nextBlockScore) {
-                newBlocks++;
-                state.nextBlockScore += 100;
-              }
-              const nextUi = {
-                ...previousUi,
-                score: newScore,
-                blocks: newBlocks,
-                hp: state.player.hp,
-                maxHp: state.player.maxHp,
-                level: state.chain.level,
-                chainProgress: state.chain.progress,
-              };
-              uiRef.current = nextUi;
-              return nextUi;
-            });
-          }
-
-          wave.previousRadius = currentRadius;
-          if (progress >= 1) {
-            state.damageWaves.splice(waveIndex, 1);
-          }
-        }
 
         // Remote bullets are rendered from the reliable buffered host timeline.
         // A guest's own bullet keeps one continuous local-only visual; the host
@@ -10793,234 +10145,6 @@ export default function GameCanvas() {
           Boolean(mpRef.current.roomId && mpRef.current.isHost);
 
         if (state.memoryMode && MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled) {
-          const emergencyConfig = MEMORY_ARENA_CONFIG.factionEmergency;
-          for (const faction of ENEMY_FACTIONS) {
-            const members = state.enemies.filter(enemy => !enemy.isPlayerAlly && enemy.factionColor === faction);
-            const playerAllies = state.enemies.filter(enemy => enemy.isPlayerAlly).length;
-            const largestHostileFaction = Math.max(
-              playerAllies,
-              ...ENEMY_FACTIONS
-                .filter(otherFaction => otherFaction !== faction)
-                .map(otherFaction => state.enemies.filter(enemy => (
-                  !enemy.isPlayerAlly && enemy.factionColor === otherFaction
-                )).length),
-            );
-            const ability = FACTION_EMERGENCY_ABILITY_BY_FACTION[faction];
-            const transition = advanceFactionEmergencyState(state.factionEmergencies[faction], {
-              now: currentTime,
-              deltaSeconds: dt,
-              nearbyFriendlies: members.length,
-              nearbyHostiles: largestHostileFaction,
-              factionAlive: members.length > 0,
-              abilityAvailable: members.length > 0,
-              cooldownMs: memoryThreat.factionAbilityCooldownMs,
-            });
-            state.factionEmergencies[faction] = transition.state;
-
-            if (transition.beganTelegraph) {
-              let yellowSlots = new Map<MemoryEnemy, { x: number; y: number }>();
-              if (ability === 'buildWall' && members.length > 0) {
-                const centerX = members.reduce((sum, enemy) => sum + enemy.x, 0) / members.length;
-                const centerY = members.reduce((sum, enemy) => sum + enemy.y, 0) / members.length;
-                const hostileCandidates = state.enemies.filter(enemy => areMemoryCombatantsHostile(members[0], enemy));
-                const closestThreat = hostileCandidates.reduce<MemoryEnemy | null>((closest, enemy) => {
-                  if (!closest) return enemy;
-                  return Math.hypot(enemy.x - centerX, enemy.y - centerY) < Math.hypot(closest.x - centerX, closest.y - centerY)
-                    ? enemy
-                    : closest;
-                }, null);
-                const threatX = closestThreat?.x ?? state.player.x;
-                const threatY = closestThreat?.y ?? state.player.y;
-                const threatDistance = Math.max(1, Math.hypot(threatX - centerX, threatY - centerY));
-                const directionX = (threatX - centerX) / threatDistance;
-                const directionY = (threatY - centerY) / threatDistance;
-                const tangentX = -directionY;
-                const tangentY = directionX;
-                const orderedMembers = [...members].sort((first, second) => (
-                  (first.x - centerX) * tangentX + (first.y - centerY) * tangentY -
-                  ((second.x - centerX) * tangentX + (second.y - centerY) * tangentY)
-                ));
-                orderedMembers.forEach((enemy, index) => {
-                  const slotOffset = (index - (orderedMembers.length - 1) / 2) * emergencyConfig.yellowWallSpacing;
-                  yellowSlots.set(enemy, {
-                    x: clamp(
-                      centerX + directionX * emergencyConfig.yellowFormationForwardOffset + tangentX * slotOffset,
-                      ENEMY_RADIUS + 50,
-                      activeMapWidth - ENEMY_RADIUS - 50,
-                    ),
-                    y: clamp(
-                      centerY + directionY * emergencyConfig.yellowFormationForwardOffset + tangentY * slotOffset,
-                      ENEMY_RADIUS + 50,
-                      activeMapHeight - ENEMY_RADIUS - 50,
-                    ),
-                  });
-                });
-              }
-
-              for (const enemy of members) {
-                enemy.factionAbilityKind = ability;
-                enemy.factionAbilityActivatesAt = currentTime + emergencyConfig.telegraphMs;
-                enemy.factionAbilityEndsAt = enemy.factionAbilityActivatesAt + (
-                  ability === 'reflectionShield'
-                    ? emergencyConfig.blueShieldDurationMs
-                    : ability === 'conversionPulse'
-                      ? emergencyConfig.greenPullDurationMs
-                      : 0
-                );
-                const yellowSlot = yellowSlots.get(enemy);
-                enemy.factionAbilityTargetX = yellowSlot?.x;
-                enemy.factionAbilityTargetY = yellowSlot?.y;
-                spawnParticles(enemy.x, enemy.y, ENEMY_COLOR_HEX[faction], 4);
-              }
-            }
-
-            if (!transition.detonated) continue;
-            const casters = state.enemies.filter(enemy => (
-              !enemy.isPlayerAlly &&
-              enemy.factionColor === faction &&
-              enemy.factionAbilityKind === ability &&
-              currentTime >= (enemy.factionAbilityActivatesAt ?? Infinity)
-            ));
-
-            if (ability === 'damagePulse') {
-              const defeatedEnemies = new Set<MemoryEnemy>();
-              for (const target of state.enemies) {
-                if (!areMemoryCombatantsHostile(casters[0] ?? target, target)) continue;
-                if (casters.some(caster => Math.hypot(target.x - caster.x, target.y - caster.y) <= emergencyConfig.redPulseRadius)) {
-                  defeatedEnemies.add(target);
-                }
-              }
-              for (const target of defeatedEnemies) {
-                const defeatedColor = target.isPlayerAlly
-                  ? PLAYER_COLOR_HEX
-                  : (target.factionColor ? ENEMY_COLOR_HEX[target.factionColor] : '#ffffff');
-                spawnDestructionBurst(state, target.x, target.y, defeatedColor, 0.7, Boolean(shouldReduceMotion));
-              }
-              state.enemies = state.enemies.filter(enemy => !defeatedEnemies.has(enemy));
-              state.bullets = state.bullets.filter(bullet => {
-                const isFriendly = !bullet.isPlayer && !bullet.isPlayerAlly && bullet.factionColor === faction;
-                return isFriendly || !casters.some(caster => (
-                  Math.hypot(bullet.x - caster.x, bullet.y - caster.y) <= emergencyConfig.redPulseRadius
-                ));
-              });
-              for (const caster of casters) {
-                state.shockwaves.push({
-                  x: caster.x,
-                  y: caster.y,
-                  color: ENEMY_COLOR_HEX[faction],
-                  maxRadius: emergencyConfig.redPulseRadius,
-                  age: 0,
-                  maxAge: 0.34,
-                  thickness: 10,
-                });
-                clearMemoryEnemyFactionAbility(caster);
-              }
-              state.shake = Math.max(state.shake, Math.min(18, 7 + defeatedEnemies.size * 0.5));
-            } else if (ability === 'reflectionShield') {
-              for (const caster of casters) {
-                state.shockwaves.push({
-                  x: caster.x,
-                  y: caster.y,
-                  color: ENEMY_COLOR_HEX[faction],
-                  maxRadius: emergencyConfig.blueShieldRadius,
-                  age: 0,
-                  maxAge: 0.3,
-                  thickness: 7,
-                });
-              }
-            } else if (ability === 'conversionPulse') {
-              const claimedTargets = new Set<MemoryEnemy>();
-              for (const caster of casters) {
-                let closestTarget: MemoryEnemy | null = null;
-                let closestDistance: number = emergencyConfig.greenConversionRadius;
-                for (const candidate of state.enemies) {
-                  if (claimedTargets.has(candidate) || !areMemoryCombatantsHostile(caster, candidate)) continue;
-                  const distance = Math.hypot(candidate.x - caster.x, candidate.y - caster.y);
-                  if (distance <= closestDistance) {
-                    closestDistance = distance;
-                    closestTarget = candidate;
-                  }
-                }
-                if (closestTarget) {
-                  claimedTargets.add(closestTarget);
-                  closestTarget.isPlayerAlly = false;
-                  closestTarget.factionColor = 'green';
-                  closestTarget.conversionPullUntil = currentTime + emergencyConfig.greenPullDurationMs;
-                  closestTarget.conversionPullTargetX = caster.x;
-                  closestTarget.conversionPullTargetY = caster.y;
-                  closestTarget.lastShoot = currentTime;
-                  closestTarget.dashDx = 0;
-                  closestTarget.dashDy = 0;
-                  clearMemoryEnemyFactionAbility(closestTarget);
-                  if (closestTarget.shape === 'triangle') {
-                    closestTarget.triangleAi = createTriangleAiState(currentTime);
-                  }
-                  spawnParticles(closestTarget.x, closestTarget.y, ENEMY_COLOR_HEX.green, 8);
-                }
-              }
-              for (const bullet of state.bullets) {
-                const isGreen = !bullet.isPlayer && !bullet.isPlayerAlly && bullet.factionColor === 'green';
-                if (isGreen || !casters.some(caster => (
-                  Math.hypot(bullet.x - caster.x, bullet.y - caster.y) <= emergencyConfig.greenConversionRadius
-                ))) continue;
-                bullet.isPlayer = false;
-                bullet.isPlayerAlly = false;
-                bullet.isNeutral = false;
-                bullet.ownerId = undefined;
-                bullet.colorIdx = undefined;
-                bullet.factionColor = 'green';
-              }
-              for (const caster of casters) {
-                state.shockwaves.push({
-                  x: caster.x,
-                  y: caster.y,
-                  color: ENEMY_COLOR_HEX.green,
-                  maxRadius: emergencyConfig.greenConversionRadius,
-                  age: 0,
-                  maxAge: 0.45,
-                  thickness: 7,
-                });
-              }
-            } else if (ability === 'buildWall') {
-              for (const caster of casters) {
-                const targetX = caster.factionAbilityTargetX ?? caster.x;
-                const targetY = caster.factionAbilityTargetY ?? caster.y;
-                const gridX = Math.round(targetX / emergencyConfig.yellowWallSpacing) * emergencyConfig.yellowWallSpacing;
-                const gridY = Math.round(targetY / emergencyConfig.yellowWallSpacing) * emergencyConfig.yellowWallSpacing;
-                const halfSize = emergencyConfig.yellowWallSegmentSize / 2;
-                const blockedByWall = activeWalls.some(wall => (
-                  gridX + halfSize > wall.x && gridX - halfSize < wall.x + wall.w &&
-                  gridY + halfSize > wall.y && gridY - halfSize < wall.y + wall.h
-                ));
-                const blockedBySpawner = state.spawners.some(spawner => (
-                  Math.hypot(gridX - spawner.x, gridY - spawner.y) < spawner.radius + halfSize + 8
-                ));
-                const blockedByPlayer = Math.hypot(gridX - state.player.x, gridY - state.player.y) < state.player.radius + halfSize + 12;
-                const occupied = state.blocks.some(block => block.x === gridX && block.y === gridY);
-                if (!blockedByWall && !blockedBySpawner && !blockedByPlayer && !occupied) {
-                  state.blocks.push({
-                    x: gridX,
-                    y: gridY,
-                    size: emergencyConfig.yellowWallSegmentSize,
-                    createdAt: currentTime,
-                    ownerId: 'faction:yellow',
-                    factionColor: 'yellow',
-                    isFactionWall: true,
-                    expiresAt: currentTime + emergencyConfig.yellowWallDurationMs,
-                  });
-                  spawnParticles(gridX, gridY, ENEMY_COLOR_HEX.yellow, 8);
-                }
-                clearMemoryEnemyFactionAbility(caster);
-              }
-            }
-          }
-        } else if (state.memoryMode) {
-          for (const enemy of state.enemies) {
-            clearMemoryEnemyFactionAbility(enemy);
-          }
-        }
-
-        if (state.memoryMode && MEMORY_ARENA_CONFIG.combat.enemyFactionCombatEnabled) {
           for (const faction of ENEMY_FACTIONS) {
             const raid = state.factionRaids[faction];
             const members = state.enemies.filter(enemy => !enemy.isPlayerAlly && enemy.factionColor === faction);
@@ -11504,7 +10628,6 @@ export default function GameCanvas() {
                       enemy.radius + candidate.radius,
                     )) {
                       enemiesDefeatedByFactions.add(candidate);
-                      if (enemy.isPlayerAlly) maybeSpawnAbilityDrop(candidate, 'ally');
                       const defeatedColor = candidate.isPlayerAlly
                         ? PLAYER_COLOR_HEX
                         : ENEMY_COLOR_HEX[candidate.factionColor];
@@ -13301,7 +12424,6 @@ export default function GameCanvas() {
                 bulletDestroyed = true;
 
                 if (state.memoryMode && (bullet.isPlayer || isMemoryAllyBullet)) {
-                  maybeSpawnAbilityDrop(enemy, bullet.isPlayer ? 'player' : 'ally');
                 }
 
                 if (state.memoryMode && state.soloWave.phase === 'active' && bullet.isPlayer && enemy.shape && enemy.factionColor) {
@@ -13767,55 +12889,6 @@ export default function GameCanvas() {
           const telegraphVisual = enemy.shape === 'triangle' && enemy.triangleAi?.phase === 'telegraph'
             ? getTriangleTelegraphVisual(currentTime - enemy.triangleAi.phaseStartedAt)
             : null;
-          const factionAbilityWarning = Boolean(
-            enemy.factionAbilityKind && currentTime < (enemy.factionAbilityActivatesAt ?? 0),
-          );
-          const factionAbilityActive = Boolean(
-            enemy.factionAbilityKind &&
-            currentTime >= (enemy.factionAbilityActivatesAt ?? Infinity) &&
-            currentTime < (enemy.factionAbilityEndsAt ?? 0),
-          );
-
-          if (factionAbilityWarning) {
-            const warningProgress = Math.max(0, Math.min(1, (
-              currentTime - ((enemy.factionAbilityActivatesAt ?? currentTime) - MEMORY_ARENA_CONFIG.factionEmergency.telegraphMs)
-            ) / MEMORY_ARENA_CONFIG.factionEmergency.telegraphMs));
-            const warningRadius = enemy.radius + 34 * (1 - warningProgress) + 7;
-            ctx.save();
-            ctx.globalCompositeOperation = 'lighter';
-            ctx.globalAlpha = 0.45 + warningProgress * 0.4;
-            ctx.strokeStyle = enemyColor;
-            ctx.shadowColor = enemyColor;
-            ctx.shadowBlur = 12 + warningProgress * 14;
-            ctx.lineWidth = 2.5 + warningProgress * 2;
-            ctx.setLineDash([7, 6]);
-            ctx.lineDashOffset = -currentTime * 0.04;
-            ctx.beginPath();
-            ctx.arc(enemy.x, enemy.y, warningRadius, 0, Math.PI * 2);
-            ctx.stroke();
-
-            if (
-              enemy.factionAbilityKind === 'buildWall' &&
-              enemy.factionAbilityTargetX !== undefined &&
-              enemy.factionAbilityTargetY !== undefined
-            ) {
-              const segmentSize = MEMORY_ARENA_CONFIG.factionEmergency.yellowWallSegmentSize;
-              ctx.globalAlpha = 0.35 + warningProgress * 0.25;
-              ctx.setLineDash([4, 5]);
-              ctx.beginPath();
-              ctx.moveTo(enemy.x, enemy.y);
-              ctx.lineTo(enemy.factionAbilityTargetX, enemy.factionAbilityTargetY);
-              ctx.stroke();
-              ctx.setLineDash([]);
-              ctx.strokeRect(
-                enemy.factionAbilityTargetX - segmentSize / 2,
-                enemy.factionAbilityTargetY - segmentSize / 2,
-                segmentSize,
-                segmentSize,
-              );
-            }
-            ctx.restore();
-          }
 
           if (telegraphVisual) {
             ctx.save();
@@ -13862,43 +12935,6 @@ export default function GameCanvas() {
           ctx.fill();
 
           ctx.restore();
-
-          if (factionAbilityActive && enemy.factionAbilityKind === 'reflectionShield') {
-            const shieldRadius = MEMORY_ARENA_CONFIG.factionEmergency.blueShieldRadius;
-            ctx.save();
-            ctx.globalCompositeOperation = 'lighter';
-            ctx.fillStyle = MEMORY_ARENA_PALETTE.factions.blue.glow;
-            ctx.strokeStyle = enemyColor;
-            ctx.shadowColor = enemyColor;
-            ctx.shadowBlur = 15;
-            ctx.lineWidth = 2.5;
-            ctx.globalAlpha = 0.58 + Math.sin(currentTime * 0.012) * 0.12;
-            ctx.beginPath();
-            ctx.arc(enemy.x, enemy.y, shieldRadius, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
-            ctx.restore();
-          } else if (factionAbilityActive && enemy.factionAbilityKind === 'conversionPulse') {
-            const activeProgress = Math.max(0, Math.min(1, (
-              currentTime - (enemy.factionAbilityActivatesAt ?? currentTime)
-            ) / MEMORY_ARENA_CONFIG.factionEmergency.greenPullDurationMs));
-            ctx.save();
-            ctx.globalAlpha = (1 - activeProgress) * 0.5;
-            ctx.strokeStyle = enemyColor;
-            ctx.shadowColor = enemyColor;
-            ctx.shadowBlur = 12;
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.arc(
-              enemy.x,
-              enemy.y,
-              enemy.radius + activeProgress * (MEMORY_ARENA_CONFIG.factionEmergency.greenConversionRadius - enemy.radius),
-              0,
-              Math.PI * 2,
-            );
-            ctx.stroke();
-            ctx.restore();
-          }
           ctx.restore();
           continue;
         }
@@ -14393,114 +13429,6 @@ export default function GameCanvas() {
          ctx.restore();
       }
 
-      // Ability drops are persistent world pickups. They have no physics and
-      // render above combat until the player collects them.
-      for (const pickup of state.abilityPickups) {
-        if (openingBlocked) continue;
-        const visualRadius = pickup.radius + 10;
-        if (
-          pickup.x + visualRadius < state.camera.x ||
-          pickup.x - visualRadius > state.camera.x + state.camera.width ||
-          pickup.y + visualRadius < state.camera.y ||
-          pickup.y - visualRadius > state.camera.y + state.camera.height
-        ) continue;
-
-        const color = ENEMY_COLOR_HEX[pickup.factionColor];
-        beginSpawnDrawing(`pickup:${pickup.id}`, pickup.x, pickup.y, pickup.radius, color);
-        const phase = currentTime * 0.004 + pickup.x * 0.01 + pickup.y * 0.006;
-        const bobY = Math.sin(phase) * 2;
-        const pulse = 1 + Math.sin(phase * 1.35) * 0.035;
-
-        ctx.save();
-        ctx.translate(pickup.x, pickup.y + bobY);
-        ctx.globalAlpha = 0.12 + Math.sin(phase) * 0.025;
-        ctx.fillStyle = color;
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 22;
-        ctx.beginPath();
-        ctx.arc(0, 0, pickup.radius + 10, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-
-        ctx.save();
-        ctx.translate(pickup.x, pickup.y + bobY);
-        ctx.scale(pulse, pulse);
-        ctx.rotate(Math.PI / 4);
-        ctx.fillStyle = 'rgba(6, 8, 14, 0.96)';
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2.5;
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 13;
-        ctx.fillRect(-pickup.radius, -pickup.radius, pickup.radius * 2, pickup.radius * 2);
-        ctx.strokeRect(-pickup.radius, -pickup.radius, pickup.radius * 2, pickup.radius * 2);
-        ctx.globalAlpha = 0.28;
-        ctx.strokeStyle = '#F5F7FF';
-        ctx.lineWidth = 1;
-        const inset = pickup.radius - 4;
-        ctx.strokeRect(-inset, -inset, inset * 2, inset * 2);
-        ctx.restore();
-
-        ctx.save();
-        ctx.translate(pickup.x, pickup.y + bobY);
-        ctx.strokeStyle = '#F5F7FF';
-        ctx.fillStyle = color;
-        ctx.lineWidth = 2.2;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 8;
-
-        if (pickup.abilityId === 'damage') {
-          ctx.beginPath();
-          for (let ray = 0; ray < 8; ray++) {
-            const angle = ray * Math.PI / 4;
-            const inner = ray % 2 === 0 ? 4 : 5;
-            const outer = ray % 2 === 0 ? 10 : 8;
-            ctx.moveTo(Math.cos(angle) * inner, Math.sin(angle) * inner);
-            ctx.lineTo(Math.cos(angle) * outer, Math.sin(angle) * outer);
-          }
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(0, 0, 3.5, 0, Math.PI * 2);
-          ctx.fill();
-        } else if (pickup.abilityId === 'special') {
-          ctx.beginPath();
-          ctx.moveTo(0, -9);
-          ctx.lineTo(8, -5);
-          ctx.lineTo(6.5, 3);
-          ctx.quadraticCurveTo(4, 8, 0, 10);
-          ctx.quadraticCurveTo(-4, 8, -6.5, 3);
-          ctx.lineTo(-8, -5);
-          ctx.closePath();
-          ctx.globalAlpha = 0.3;
-          ctx.fill();
-          ctx.globalAlpha = 1;
-          ctx.stroke();
-        } else if (pickup.abilityId === 'build') {
-          ctx.globalAlpha = 0.34;
-          ctx.fillRect(-4, -8, 8, 6);
-          ctx.fillRect(-9, 1, 8, 6);
-          ctx.fillRect(1, 1, 8, 6);
-          ctx.globalAlpha = 1;
-          ctx.strokeRect(-4, -8, 8, 6);
-          ctx.strokeRect(-9, 1, 8, 6);
-          ctx.strokeRect(1, 1, 8, 6);
-        } else {
-          ctx.beginPath();
-          for (let segment = 0; segment < 3; segment++) {
-            const start = segment * Math.PI * 2 / 3 + phase * 0.18;
-            ctx.moveTo(Math.cos(start) * 8, Math.sin(start) * 8);
-            ctx.arc(0, 0, 8, start, start + 0.95);
-          }
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(0, 0, 3, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.restore();
-        ctx.restore();
-      }
-
       // Draw Player
       if (uiRef.current.status !== 'GAME_OVER' && !openingBlocked) {
         const localId = socketRef.current?.id || 'local';
@@ -14914,73 +13842,6 @@ export default function GameCanvas() {
 
         drawJoystick(leftJoyX, leftJoyY, state.touches.left, '#00ccff');
         drawJoystick(rightJoyX, rightJoyY, state.touches.right, '#ff0066');
-      }
-
-      // Update cooldown UI
-      if (STATUS !== 'PAUSED') {
-        let damageCooldown = 0;
-        let specialCooldown = 0;
-        let buildCooldown = 0;
-        let convertCooldown = 0;
-        const now = currentTime;
-
-        const isGuestMode = mpRef.current.roomId && !mpRef.current.isHost;
-        if (state.memoryMode) {
-          const memoryCooldownMs = getPlayerLevelStats(state.playerUpgradeRanks).cooldownSeconds * 1000;
-          const sharedCooldown = Math.max(
-            0,
-            Math.ceil((memoryCooldownMs - (now - state.player.abilityLastUsed)) / 1000),
-          );
-          damageCooldown = sharedCooldown;
-          specialCooldown = sharedCooldown;
-          buildCooldown = sharedCooldown;
-          convertCooldown = sharedCooldown;
-        } else if (isGuestMode) {
-          const socketId = socketRef.current?.id;
-          const auth = socketId ? state.playerActionAuthority?.[socketId] : null;
-          if (auth) {
-            if (state.player.dash.active) {
-              specialCooldown = Math.max(0, Math.ceil((auth.specialActiveUntil - now) / 1000));
-            } else {
-              specialCooldown = Math.max(0, Math.ceil((auth.specialReadyAt - now) / 1000));
-            }
-
-            if (state.player.build.active) {
-              buildCooldown = Math.max(0, Math.ceil((auth.buildActiveUntil - now) / 1000));
-            } else {
-              buildCooldown = Math.max(0, Math.ceil((auth.buildReadyAt - now) / 1000));
-            }
-          } else {
-            specialCooldown = 0;
-            buildCooldown = 0;
-          }
-        } else {
-          if (state.player.dash.active) {
-             specialCooldown = Math.max(0, Math.ceil((state.player.dash.endTime - now) / 1000));
-          } else if (state.player.dash.endTime > 0) {
-             specialCooldown = Math.max(0, Math.ceil((DASH_COOLDOWN - (now - state.player.dash.endTime)) / 1000));
-          } else {
-             specialCooldown = Math.max(0, Math.ceil((DASH_COOLDOWN - (now - state.player.dash.lastTime)) / 1000));
-          }
-
-          if (state.player.build.active) {
-             buildCooldown = Math.max(0, Math.ceil((state.player.build.endTime - now) / 1000));
-          } else if (state.player.build.endTime > 0) {
-             buildCooldown = Math.max(0, Math.ceil((BUILD_COOLDOWN - (now - state.player.build.endTime)) / 1000));
-          }
-        }
-
-        if (
-          uiRef.current.buttonCounters.damage !== damageCooldown ||
-          uiRef.current.buttonCounters.special !== specialCooldown ||
-          uiRef.current.buttonCounters.build !== buildCooldown ||
-          uiRef.current.buttonCounters.convert !== convertCooldown
-        ) {
-           setUiState(prev => {
-             uiRef.current = { ...prev, buttonCounters: { damage: damageCooldown, special: specialCooldown, build: buildCooldown, convert: convertCooldown } };
-             return uiRef.current;
-           });
-        }
       }
 
       } catch (error) {
@@ -16078,67 +14939,6 @@ export default function GameCanvas() {
   </AnimatePresence>
 
       {(uiState.status === 'PLAYING' || uiState.status === 'PAUSED') && (() => {
-        const toolsData = {
-          damage: {
-            label: 'DAMAGE',
-            keyHint: 3,
-            control: 'damage',
-            owned: !mpState.roomId && (!stateRef.current.memoryMode || uiState.ownedAbilities.damage),
-            usableFill: 'linear-gradient(rgba(255, 77, 109, 0.58), rgba(255, 77, 109, 0.58)), rgba(6, 8, 14, 0.90)',
-            usableBorder: MEMORY_ARENA_PALETTE.factions.red.bright,
-            usableText: '#F5F7FF',
-            unusableFill: 'rgba(255, 77, 109, 0.05)',
-            unusableBorder: 'rgba(255, 77, 109, 0.42)',
-            unusableText: 'rgba(255, 77, 109, 0.52)',
-            usableGlow: '0 0 5px rgba(255, 77, 109, 0.24), 0 0 12px rgba(255, 77, 109, 0.08)',
-          },
-          special: {
-            label: 'SPECIAL',
-            keyHint: 1,
-            control: 'special',
-            owned: mpState.roomId ? true : (!stateRef.current.memoryMode || uiState.ownedAbilities.special),
-            usableFill: 'linear-gradient(rgba(99, 124, 255, 0.58), rgba(99, 124, 255, 0.58)), rgba(6, 8, 14, 0.90)',
-            usableBorder: MEMORY_ARENA_PALETTE.factions.blue.bright,
-            usableText: '#F5F7FF',
-            unusableFill: 'rgba(99, 124, 255, 0.05)',
-            unusableBorder: 'rgba(99, 124, 255, 0.42)',
-            unusableText: 'rgba(99, 124, 255, 0.52)',
-            usableGlow: '0 0 5px rgba(99, 124, 255, 0.24), 0 0 12px rgba(99, 124, 255, 0.08)',
-          },
-          build: {
-            label: 'BUILD',
-            keyHint: 2,
-            control: 'build',
-            owned: mpState.roomId ? true : (!stateRef.current.memoryMode || uiState.ownedAbilities.build),
-            usableFill: 'linear-gradient(rgba(255, 200, 87, 0.62), rgba(255, 200, 87, 0.62)), rgba(6, 8, 14, 0.90)',
-            usableBorder: MEMORY_ARENA_PALETTE.factions.yellow.bright,
-            usableText: '#F5F7FF',
-            unusableFill: 'rgba(255, 200, 87, 0.05)',
-            unusableBorder: 'rgba(255, 200, 87, 0.42)',
-            unusableText: 'rgba(255, 200, 87, 0.52)',
-            usableGlow: '0 0 5px rgba(255, 200, 87, 0.24), 0 0 12px rgba(255, 200, 87, 0.08)',
-          },
-          convert: {
-            label: 'CONVERT',
-            keyHint: 4,
-            control: 'convert',
-            owned: !mpState.roomId && (!stateRef.current.memoryMode || uiState.ownedAbilities.convert),
-            usableFill: 'linear-gradient(rgba(46, 217, 154, 0.58), rgba(46, 217, 154, 0.58)), rgba(6, 8, 14, 0.90)',
-            usableBorder: MEMORY_ARENA_PALETTE.factions.green.bright,
-            usableText: '#F5F7FF',
-            unusableFill: 'rgba(46, 217, 154, 0.05)',
-            unusableBorder: 'rgba(46, 217, 154, 0.42)',
-            unusableText: 'rgba(46, 217, 154, 0.52)',
-            usableGlow: '0 0 5px rgba(46, 217, 154, 0.24), 0 0 12px rgba(46, 217, 154, 0.08)',
-          },
-        } as const;
-        const abilityHudOrder = ['damage', 'special', 'build', 'convert'] as const;
-        const sharedCooldownSeconds = Math.max(
-          uiState.buttonCounters.damage,
-          uiState.buttonCounters.special,
-          uiState.buttonCounters.build,
-          uiState.buttonCounters.convert,
-        );
 
         return (
           <AnimatePresence>
@@ -16566,84 +15366,7 @@ export default function GameCanvas() {
                      {uiState.deviceType === 'mobile' ? 'JOYSTICK TO MOVE' : 'WASD TO MOVE'}
                    </div>
                 </div>
-                <div
-                  ref={hudBottomCenterRef}
-                  className="absolute left-1/2 -translate-x-1/2 pointer-events-none z-10 flex flex-col items-center gap-1 sm:gap-1.5 bottom-3 sm:bottom-6 max-w-[calc(100vw-24px)]"
-                  style={{
-                    bottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))',
-                  }}
-                >
-                   <div className="flex h-4 sm:h-5 items-end justify-center" aria-live="polite">
-                     {sharedCooldownSeconds > 0 && (
-                       <span
-                         aria-label={`Shared ability cooldown ${sharedCooldownSeconds}`}
-                         className="-translate-y-0.5 font-mono text-[12px] sm:text-sm font-bold tabular-nums text-[#CBD5E1]"
-                       >
-                         {sharedCooldownSeconds}
-                       </span>
-                     )}
-                   </div>
-                   <div className="flex items-end gap-[6px] sm:gap-[9px]">
-                   {abilityHudOrder.map((toolKey) => {
-                     const tool = toolsData[toolKey];
-                     const isProtected = isOpeningProtectionActiveLocal(performance.now());
-                     const isGuestMode = Boolean(mpRef.current.roomId && !mpRef.current.isHost);
-                     const socketId = socketRef.current?.id;
-                     const auth = isGuestMode && socketId ? stateRef.current.playerActionAuthority?.[socketId] : null;
-                     const hasValidAuthority = auth &&
-                       typeof auth.specialActiveUntil === 'number' && Number.isFinite(auth.specialActiveUntil) &&
-                       typeof auth.specialReadyAt === 'number' && Number.isFinite(auth.specialReadyAt) &&
-                       typeof auth.buildActiveUntil === 'number' && Number.isFinite(auth.buildActiveUntil) &&
-                       typeof auth.buildReadyAt === 'number' && Number.isFinite(auth.buildReadyAt);
 
-                     const isAuthorityUnknown = isGuestMode && !hasValidAuthority;
-
-                     const toolCooldown = tool.control ? uiState.buttonCounters[tool.control] : 0;
-                     const isReady = tool.owned && !isAuthorityUnknown && !isProtected && toolCooldown === 0;
-                     const isLocked = !tool.owned;
-
-                     return (
-                       <div key={toolKey} className="relative flex items-end">
-                         <button
-                           id={`tool-btn-${toolKey}`}
-                           aria-disabled={!isReady}
-                           aria-label={`${tool.label}${isLocked ? ' locked' : ''}`}
-                           onPointerDown={(e) => {
-                             e.stopPropagation();
-                             const isLocalMenuOpen = mpRef.current.roomId && (mpMenuOpenRef.current || confirmResignRef.current);
-                             if (!isReady || isLocalMenuOpen) return;
-                             const currentTime = performance.now();
-                             if (tool.control === 'special') {
-                               requestSpecialActivation(currentTime);
-                             } else if (tool.control === 'build') {
-                               requestBuildActivation(currentTime);
-                             } else if (tool.control === 'damage') {
-                               requestDamageActivation(currentTime);
-                             } else if (tool.control === 'convert') {
-                               requestConversionActivation(currentTime);
-                             }
-                           }}
-                           className={`pointer-events-auto h-[44px] border-2 font-black tracking-[0.08em] sm:tracking-widest uppercase text-[9px] min-[380px]:text-[10px] sm:text-[12px] relative overflow-hidden flex justify-center items-center gap-1 sm:gap-1.5 focus:outline-none ${isReady ? 'hover:brightness-110 active:brightness-90 active:scale-95 cursor-pointer' : 'cursor-default'}`}
-                           style={{
-                             borderColor: isLocked ? 'rgba(148, 163, 184, 0.44)' : (isReady ? tool.usableBorder : tool.unusableBorder),
-                             background: isLocked ? 'rgba(71, 85, 105, 0.20)' : (isReady ? tool.usableFill : tool.unusableFill),
-                             color: isLocked ? 'rgba(203, 213, 225, 0.50)' : (isReady ? tool.usableText : tool.unusableText),
-                             boxShadow: isReady ? tool.usableGlow : 'none',
-                             transition: isReady ? 'all 140ms ease-out' : 'all 100ms ease-in',
-                             width: 'clamp(52px, 17.5vw, 142px)',
-                             filter: isLocked ? 'grayscale(1)' : 'none',
-                           }}
-                         >
-                           {uiState.deviceType === 'desktop' && (
-                             <span className="hidden sm:inline-block relative z-10 opacity-70 font-mono">[{tool.keyHint}]</span>
-                           )}
-                           <span className="relative z-10">{tool.label}</span>
-                         </button>
-                       </div>
-                     );
-                   })}
-                   </div>
-                </div>
 
                 <div ref={hudBottomRightRef} className="hidden lg:block absolute bottom-0 right-0 p-8 pointer-events-none z-10 text-right">
                    <div className="text-sm text-[#94A3B8] tracking-[0.2em] font-bold font-mono">

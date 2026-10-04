@@ -1,66 +1,67 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { getMapDimensions, isValidMapId, VALID_MAP_IDS } from '../shared/matchSettings';
+import { clearLegacyAbilities } from './legacyAbilities';
 import {
   ABILITY_BY_FACTION,
+  addFactionEmergencyPressure,
+  advanceFactionEmergencyState,
+  advanceSoloWaveBreak,
+  advanceTriangleAi,
+  applyPlayerDamage,
+  areEnemyFactionsHostile,
+  calculateEnemySeparationSteering,
+  canEnemyFactionDamageSpawner,
+  canMemoryProjectileDamageEnemies,
+  collectAbilityPickup,
+  composeThreeByThreeArena,
+  countRemainingCoreSpawners,
+  createEmptyAbilityOwnership,
+  createInitialAbilityDropProgress,
+  createInitialChainState,
+  createInitialFactionEmergencyStates,
+  createInitialFactionRaidStates,
+  createInitialPlayerUpgradeRanks,
+  createInitialSoloWaveState,
+  createMemoryCoreSpawners,
+  createShuffledShapeBag,
+  createTriangleAiState,
+  derivePlayerUpgradeRanks,
   ENEMY_FACTIONS,
   ENEMY_SHAPES,
   FACTION_EMERGENCY_ABILITY_BY_FACTION,
-  MEMORY_ARENA_CONFIG,
-  MEMORY_MAP_CORE_INDICES,
-  advanceFactionEmergencyState,
-  advanceTriangleAi,
-  advanceSoloWaveBreak,
-  addFactionEmergencyPressure,
-  areEnemyFactionsHostile,
-  applyPlayerDamage,
-  calculateEnemySeparationSteering,
-  collectAbilityPickup,
-  canEnemyFactionDamageSpawner,
-  canMemoryProjectileDamageEnemies,
-  createInitialChainState,
-  createInitialSoloWaveState,
-  createEmptyAbilityOwnership,
-  createInitialAbilityDropProgress,
-  createInitialFactionRaidStates,
-  createInitialFactionEmergencyStates,
-  createInitialPlayerUpgradeRanks,
-  createMemoryCoreSpawners,
-  composeThreeByThreeArena,
-  createShuffledShapeBag,
-  createTriangleAiState,
-  countRemainingCoreSpawners,
   findNearestSpawnerReplicationPosition,
-  getSquareVolleyDirections,
-  getRaidFormationOffset,
-  getTriangleTelegraphVisual,
-  getPlayerLevelStats,
+  getLeastRepresentedEnemyCombination,
   getMemoryThreatStats,
+  getMissingEnemyCombinations,
+  getPlayerLevelStats,
+  getRaidFormationOffset,
   getSoloWaveIdentities,
   getSoloWaveRescueSpawns,
   getSoloWaveRoster,
   getSoloWaveSpeedMultiplier,
   getSoloWaveStreakTarget,
-  getMissingEnemyCombinations,
-  getLeastRepresentedEnemyCombination,
+  getSquareVolleyDirections,
+  getTriangleTelegraphVisual,
   getWallFollowDirection,
   grantPlayerLevelUpgrade,
-  derivePlayerUpgradeRanks,
   isValidChainState,
-  isValidSoloWaveState,
-  isValidFactionRaidStates,
   isValidFactionEmergencyStates,
+  isValidFactionRaidStates,
+  isValidSoloWaveState,
   markTrianglePlayerHit,
+  MEMORY_ARENA_CONFIG,
+  MEMORY_MAP_CORE_INDICES,
   preserveChainOnSpawnerDestroyed,
   regeneratePlayerHealth,
+  registerAbilityDropKill,
   registerPlayerEnemyKill,
   registerSoloWaveStreak,
-  registerAbilityDropKill,
   resolveEnemyOverlaps,
   turnAngleTowards,
   type ColoredCoreSpawnerState,
   type EnemyAiState,
 } from './memoryArena';
-import { getMapDimensions, isValidMapId, VALID_MAP_IDS } from '../shared/matchSettings';
 
 test('3x3 arena composition creates a seamless 9000px world', () => {
   const boundaryWalls = [
@@ -253,45 +254,6 @@ test('each enemy faction owns a weaker version of its matching player ability', 
   });
 });
 
-test('ability drops use a deterministic twelve percent roll', () => {
-  const ownership = createEmptyAbilityOwnership();
-  const progress = createInitialAbilityDropProgress();
-  const miss = registerAbilityDropKill({
-    factionColor: 'red', credit: 'player', defeatedWasPlayerAlly: false,
-    ownership, progress, hasActivePickup: false, randomValue: 0.12,
-  });
-  assert.equal(miss.shouldDrop, false);
-  assert.equal(miss.progress.red, 1);
-
-  const hit = registerAbilityDropKill({
-    factionColor: 'blue', credit: 'ally', defeatedWasPlayerAlly: false,
-    ownership, progress: miss.progress, hasActivePickup: false, randomValue: 0.119,
-  });
-  assert.equal(hit.shouldDrop, true);
-  assert.equal(hit.abilityId, 'special');
-  assert.equal(hit.progress.blue, 0);
-});
-
-test('the eighth eligible kill guarantees a drop independently per colour', () => {
-  const ownership = createEmptyAbilityOwnership();
-  let progress = createInitialAbilityDropProgress();
-  let result = registerAbilityDropKill({
-    factionColor: 'green', credit: 'player', defeatedWasPlayerAlly: false,
-    ownership, progress, hasActivePickup: false, randomValue: 1,
-  });
-  progress = result.progress;
-  for (let kill = 2; kill <= 8; kill++) {
-    result = registerAbilityDropKill({
-      factionColor: 'green', credit: 'ally', defeatedWasPlayerAlly: false,
-      ownership, progress, hasActivePickup: false, randomValue: 1,
-    });
-    progress = result.progress;
-  }
-  assert.equal(result.shouldDrop, true);
-  assert.equal(progress.green, 0);
-  assert.equal(progress.red, 0);
-});
-
 test('faction kills, ally deaths, owned abilities, and active pickups cannot drop duplicates', () => {
   const base = {
     factionColor: 'yellow' as const,
@@ -309,19 +271,6 @@ test('faction kills, ally deaths, owned abilities, and active pickups cannot dro
     hasActivePickup: false,
     ownership: { ...base.ownership, build: true },
   }).shouldDrop, false);
-});
-
-test('collecting a pickup unlocks only its ability and preserves the shared cooldown timestamp', () => {
-  const ownership = createEmptyAbilityOwnership();
-  const collected = collectAbilityPickup(ownership, 'convert', 12345);
-  assert.deepEqual(collected.ownership, {
-    damage: false,
-    special: false,
-    build: false,
-    convert: true,
-  });
-  assert.equal(collected.abilityLastUsed, 12345);
-  assert.deepEqual(createEmptyAbilityOwnership(), ownership);
 });
 
 const redCircle = { shape: 'circle', color: 'red' } as const;
@@ -684,32 +633,6 @@ test('damage stacks and continuous regeneration clamps to maximum health', () =>
   assert.equal(regeneratePlayerHealth(99, 100, 0.02, 10), 100);
 });
 
-test('player levels follow the fixed fire, hp, regeneration, cooldown cycle', () => {
-  let ranks = createInitialPlayerUpgradeRanks();
-  const upgradedStats = [];
-  for (let level = 2; level <= 5; level++) {
-    const upgrade = grantPlayerLevelUpgrade(level, ranks);
-    ranks = upgrade.ranks;
-    upgradedStats.push(upgrade.stat);
-  }
-  assert.deepEqual(upgradedStats, ['fireRate', 'maxHp', 'regeneration', 'cooldown']);
-  assert.deepEqual(ranks, { fireRate: 1, maxHp: 1, regeneration: 1, cooldown: 1 });
-});
-
-test('level stats scale quickly with percentage regeneration and whole cooldowns', () => {
-  const levelFive = getPlayerLevelStats(derivePlayerUpgradeRanks(5));
-  assert.equal(levelFive.maxHp, 140);
-  assert.equal(levelFive.regenerationPercentPerSecond, 0.0275);
-  assert.equal(levelFive.bulletsPerSecond, 1.75);
-  assert.equal(levelFive.cooldownSeconds, 13);
-
-  const levelSeventeen = getPlayerLevelStats(derivePlayerUpgradeRanks(17));
-  assert.equal(levelSeventeen.maxHp, 384);
-  assert.ok(Math.abs(levelSeventeen.regenerationPercentPerSecond - 0.05) < 1e-12);
-  assert.ok(Math.abs(levelSeventeen.bulletsPerSecond - 4.802) < 1e-12);
-  assert.equal(levelSeventeen.cooldownSeconds, 7);
-});
-
 test('high fire rate becomes three streams while preserving total bullet output', () => {
   const threeStreamStats = getPlayerLevelStats({
     ...createInitialPlayerUpgradeRanks(),
@@ -725,18 +648,6 @@ test('high fire rate becomes three streams while preserving total bullet output'
   });
   assert.equal(capped.bulletsPerSecond, 30);
   assert.equal(capped.volleyIntervalMs, 100);
-});
-
-test('capped fire and cooldown cycle slots continue upgrading hp and regeneration', () => {
-  const before = derivePlayerUpgradeRanks(45);
-  const after = derivePlayerUpgradeRanks(49);
-  assert.equal(getPlayerLevelStats(before).cooldownSeconds, 4);
-  assert.equal(getPlayerLevelStats(before).bulletsPerSecond, 30);
-  assert.equal(after.maxHp - before.maxHp, 2);
-  assert.equal(after.regeneration - before.regeneration, 2);
-  assert.equal(after.fireRate, before.fireRate);
-  assert.equal(after.cooldown, before.cooldown);
-  assert.deepEqual(derivePlayerUpgradeRanks(1_000_000), derivePlayerUpgradeRanks(1_000_000));
 });
 
 test('Memory Arena wall ricochets are disabled by prototype configuration', () => {
@@ -793,4 +704,80 @@ test('spawner replication chooses the nearest valid candidate ring', () => {
   assert.ok(position);
   assert.ok(Math.abs(Math.hypot(position.x - 1000, position.y - 1000) - (startDistance + searchStep)) < 0.01);
   assert.equal(findNearestSpawnerReplicationPosition({ x: 0, y: 0 }, () => false), null);
+});
+
+
+test('ability drops stay disabled for every colour, kill credit, random roll and pity counter', () => {
+  for (const factionColor of ['red', 'blue', 'green', 'yellow'] as const) {
+    for (const credit of ['player', 'ally', 'faction'] as const) {
+      for (const randomValue of [0, 0.1, 0.99]) {
+        const progress = { red: 7, blue: 7, green: 7, yellow: 7 };
+        const result = registerAbilityDropKill({ factionColor, credit, randomValue,
+          defeatedWasPlayerAlly: false, hasActivePickup: false,
+          ownership: createEmptyAbilityOwnership(), progress });
+        assert.equal(result.shouldDrop, false);
+        assert.deepEqual(result.progress, progress);
+      }
+    }
+  }
+});
+
+test('legacy pickup collection cannot unlock an ability', () => {
+  const collected = collectAbilityPickup({ damage: true, special: true, build: true, convert: true }, 'convert', 12345);
+  assert.deepEqual(collected.ownership, createEmptyAbilityOwnership());
+  assert.equal(collected.abilityLastUsed, 12345);
+});
+
+test('levels cycle through shooting, HP and regeneration without ability cooldown upgrades', () => {
+  let ranks = createInitialPlayerUpgradeRanks();
+  const stats = [];
+  for (let level = 2; level <= 7; level++) {
+    const upgrade = grantPlayerLevelUpgrade(level, ranks);
+    ranks = upgrade.ranks;
+    stats.push(upgrade.stat);
+  }
+  assert.deepEqual(stats, ['fireRate', 'maxHp', 'regeneration', 'fireRate', 'maxHp', 'regeneration']);
+  assert.deepEqual(ranks, { fireRate: 2, maxHp: 2, regeneration: 2, cooldown: 0 });
+  assert.equal(getPlayerLevelStats(ranks).maxHp, 196);
+  assert.ok(Math.abs(getPlayerLevelStats(ranks).regenerationPercentPerSecond - 0.035) < 1e-12);
+});
+
+test('fast level reconstruction matches stepwise upgrades through and beyond the fire rate cap', () => {
+  let ranks = createInitialPlayerUpgradeRanks();
+  for (let level = 2; level <= 1000; level++) {
+    ranks = grantPlayerLevelUpgrade(level, ranks).ranks;
+    assert.deepEqual(derivePlayerUpgradeRanks(level), ranks, 'level ' + level);
+  }
+  const large = derivePlayerUpgradeRanks(1_000_000);
+  assert.equal(large.fireRate + large.maxHp + large.regeneration, 999_999);
+  assert.equal(large.cooldown, 0);
+  assert.equal(getPlayerLevelStats(large).bulletsPerSecond, 30);
+});
+
+test('old saves lose abilities and their effects while retaining normal combat and triangle AI', () => {
+  const triangleAi = { phase: 'dash' };
+  const enemy = { isPlayerAlly: true, conversionPullUntil: 3000,
+    conversionPullTargetX: 100, conversionPullTargetY: 200,
+    factionAbilityKind: 'reflectionShield', factionAbilityActivatesAt: 1000,
+    factionAbilityEndsAt: 3000, factionAbilityTargetX: 100, factionAbilityTargetY: 200,
+    triangleAi, hp: 100 };
+  const normalBullet = { isPlayerAlly: false, damage: 10 };
+  const state = { player: { dash: { active: true, endTime: 3000 }, build: { active: true, endTime: 3000 }, recentBlocks: [{}], hp: 75 },
+    abilityOwnership: { damage: true, special: true, build: true, convert: true },
+    abilityDropProgress: { red: 7, blue: 7, green: 7, yellow: 7 },
+    abilityPickups: [{}], damageWaves: [{}], zones: [{}], blocks: [{}],
+    enemies: [enemy], bullets: [normalBullet, { isPlayerAlly: true, damage: 10 }] };
+  clearLegacyAbilities(state);
+  assert.equal(state.player.hp, 75);
+  assert.equal(state.player.dash.active, false);
+  assert.equal(state.player.build.active, false);
+  assert.deepEqual(state.abilityOwnership, createEmptyAbilityOwnership());
+  assert.deepEqual(state.abilityDropProgress, createInitialAbilityDropProgress());
+  for (const list of [state.abilityPickups, state.damageWaves, state.zones, state.blocks, state.player.recentBlocks]) assert.deepEqual(list, []);
+  assert.deepEqual(state.bullets, [normalBullet]);
+  assert.equal(enemy.isPlayerAlly, false);
+  assert.equal(enemy.factionAbilityKind, undefined);
+  assert.equal(enemy.conversionPullUntil, undefined);
+  assert.equal(enemy.triangleAi, triangleAi);
+  assert.equal(enemy.hp, 100);
 });
