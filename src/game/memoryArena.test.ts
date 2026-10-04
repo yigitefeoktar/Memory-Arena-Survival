@@ -397,8 +397,8 @@ test('solo waves clear only after enough exact three-kill streaks and restart af
   assert.equal(wave.completedStreaks, 2);
   assert.equal(chain.level, 1);
   assert.equal(registerSoloWaveStreak(wave), wave);
-  assert.equal(advanceSoloWaveBreak(wave, 2999).phase, 'break');
-  wave = advanceSoloWaveBreak(wave, 3000);
+  assert.equal(advanceSoloWaveBreak(wave, MEMORY_ARENA_CONFIG.waves.breakMs - 1).phase, 'break');
+  wave = advanceSoloWaveBreak(wave, MEMORY_ARENA_CONFIG.waves.breakMs);
   assert.deepEqual(wave, { number: 2, completedStreaks: 0, phase: 'active', breakRemainingMs: 0 });
   assert.equal(getSoloWaveStreakTarget(wave.number), 3);
   assert.equal(isValidSoloWaveState(wave), true);

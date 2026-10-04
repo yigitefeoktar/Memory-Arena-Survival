@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advanceSoloWaveBreak, createInitialSoloWaveState, MEMORY_ARENA_CONFIG, type SoloWaveState } from './memoryArena';
+import { advanceSoloWaveBreak, createInitialSoloWaveState, isValidSoloWaveState, restoreSoloWaveState, MEMORY_ARENA_CONFIG, type SoloWaveState } from './memoryArena';
 import { getSpawnVisual, SPAWN_ANIMATION_MS } from './roundOpening';
 import {
-  ARENA_MATERIALIZE_AT_MS, ARENA_WALL_STAGGER_MS, findClearArenaPosition,
+  getArenaMaterializeAtMs, ARENA_WALL_STAGGER_MS, findClearArenaPosition,
   getSoloArenaFrame, getSoloArenaLayout, isArenaPositionClear,
   SOLO_ARENA_BOUNDARY, SOLO_ARENA_HEIGHT, SOLO_ARENA_LAYOUTS, SOLO_ARENA_WIDTH,
 } from './soloArena';
@@ -47,13 +47,13 @@ test('layouts repeat indefinitely and switch once per wave break without changin
   assert.equal(getSoloArenaFrame(createInitialSoloWaveState()).layout, getSoloArenaLayout(1));
   for (const wave of [1, 2, 3, 4, 5, 100, 999999]) {
     assert.equal(getSoloArenaLayout(wave + 4), getSoloArenaLayout(wave));
-    for (const elapsed of [0, 175, 350, 450, 470, 600, 1000, 2999]) {
+    for (const elapsed of [0, 175, 350, 450, 470, 600, 999]) {
       const frame = getSoloArenaFrame(breakAt(wave, elapsed));
       assert.deepEqual(frame.walls.slice(0, 4), SOLO_ARENA_BOUNDARY);
-      assert.equal(frame.layout, getSoloArenaLayout(wave + (elapsed >= ARENA_MATERIALIZE_AT_MS ? 1 : 0)));
+      assert.equal(frame.layout, getSoloArenaLayout(wave + (elapsed >= getArenaMaterializeAtMs(wave) ? 1 : 0)));
       assert.deepEqual(getSoloArenaFrame(JSON.parse(JSON.stringify(breakAt(wave, elapsed)))), frame, 'save/load retains the transition');
     }
-    const next = advanceSoloWaveBreak(breakAt(wave, 2999), 1);
+    const next = advanceSoloWaveBreak(breakAt(wave, 999), 1);
     assert.equal(next.phase, 'active');
     assert.equal(getSoloArenaFrame(next).walls, getSoloArenaLayout(wave + 1).walls);
   }
@@ -63,12 +63,12 @@ test('walls use enemy spawn easing, stagger their arrival, and become solid only
   const midway = getSoloArenaFrame(breakAt(1, SPAWN_ANIMATION_MS / 2));
   assert.deepEqual(midway.interior[0].visual, getSpawnVisual(SPAWN_ANIMATION_MS / 2));
   assert.equal(getSoloArenaFrame(breakAt(1, SPAWN_ANIMATION_MS)).walls, SOLO_ARENA_BOUNDARY);
-  const arrival = ARENA_MATERIALIZE_AT_MS + SPAWN_ANIMATION_MS / 2;
+  const arrival = getArenaMaterializeAtMs(1) + SPAWN_ANIMATION_MS / 2;
   const frame = getSoloArenaFrame(breakAt(1, arrival));
   assert.deepEqual(frame.interior[0].visual, getSpawnVisual(SPAWN_ANIMATION_MS / 2));
   assert.ok(frame.interior[0].visual.alpha > frame.interior[1].visual.alpha);
   assert.equal(frame.walls, SOLO_ARENA_BOUNDARY);
-  const solidAt = ARENA_MATERIALIZE_AT_MS + SPAWN_ANIMATION_MS + ARENA_WALL_STAGGER_MS;
+  const solidAt = getArenaMaterializeAtMs(1) + SPAWN_ANIMATION_MS + ARENA_WALL_STAGGER_MS;
   assert.equal(getSoloArenaFrame(breakAt(1, solidAt - 1)).walls, SOLO_ARENA_BOUNDARY);
   assert.equal(getSoloArenaFrame(breakAt(1, solidAt)).walls, getSoloArenaLayout(2).walls);
   for (const { visual } of getSoloArenaFrame(breakAt(1, arrival), true).interior) {
@@ -100,4 +100,34 @@ test('valid positions stay fixed and corner overlaps use the shortest diagonal e
   assert.ok(isArenaPositionClear(clear.x, clear.y, body.radius, walls));
   assert.ok(Math.abs((clear.x - body.x) - (clear.y - body.y)) < 0.0001);
   assert.ok(Math.abs(Math.hypot(clear.x - body.x, clear.y - body.y) - (16.01 - Math.hypot(8, 8))) < 0.0001);
+});
+
+test('every layout finishes its final wall on the same tick as the next wave starts', () => {
+  for (const wave of [1, 2, 3, 4, 100]) {
+    const before = breakAt(wave, MEMORY_ARENA_CONFIG.waves.breakMs - 1);
+    const frame = getSoloArenaFrame(before);
+    assert.equal(frame.layout, getSoloArenaLayout(wave + 1));
+    assert.equal(frame.walls, SOLO_ARENA_BOUNDARY);
+    assert.ok(frame.interior.at(-1)!.visual.alpha < 1);
+    assert.equal(advanceSoloWaveBreak(before, 0).phase, 'break');
+    const next = advanceSoloWaveBreak(before, 1);
+    assert.equal(next.phase, 'active');
+    assert.equal(next.number, wave + 1);
+    assert.equal(getSoloArenaFrame(next).walls, getSoloArenaLayout(wave + 1).walls);
+    assert.ok(getSoloArenaFrame(next).interior.every(wall => wall.visual.alpha === 1));
+  }
+});
+
+test('older saves retain wave progress and resume with the shorter break', () => {
+  for (const remaining of [3000, 2000, 1000, 200, 0]) {
+    const old = { ...breakAt(2, 0), breakRemainingMs: remaining };
+    assert.equal(isValidSoloWaveState(old), true);
+    const restored = restoreSoloWaveState(old);
+    assert.equal(restored.number, old.number);
+    assert.equal(restored.completedStreaks, old.completedStreaks);
+    assert.ok(restored.breakRemainingMs <= MEMORY_ARENA_CONFIG.waves.breakMs);
+    assert.deepEqual(getSoloArenaFrame(old), getSoloArenaFrame(restored));
+    assert.equal(advanceSoloWaveBreak(old, MEMORY_ARENA_CONFIG.waves.breakMs).number, 3);
+  }
+  assert.equal(isValidSoloWaveState({ ...breakAt(1, 0), breakRemainingMs: 3001 }), false);
 });

@@ -1,4 +1,4 @@
-import { MEMORY_ARENA_CONFIG, type SoloWaveState } from './memoryArena';
+import { MEMORY_ARENA_CONFIG, restoreSoloWaveState, type SoloWaveState } from './memoryArena';
 import { getSpawnVisual, SPAWN_ANIMATION_MS } from './roundOpening';
 
 export interface ArenaWall { x: number; y: number; w: number; h: number }
@@ -36,20 +36,26 @@ export const SOLO_ARENA_LAYOUTS = [
   ] },
 ].map(layout => ({ ...layout, walls: [...SOLO_ARENA_BOUNDARY, ...layout.interior] }));
 
-export const ARENA_MATERIALIZE_AT_MS = SPAWN_ANIMATION_MS + 120;
 export const ARENA_WALL_STAGGER_MS = 60;
 
 export function getSoloArenaLayout(wave: number) {
   return SOLO_ARENA_LAYOUTS[(Math.max(1, Math.floor(wave)) - 1) % SOLO_ARENA_LAYOUTS.length];
 }
 
+export function getArenaMaterializeAtMs(wave: number) {
+  const incoming = getSoloArenaLayout(wave + 1);
+  return MEMORY_ARENA_CONFIG.waves.breakMs - SPAWN_ANIMATION_MS -
+    (incoming.interior.length - 1) * ARENA_WALL_STAGGER_MS;
+}
+
 // Derive everything from the saved wave countdown so pausing and loading retain
 // the exact geometry and transition phase without additional clocks or save data.
 export function getSoloArenaFrame(wave: SoloWaveState, reducedMotion = false) {
-  const elapsed = MEMORY_ARENA_CONFIG.waves.breakMs - wave.breakRemainingMs;
-  const outgoing = wave.phase === 'break' && elapsed < ARENA_MATERIALIZE_AT_MS;
+  const elapsed = MEMORY_ARENA_CONFIG.waves.breakMs - restoreSoloWaveState(wave).breakRemainingMs;
+  const materializeAt = getArenaMaterializeAtMs(wave.number);
+  const outgoing = wave.phase === 'break' && elapsed < materializeAt;
   const layout = getSoloArenaLayout(wave.number + (wave.phase === 'break' && !outgoing ? 1 : 0));
-  const settledAt = ARENA_MATERIALIZE_AT_MS + SPAWN_ANIMATION_MS +
+  const settledAt = materializeAt + SPAWN_ANIMATION_MS +
     (layout.interior.length - 1) * ARENA_WALL_STAGGER_MS;
   const walls = wave.phase === 'active' ? layout.walls
     : elapsed < SPAWN_ANIMATION_MS ? layout.walls
@@ -57,7 +63,7 @@ export function getSoloArenaFrame(wave: SoloWaveState, reducedMotion = false) {
   const interior = layout.interior.map((wall, index) => {
     const age = wave.phase === 'active' ? SPAWN_ANIMATION_MS
       : outgoing ? SPAWN_ANIMATION_MS - elapsed
-      : elapsed - ARENA_MATERIALIZE_AT_MS - index * ARENA_WALL_STAGGER_MS;
+      : elapsed - materializeAt - index * ARENA_WALL_STAGGER_MS;
     const visual = getSpawnVisual(age, reducedMotion);
     if (age < 0 || (outgoing && age === 0)) visual.ringAlpha = 0;
     return { wall, visual };

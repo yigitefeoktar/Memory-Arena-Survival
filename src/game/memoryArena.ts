@@ -70,7 +70,8 @@ export const PLAYER_COLOR_HEX = MEMORY_ARENA_PALETTE.player.effect;
 
 export const MEMORY_ARENA_CONFIG = {
   waves: {
-    breakMs: 3000,
+    // The next wave begins as the final interior wall finishes materializing.
+    breakMs: 1000,
     initialStreaks: 2,
     enemiesPerIdentity: 4,
     initialIdentities: 4,
@@ -1251,7 +1252,7 @@ export function registerSoloWaveStreak(current: SoloWaveState): SoloWaveState {
 
 export function advanceSoloWaveBreak(current: SoloWaveState, elapsedMs: number): SoloWaveState {
   if (current.phase !== 'break') return current;
-  const remaining = Math.max(0, current.breakRemainingMs - Math.max(0, elapsedMs));
+  const remaining = Math.max(0, restoreSoloWaveState(current).breakRemainingMs - Math.max(0, elapsedMs));
   return remaining > 0
     ? { ...current, breakRemainingMs: remaining }
     : { number: current.number + 1, completedStreaks: 0, phase: 'active', breakRemainingMs: 0 };
@@ -1265,9 +1266,14 @@ export function isValidSoloWaveState(value: unknown): value is SoloWaveState {
     wave.completedStreaks! <= getSoloWaveStreakTarget(wave.number!) &&
     (wave.phase === 'active' || wave.phase === 'break') &&
     typeof wave.breakRemainingMs === 'number' && Number.isFinite(wave.breakRemainingMs) &&
-    wave.breakRemainingMs >= 0 && wave.breakRemainingMs <= MEMORY_ARENA_CONFIG.waves.breakMs &&
+    // Accept the previous three-second countdown when loading older saves.
+    wave.breakRemainingMs >= 0 && wave.breakRemainingMs <= 3000 &&
     (wave.phase === 'active' ? wave.breakRemainingMs === 0 && wave.completedStreaks! < getSoloWaveStreakTarget(wave.number!)
       : wave.completedStreaks === getSoloWaveStreakTarget(wave.number!));
+}
+
+export function restoreSoloWaveState(wave: SoloWaveState): SoloWaveState {
+  return { ...wave, breakRemainingMs: Math.min(wave.breakRemainingMs, MEMORY_ARENA_CONFIG.waves.breakMs) };
 }
 
 export function createShuffledShapeBag(random: () => number = Math.random): EnemyShape[] {
