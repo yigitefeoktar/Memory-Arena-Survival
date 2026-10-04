@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advanceSoloWaveBreak, createInitialSoloWaveState, isValidSoloWaveState, restoreSoloWaveState, MEMORY_ARENA_CONFIG, type SoloWaveState } from './memoryArena';
+import { advanceSoloWaveBreak, createInitialSoloWaveState, getSoloWaveStreakTarget, isValidSoloWaveState, restoreSoloWaveState, MEMORY_ARENA_CONFIG, type SoloWaveState } from './memoryArena';
 import { getSpawnVisual, SPAWN_ANIMATION_MS } from './roundOpening';
 import {
   getArenaMaterializeAtMs, ARENA_WALL_STAGGER_MS, findClearArenaPosition,
@@ -9,7 +9,7 @@ import {
 } from './soloArena';
 
 const breakAt = (wave: number, elapsed: number): SoloWaveState => ({
-  number: wave, phase: 'break', completedStreaks: wave + 1,
+  number: wave, phase: 'break', completedStreaks: getSoloWaveStreakTarget(wave),
   breakRemainingMs: MEMORY_ARENA_CONFIG.waves.breakMs - elapsed,
 });
 

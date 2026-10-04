@@ -62,6 +62,7 @@ import {
   PLAYER_COLOR_HEX,
   PLAYER_UPGRADE_STATS,
   restorePlayerHealthOnWaveClear,
+  restoreSoloWaveState,
   registerPlayerEnemyKill,
   registerSoloWaveStreak,
   resolveEnemyOverlaps,
@@ -250,7 +251,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 14;
+const SAVE_VERSION = 15;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -4788,7 +4789,7 @@ export default function GameCanvas() {
       if (rawState.memoryMode !== true || !isValidChainState(normalizedRawChain)) {
         throw new Error("INVALID SAVE FILE");
       }
-      if (version >= 11 && (mapId !== (version >= 12 ? MEMORY_DEFAULT_MAP_ID : 'classic_arena') || !isValidSoloWaveState(rawState.soloWave) ||
+      if (version >= 11 && (mapId !== (version >= 12 ? MEMORY_DEFAULT_MAP_ID : 'classic_arena') || !isValidSoloWaveState(rawState.soloWave, version < 15) ||
           !Array.isArray(rawState.spawners) || rawState.spawners.length !== 0)) {
         throw new Error("INVALID SAVE FILE");
       }
@@ -5589,6 +5590,18 @@ export default function GameCanvas() {
         ])) as FactionEmergencyStates
       : createInitialFactionEmergencyStates(loadNow);
 
+    const reconstructedSoloWave = isMemorySave && version >= 11
+      ? restoreSoloWaveState(rawState.soloWave)
+      : createInitialSoloWaveState();
+    if (isMemorySave && version >= 11) {
+      reconstructedPlayer.hp = restorePlayerHealthOnWaveClear(
+        reconstructedPlayer.hp, reconstructedPlayer.maxHp, rawState.soloWave, reconstructedSoloWave,
+      );
+      if (rawState.soloWave.phase === 'active' && reconstructedSoloWave.phase === 'break') {
+        Object.assign(reconstructedChain, { target: null, matchingShape: null, matchingColor: null, progress: 0 });
+      }
+    }
+
     const cleanUi = {
       status: 'PAUSED' as const,
       score: rawUi.score !== undefined ? rawUi.score : 0,
@@ -5678,7 +5691,7 @@ export default function GameCanvas() {
       memoryRunElapsedMs: reconstructedMemoryRunElapsedMs,
       openingHostilesSeeded: false,
       chain: reconstructedChain,
-      soloWave: isMemorySave && version >= 11 ? { ...rawState.soloWave } as SoloWaveState : createInitialSoloWaveState(),
+      soloWave: reconstructedSoloWave,
       playerUpgradeRanks: reconstructedPlayerUpgradeRanks,
       factionRaids: reconstructedFactionRaids,
       factionEmergencies: reconstructedFactionEmergencies,
@@ -5702,6 +5715,10 @@ export default function GameCanvas() {
       cleanState.camera.x = Math.max(0, cleanState.player.x - cleanState.camera.width / 2);
       cleanState.camera.y = Math.max(0, cleanState.player.y - cleanState.camera.height / 2);
       cleanState.chain = { ...cleanState.chain, target: null, matchingShape: null, matchingColor: null, progress: 0 };
+    }
+    if (isMemorySave && cleanState.soloWave.phase === 'break') {
+      cleanState.enemies = [];
+      cleanState.bullets = [];
     }
     clearLegacyAbilities(cleanState);
     cleanUi.ownedAbilities = createEmptyAbilityOwnership();

@@ -73,6 +73,7 @@ export const MEMORY_ARENA_CONFIG = {
     // The next wave begins as the final interior wall finishes materializing.
     breakMs: 1000,
     initialStreaks: 2,
+    maximumStreaks: 5,
     enemiesPerIdentity: 4,
     initialIdentities: 4,
     maximumIdentities: 8,
@@ -1153,7 +1154,10 @@ export function createInitialSoloWaveState(): SoloWaveState {
 }
 
 export function getSoloWaveStreakTarget(wave: number): number {
-  return MEMORY_ARENA_CONFIG.waves.initialStreaks + Math.max(0, Math.floor(wave) - 1);
+  return Math.min(
+    MEMORY_ARENA_CONFIG.waves.maximumStreaks,
+    MEMORY_ARENA_CONFIG.waves.initialStreaks + Math.max(0, Math.floor(wave) - 1),
+  );
 }
 
 export function getSoloWaveIdentities(wave: number): EnemyIdentity[] {
@@ -1236,22 +1240,30 @@ export function advanceSoloWaveBreak(current: SoloWaveState, elapsedMs: number):
     : { number: current.number + 1, completedStreaks: 0, phase: 'active', breakRemainingMs: 0 };
 }
 
-export function isValidSoloWaveState(value: unknown): value is SoloWaveState {
+export function isValidSoloWaveState(value: unknown, legacyUncapped = false): value is SoloWaveState {
   if (!value || typeof value !== 'object') return false;
   const wave = value as Partial<SoloWaveState>;
+  const streakTarget = legacyUncapped
+    ? MEMORY_ARENA_CONFIG.waves.initialStreaks + Math.max(0, (wave.number ?? 0) - 1)
+    : getSoloWaveStreakTarget(wave.number ?? 0);
   return Number.isInteger(wave.number) && wave.number! >= 1 && wave.number! <= 1_000_000 &&
     Number.isInteger(wave.completedStreaks) && wave.completedStreaks! >= 0 &&
-    wave.completedStreaks! <= getSoloWaveStreakTarget(wave.number!) &&
+    wave.completedStreaks! <= streakTarget &&
     (wave.phase === 'active' || wave.phase === 'break') &&
     typeof wave.breakRemainingMs === 'number' && Number.isFinite(wave.breakRemainingMs) &&
     // Accept the previous three-second countdown when loading older saves.
     wave.breakRemainingMs >= 0 && wave.breakRemainingMs <= 3000 &&
-    (wave.phase === 'active' ? wave.breakRemainingMs === 0 && wave.completedStreaks! < getSoloWaveStreakTarget(wave.number!)
-      : wave.completedStreaks === getSoloWaveStreakTarget(wave.number!));
+    (wave.phase === 'active' ? wave.breakRemainingMs === 0 && wave.completedStreaks! < streakTarget
+      : wave.completedStreaks === streakTarget);
 }
 
 export function restoreSoloWaveState(wave: SoloWaveState): SoloWaveState {
-  return { ...wave, breakRemainingMs: Math.min(wave.breakRemainingMs, MEMORY_ARENA_CONFIG.waves.breakMs) };
+  const completedStreaks = Math.min(wave.completedStreaks, getSoloWaveStreakTarget(wave.number));
+  // Older active saves may already satisfy the new cap. Clear them without losing the run.
+  if (wave.phase === 'active' && completedStreaks >= getSoloWaveStreakTarget(wave.number)) {
+    return { ...wave, completedStreaks, phase: 'break', breakRemainingMs: MEMORY_ARENA_CONFIG.waves.breakMs };
+  }
+  return { ...wave, completedStreaks, breakRemainingMs: Math.min(wave.breakRemainingMs, MEMORY_ARENA_CONFIG.waves.breakMs) };
 }
 
 export function createShuffledShapeBag(random: () => number = Math.random): EnemyShape[] {

@@ -54,6 +54,7 @@ import {
   MEMORY_MAP_CORE_INDICES,
   preserveChainOnSpawnerDestroyed,
   restorePlayerHealthOnWaveClear,
+  restoreSoloWaveState,
   registerAbilityDropKill,
   registerPlayerEnemyKill,
   registerSoloWaveStreak,
@@ -352,6 +353,46 @@ test('solo waves clear only after enough exact three-kill streaks and restart af
   assert.equal(getSoloWaveStreakTarget(wave.number), 3);
   assert.equal(isValidSoloWaveState(wave), true);
   assert.equal(isValidSoloWaveState({ ...wave, completedStreaks: 3 }), false);
+});
+
+test('waves progress from two to five streaks and later waves clear at the cap', () => {
+  assert.deepEqual([1, 2, 3, 4, 5, 10, 100, 1_000_000].map(getSoloWaveStreakTarget), [2, 3, 4, 5, 5, 5, 5, 5]);
+  for (const number of [4, 5, 10, 100, 999_999]) {
+    let wave = { ...createInitialSoloWaveState(), number };
+    for (let streak = 1; streak <= 5; streak++) {
+      wave = registerSoloWaveStreak(wave);
+      assert.equal(wave.completedStreaks, streak);
+      assert.equal(wave.phase, streak === 5 ? 'break' : 'active');
+      assert.equal(isValidSoloWaveState(wave), true);
+    }
+    assert.equal(registerSoloWaveStreak(wave), wave);
+    assert.deepEqual(advanceSoloWaveBreak(wave, MEMORY_ARENA_CONFIG.waves.breakMs), {
+      number: number + 1, completedStreaks: 0, phase: 'active', breakRemainingMs: 0,
+    });
+  }
+});
+
+test('uncapped older saves retain progress or clear once they have earned five streaks', () => {
+  const oldActive = { number: 10, completedStreaks: 4, phase: 'active' as const, breakRemainingMs: 0 };
+  assert.equal(isValidSoloWaveState(oldActive, true), true);
+  assert.deepEqual(restoreSoloWaveState(oldActive), oldActive);
+  for (const completedStreaks of [5, 7, 10]) {
+    const old = { ...oldActive, completedStreaks };
+    assert.equal(isValidSoloWaveState(old), false);
+    assert.equal(isValidSoloWaveState(old, true), true);
+    const restored = restoreSoloWaveState(old);
+    assert.deepEqual(restored, { ...oldActive, completedStreaks: 5, phase: 'break', breakRemainingMs: 1000 });
+    assert.equal(isValidSoloWaveState(restored), true);
+    assert.equal(restorePlayerHealthOnWaveClear(50, 100, old, restored), 100);
+    assert.deepEqual(restoreSoloWaveState(restored), restored);
+  }
+  const oldBreak = { ...oldActive, completedStreaks: 11, phase: 'break' as const, breakRemainingMs: 200 };
+  assert.equal(isValidSoloWaveState(oldBreak, true), true);
+  const restoredBreak = restoreSoloWaveState(oldBreak);
+  assert.deepEqual(restoredBreak, { ...oldBreak, completedStreaks: 5 });
+  assert.equal(isValidSoloWaveState(restoredBreak), true);
+  assert.equal(advanceSoloWaveBreak(restoredBreak, 200).number, 11);
+  assert.equal(isValidSoloWaveState({ ...oldActive, completedStreaks: 12 }, true), false);
 });
 
 test('opening waves start with sixteen enemies across four visible identities and scale to eight identities', () => {
