@@ -1,4 +1,5 @@
 import { Check, Copy, Shuffle } from 'lucide-react';
+import MainMenu from './MainMenu';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
@@ -2584,7 +2585,6 @@ export default function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const mapListRef = useRef<HTMLDivElement>(null);
 
   const hudTopLeftRef = useRef<HTMLDivElement>(null);
   const hudTopRightRef = useRef<HTMLDivElement>(null);
@@ -3058,7 +3058,6 @@ export default function GameCanvas() {
     }
   }, [isMpMapSelectOpen, mpState.isHost, mpState.roomId, mpState.isConnected, uiState.status, closeMpMapSelector]);
 
-  const [isMapSelectOpen, setIsMapSelectOpen] = useState(false);
   const [mpTick, setMpTick] = useState(0);
   const [confirmLeaveMatches, setConfirmLeaveMatches] = useState(false);
 
@@ -5891,30 +5890,6 @@ export default function GameCanvas() {
     }
   };
 
-  const selectAndScrollToMap = (mapId: string) => {
-    setUiState(prev => ({ ...prev, mapId }));
-
-    setTimeout(() => {
-      if (mapListRef.current) {
-        const container = mapListRef.current;
-        const button = container.querySelector(`[data-map-id="${mapId}"]`) as HTMLElement;
-        if (button) {
-          const containerRect = container.getBoundingClientRect();
-          const buttonRect = button.getBoundingClientRect();
-
-          const isFullyVisible = (
-            buttonRect.top >= containerRect.top - 1 &&
-            buttonRect.bottom <= containerRect.bottom + 1
-          );
-
-          if (!isFullyVisible) {
-            button.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-        }
-      }
-    }, 50);
-  };
-
   const isValidRoomResponse = useCallback((
     res: any,
     capturedSocket: Socket | null,
@@ -6654,7 +6629,6 @@ export default function GameCanvas() {
     setConfirmResign(false);
     confirmResignRef.current = false;
     setConfirmLeaveMatches(false);
-    setIsMapSelectOpen(false);
     setLoadError(null);
 
     // Neutralize all input
@@ -13893,15 +13867,12 @@ export default function GameCanvas() {
   const lobbyMenuScale = 0.85;
   const lobbyMenuWidthPercent = 100 / lobbyMenuScale;
   const lobbyMenuMaxWidth = 448 / lobbyMenuScale;
-  const mapScale = Math.max(0.75, Math.min(1.1, Math.min(containerSize.width / 920, containerSize.height / 650)));
 
-  const isAnyMapSelectorOpen =
-    (uiState.status === 'MENU' && isMapSelectOpen) ||
-    (uiState.status === 'LOBBY' && isMpMapSelectOpen);
+  const isAnyMapSelectorOpen = uiState.status === 'LOBBY' && isMpMapSelectOpen;
 
   return (
     <div ref={wrapperRef} className="w-full h-full relative overflow-hidden bg-[#050508] font-mono select-none">
-      {!isAnyMapSelectorOpen && (
+      {uiState.status !== 'MENU' && !isAnyMapSelectorOpen && (
         <div className="absolute inset-0 pointer-events-none z-[60] opacity-[0.1]" style={{
           backgroundImage: `repeating-linear-gradient(0deg, transparent, transparent 2px, #fff 2px, #fff 4px)`
         }} />
@@ -13955,290 +13926,15 @@ export default function GameCanvas() {
       {/* Absolute HUD Layers */}
       <AnimatePresence>
         {uiState.status === 'MENU' && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="absolute inset-0 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm z-[50] pointer-events-auto"
-          >
-            <AnimatePresence mode="wait">
-              {!isMapSelectOpen ? (
-                <motion.div
-                  key="main-menu"
-                  initial={{ opacity: 0, scale: 0.96, y: 15 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.96, y: -15 }}
-                  transition={{ duration: 0.2, ease: "easeOut" }}
-                  className="max-w-md w-full max-h-[90vh] bg-[#0d0f1b]/95 border-2 border-[#00f0ff] p-4 sm:p-6 shadow-[10px_10px_0_#00f0ff] flex flex-col justify-center text-center overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
-                >
-                  <h1 className="text-4xl sm:text-5xl md:text-6xl font-black text-white mb-2 sm:mb-3 tracking-tighter shrink-0 leading-none" style={{ fontFamily: 'var(--font-display, Anton, sans-serif)' }}>
-                    MEMORY <br/> <span className="text-[#00f0ff]">ARENA</span>
-                  </h1>
-                  <p className="text-[#00f0ff]/80 font-mono mb-3 sm:mb-6 whitespace-pre-wrap leading-snug sm:leading-relaxed text-[9px] sm:text-xs uppercase tracking-widest border-t border-b border-[#00f0ff]/30 py-2 sm:py-3 shrink-0">
-                    Remember the enemy.{"\n"}Build three-kill chains with the exact same color and shape to clear endless waves.
-                    {"\n\n"}
-                    Desktop: WASD + Mouse.{"\n"}Mobile: Dual Joysticks.
-                  </p>
-
-                  <div className="flex gap-2 mb-3 items-stretch shrink-0">
-                    <button
-                      onClick={() => setIsMapSelectOpen(true)}
-                      className="flex-1 py-2 sm:py-3 bg-transparent text-[#00f0ff] border-2 border-[#00f0ff]/50 hover:bg-[#00f0ff]/10 hover:border-[#00f0ff] font-bold tracking-[0.2em] transition-all duration-200 uppercase text-[10px] sm:text-xs"
-                    >
-                      CHANGE MAP: {MEMORY_MAPS[uiState.mapId]?.name || 'UNKNOWN'}
-                    </button>
-                    <button
-                      onClick={() => setUiState(prev => {
-                        const nextHard = !prev.hardMode;
-                        const nextGameMode: GameMode = nextHard ? 'hard' : 'normal';
-                        return {
-                          ...prev,
-                          hardMode: nextHard,
-                          gameMode: nextGameMode,
-                        };
-                      })}
-                      className={`flex items-center justify-center gap-1.5 py-2 sm:py-3 px-3 sm:px-4 border-2 font-bold tracking-[0.1em] transition-all duration-200 uppercase text-[10px] sm:text-xs cursor-pointer select-none
-                        ${uiState.hardMode
-                          ? 'bg-[#ff3300]/10 text-[#ff3300] border-[#ff3300] shadow-[0_0_10px_rgba(255,51,0,0.2)]'
-                          : 'bg-transparent text-[#00ffff]/60 border-[#00ffff]/20 hover:border-[#00ffff]/40 hover:text-[#00ffff]'
-                        }`}
-                    >
-                      <div className={`w-3.5 h-3.5 border flex items-center justify-center text-[9px] font-black rounded-sm
-                        ${uiState.hardMode
-                          ? 'border-[#ff3300] bg-[#ff3300] text-black'
-                          : 'border-[#00ffff]/40 bg-transparent'
-                        }`}
-                      >
-                        {uiState.hardMode && "✓"}
-                      </div>
-                      <span>HARD</span>
-                    </button>
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      const selectedMode: GameMode = uiState.hardMode ? 'hard' : 'normal';
-                      startFreshSinglePlayerRun(uiState.mapId, selectedMode);
-                    }}
-                    className="w-full py-3 sm:py-4 bg-[#00f0ff] hover:bg-white text-black border-2 border-[#00f0ff] font-black tracking-[0.2em] transition-all duration-200 uppercase text-base sm:text-lg active:translate-x-1 active:translate-y-1 active:shadow-none hover:shadow-[5px_5px_0_#fff] shrink-0"
-                  >
-                    ENTER ARENA
-                  </button>
-
-                  <div className="flex gap-2 mt-3 items-stretch shrink-0">
-                    <button
-                      onClick={() => {
-                        setMpError(null);
-                        setMpState(prev => ({ ...prev, joinCode: '', error: '' }));
-                        setUiState(prev => ({ ...prev, status: 'LOBBY' }));
-                      }}
-                      className="flex-1 py-2.5 sm:py-3 bg-[#0d0f1b] text-[#ffcc00] border-2 border-[#ffcc00]/60 hover:bg-[#ffcc00]/10 hover:border-[#ffcc00] font-black tracking-[0.15em] transition-all duration-200 uppercase text-[10px] sm:text-xs flex items-center justify-center shadow-[3px_3px_0_rgba(255,204,0,0.3)] hover:shadow-[3px_3px_0_rgba(255,204,0,0.6)] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none"
-                    >
-                      MULTIPLAYER
-                    </button>
-                    <button
-                      onClick={() => {
-                        setLoadError(null);
-                        fileInputRef.current?.click();
-                      }}
-                      className="flex-1 py-2.5 sm:py-3 bg-[#0d0f1b] text-[#b500ff] border-2 border-[#b500ff]/60 hover:bg-[#b500ff]/10 hover:border-[#b500ff] font-black tracking-[0.15em] transition-all duration-200 uppercase text-[10px] sm:text-xs flex items-center justify-center shadow-[3px_3px_0_rgba(181,0,255,0.3)] hover:shadow-[3px_3px_0_rgba(181,0,255,0.6)] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none"
-                    >
-                      LOAD MATCH
-                    </button>
-                  </div>
-                  {loadError && (
-                    <div role="alert" className="mt-2 text-center text-[#ff003c] text-xs font-mono font-bold tracking-wider uppercase">
-                      {loadError}
-                    </div>
-                  )}
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="map-select"
-                  initial={{ opacity: 0, scale: 0.96, y: 15 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.96, y: -15 }}
-                  transition={{ duration: 0.2, ease: "easeOut" }}
-                  className="relative w-full max-w-4xl max-h-[90dvh] flex flex-col bg-[#0d0f1b]/95 border-2 border-[#00f0ff] shadow-[0_0_30px_rgba(0,240,255,0.15)] ring-1 ring-black pointer-events-auto overflow-hidden"
-                >
-                  {/* Header */}
-                  <div className="shrink-0 p-3 md:p-5 flex justify-between items-center border-b border-[#00f0ff]/30 bg-gradient-to-b from-[#00f0ff]/10 to-transparent">
-                    <h2 className="text-2xl md:text-4xl font-black text-white tracking-tighter leading-none" style={{ fontFamily: 'var(--font-display, Anton, sans-serif)' }}>
-                      SELECT <span className="text-[#00f0ff]">ARENA</span>
-                    </h2>
-                    <button
-                      onClick={() => setIsMapSelectOpen(false)}
-                      className="text-[#00f0ff]/80 hover:text-[#00f0ff] font-bold tracking-[0.2em] uppercase text-xs md:text-sm border border-[#00f0ff]/30 hover:border-[#00f0ff]/80 px-3 py-1.5 md:px-4 md:py-2 bg-[#00f0ff]/10 transition-colors"
-                    >
-                      CLOSE [X]
-                    </button>
-                  </div>
-
-                  {/* Content Body */}
-                  <div className="flex-1 min-h-[0] flex flex-col md:flex-row p-3 md:p-5 gap-3 md:gap-5 overflow-hidden">
-
-                    {/* Map List Area */}
-                    <div className="flex-1 flex flex-col min-h-0 border border-[#00f0ff]/30 bg-black/40 overflow-hidden">
-                      <div
-                        ref={mapListRef}
-                        className="flex-1 overflow-y-auto p-2 grid grid-cols-2 gap-2 content-start [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
-                      >
-                        {Object.entries(MEMORY_MAPS).filter(([id]) => id === MEMORY_DEFAULT_MAP_ID)
-                          .sort((a, b) => {
-                            const difficultyRank: Record<string, number> = {
-                              'EASY': 1,
-                              'MEDIUM': 2,
-                              'HARD': 3,
-                              'EXPERT': 4
-                            };
-                            const rankA = difficultyRank[a[1].difficulty] || 99;
-                            const rankB = difficultyRank[b[1].difficulty] || 99;
-                            if (rankA !== rankB) {
-                              return rankA - rankB;
-                            }
-                            return a[1].name.localeCompare(b[1].name);
-                          })
-                          .map(([id, mapDef]) => (
-                          <button
-                            key={id}
-                            data-map-id={id}
-                            onClick={() => setUiState(prev => ({...prev, mapId: id}))}
-                            className={`flex flex-col items-center justify-center p-2 md:p-3 font-bold uppercase transition-all border-2
-                              ${uiState.mapId === id
-                                 ? 'bg-[#00f0ff] text-black border-[#00f0ff] shadow-[0_0_15px_rgba(0,240,255,0.3)]'
-                                 : 'bg-[#0d0f1b] text-[#00f0ff]/60 border-[#00f0ff]/30 hover:border-[#00f0ff]/80 hover:text-[#00f0ff] hover:bg-[#00f0ff]/5'
-                              }`}
-                          >
-                            <div className="text-[10px] sm:text-xs md:text-sm tracking-[0.1em] text-center leading-tight">{mapDef.name}</div>
-                            <div className={`text-[8px] sm:text-[9px] md:text-[10px] mt-1 tracking-widest ${
-                              uiState.mapId === id
-                                ? 'text-black/80'
-                                : mapDef.difficulty === 'EASY' ? 'text-green-400' :
-                                  mapDef.difficulty === 'MEDIUM' ? 'text-yellow-400' :
-                                  mapDef.difficulty === 'HARD' ? 'text-red-400' :
-                                  'text-purple-400'
-                            }`}>
-                               {mapDef.difficulty}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Map Preview Area */}
-                    <div className="w-full md:w-80 lg:w-[22rem] shrink-0 flex flex-col min-h-[240px] md:min-h-0 border border-[#00f0ff]/30 bg-black/40 p-3 overflow-hidden">
-                      {(() => {
-                          const selMap = MEMORY_MAPS[uiState.mapId] || MEMORY_MAPS[MEMORY_DEFAULT_MAP_ID];
-                          return (
-                            <div className="flex flex-col h-full overflow-hidden">
-                               <h3 className="text-base md:text-lg lg:text-xl font-black text-white uppercase tracking-wider mb-1 mt-1 shrink-0 px-1">{selMap.name}</h3>
-                               <div className={`text-[10px] md:text-xs font-bold mb-2 shrink-0 px-1 ${
-                                 selMap.difficulty === 'EASY' ? 'text-green-400' :
-                                 selMap.difficulty === 'MEDIUM' ? 'text-yellow-400' :
-                                 selMap.difficulty === 'HARD' ? 'text-red-400' :
-                                 'text-[#b500ff]'
-                               }`}>{selMap.difficulty}</div>
-                               <p className="text-[#00f0ff]/80 font-mono text-[9px] md:text-[10px] leading-relaxed mb-3 shrink-0 text-left line-clamp-3 px-1">
-                                 {selMap.description}
-                               </p>
-
-                               {/* Responsive map container */}
-                               <div className="flex-1 w-full min-h-[120px] flex items-center justify-center p-1 md:p-2 relative overflow-hidden shrink mt-1 mb-1">
-                                 <svg
-                                   viewBox={`0 0 ${getMapWidth(selMap)} ${getMapHeight(selMap)}`}
-                                   className="w-full h-full aspect-square max-w-[130px] max-h-[130px] sm:max-w-[145px] sm:max-h-[145px] md:max-w-[220px] md:max-h-[220px]"
-                                   preserveAspectRatio="xMidYMid meet"
-                                 >
-                                   {/* Base Map Square Background & Outer Border inside the coordinate system */}
-                                    <rect width={getMapWidth(selMap)} height={getMapHeight(selMap)} fill="#050508" stroke="rgba(0, 240, 255, 0.4)" strokeWidth="15" />
-
-                                    {/* Grid lines inside preview */}
-                                   <defs>
-                                     <pattern id="preview-grid" width="150" height="150" patternUnits="userSpaceOnUse">
-                                       <path d="M 150 0 L 0 0 0 150" fill="none" stroke="rgba(0, 240, 255, 0.05)" strokeWidth="4" />
-                                     </pattern>
-                                   </defs>
-                                   <rect width={getMapWidth(selMap)} height={getMapHeight(selMap)} fill="url(#preview-grid)" />
-
-                                   {/* Render Walls */}
-                                   {selMap.walls.map((w, i) => (
-                                     <rect
-                                       key={`wall-${i}`}
-                                       x={w.x}
-                                       y={w.y}
-                                       width={w.w}
-                                       height={w.h}
-                                       fill="rgba(0, 240, 255, 0.25)"
-                                       stroke="#00f0ff"
-                                       strokeWidth="15"
-                                     />
-                                   ))}
-
-                                   {/* Render Spawn Point */}
-                                   {selMap.spawnPoint && (
-                                     <g transform={`translate(${selMap.spawnPoint.x}, ${selMap.spawnPoint.y})`} pointerEvents="none" aria-hidden="true">
-                                       <circle r={70} fill="rgba(255, 204, 0, 0.10)" stroke="#FFCC00" strokeWidth={18} />
-                                       <circle r={18} fill="#FFCC00" />
-                                       <line x1={0} y1={-110} x2={0} y2={-80} stroke="#FFCC00" strokeWidth={18} />
-                                       <line x1={0} y1={80} x2={0} y2={110} stroke="#FFCC00" strokeWidth={18} />
-                                       <line x1={-110} y1={0} x2={-80} y2={0} stroke="#FFCC00" strokeWidth={18} />
-                                       <line x1={80} y1={0} x2={110} y2={0} stroke="#FFCC00" strokeWidth={18} />
-                                       <text
-                                         x={100}
-                                         y={-80}
-                                         fill="#FFCC00"
-                                         fontSize={120}
-                                         fontFamily="monospace"
-                                         fontWeight="bold"
-                                         stroke="#080A12"
-                                         strokeWidth={30}
-                                         paintOrder="stroke"
-                                         strokeLinejoin="round"
-                                         style={{ letterSpacing: '0.1em', filter: 'drop-shadow(0px 2px 2px rgba(255, 204, 0, 0.35))' }}
-                                       >
-                                         START
-                                       </text>
-                                     </g>
-                                   )}
-                                 </svg>
-                               </div>
-                            </div>
-                          )
-                       })()}
-                    </div>
-
-                  </div>
-
-                  {/* Footer / Action */}
-                  <div className="shrink-0 p-3 md:p-4 border-t border-[#00f0ff]/30 bg-[#0d0f1b] backdrop-blur-sm flex gap-3">
-                    <button
-                      onClick={() => {
-                        const selectedMode: GameMode = uiState.hardMode ? 'hard' : 'normal';
-                        startFreshSinglePlayerRun(uiState.mapId, selectedMode);
-                      }}
-                      className="flex-1 py-3 md:py-4 bg-[#00f0ff]/20 hover:bg-[#00f0ff]/40 text-[#00f0ff] border border-[#00f0ff]/50 font-black tracking-[0.2em] transition-all duration-200 uppercase text-sm md:text-base lg:text-lg cursor-pointer"
-                    >
-                      ENTER ARENA
-                    </button>
-                    <button
-                      onClick={() => {
-                        const keys = Object.keys(MAPS);
-                        if (keys.length > 0) {
-                          const randomKey = keys[Math.floor(Math.random() * keys.length)];
-                          selectAndScrollToMap(randomKey);
-                        }
-                      }}
-                      className="flex-none aspect-square py-3 md:py-4 px-3 md:px-4 flex items-center justify-center bg-[#00f0ff]/20 hover:bg-[#00f0ff]/40 text-[#00f0ff] border border-[#00f0ff]/50 transition-all duration-200 cursor-pointer"
-                      title="Select Random Map"
-                    >
-                      <Shuffle className="w-5 h-5 md:w-6 md:h-6" />
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </motion.div>
+          <MainMenu
+            onStart={() => startFreshSinglePlayerRun()}
+            onLoad={() => {
+              setLoadError(null);
+              fileInputRef.current?.click();
+            }}
+            loadError={loadError}
+            deviceType={isMobileRef.current ? 'mobile' : 'desktop'}
+          />
         )}
       </AnimatePresence>
 
