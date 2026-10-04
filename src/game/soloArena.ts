@@ -76,7 +76,12 @@ export function isArenaPositionClear(x: number, y: number, radius: number, walls
 // Nudge a player or uncollected pickup to the nearest clear edge if a new wall
 // forms at their position. No damage, reset to spawn, or change to arena bounds.
 export function findClearArenaPosition(body: { x: number; y: number; radius: number }, walls: readonly ArenaWall[]) {
-  const padding = body.radius + 2;
+  if (body.x >= 40 + body.radius && body.x <= SOLO_ARENA_WIDTH - 40 - body.radius &&
+      body.y >= 40 + body.radius && body.y <= SOLO_ARENA_HEIGHT - 40 - body.radius &&
+      isArenaPositionClear(body.x, body.y, body.radius, walls)) return { x: body.x, y: body.y };
+
+  // A tiny clearance avoids floating-point contact without an unnecessary nudge.
+  const padding = body.radius + 0.01;
   const clampX = (x: number) => Math.max(40 + padding, Math.min(SOLO_ARENA_WIDTH - 40 - padding, x));
   const clampY = (y: number) => Math.max(40 + padding, Math.min(SOLO_ARENA_HEIGHT - 40 - padding, y));
   const origin = { x: clampX(body.x), y: clampY(body.y) };
@@ -84,11 +89,23 @@ export function findClearArenaPosition(body: { x: number; y: number; radius: num
   const ys = [origin.y, 450, ...walls.flatMap(wall => [clampY(wall.y - padding), clampY(wall.y + wall.h + padding)])];
   let nearest = { x: 600, y: 450 };
   let nearestDistance = Infinity;
-  for (const x of xs) for (const y of ys) {
+  const consider = (x: number, y: number) => {
     const distance = (x - body.x) ** 2 + (y - body.y) ** 2;
     if (distance < nearestDistance && isArenaPositionClear(x, y, body.radius, walls)) {
       nearest = { x, y };
       nearestDistance = distance;
+    }
+  };
+  for (const x of xs) for (const y of ys) consider(x, y);
+  // Circle/rectangle corner contact has a diagonal nearest exit. Axis-only
+  // candidates would move the player farther than necessary near a corner.
+  for (const wall of walls) {
+    for (const x of [wall.x, wall.x + wall.w]) for (const y of [wall.y, wall.y + wall.h]) {
+      const dx = body.x - x;
+      const dy = body.y - y;
+      if ((x === wall.x ? dx > 0 : dx < 0) || (y === wall.y ? dy > 0 : dy < 0)) continue;
+      const distance = Math.hypot(dx, dy);
+      if (distance > 0) consider(clampX(x + dx / distance * padding), clampY(y + dy / distance * padding));
     }
   }
   return nearest;

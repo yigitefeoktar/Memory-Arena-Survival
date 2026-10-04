@@ -10361,7 +10361,16 @@ export default function GameCanvas() {
         // 1. Update Player Movement
         const pBeforeX = state.player.x;
         const pBeforeY = state.player.y;
-        if (STATUS === 'PLAYING') {
+        const waveBreakActive = state.memoryMode && state.soloWave.phase === 'break';
+        if (waveBreakActive) {
+          // Freeze keyboard/joystick movement and residual knockback while the
+          // arena rebuilds. Wall-overlap relocation above remains enabled.
+          state.player.vx = 0;
+          state.player.vy = 0;
+          state.player.kbvx = 0;
+          state.player.kbvy = 0;
+        }
+        if (STATUS === 'PLAYING' && !waveBreakActive) {
           if (state.player.dash.active && currentTime >= state.player.dash.endTime) {
             state.player.dash.active = false;
           }
@@ -10436,7 +10445,7 @@ export default function GameCanvas() {
            state.player.processedZoneKbs = [];
         }
         for (const zone of state.zones) {
-           if (zone.ownerId !== localOwnerId) {
+           if (!waveBreakActive && zone.ownerId !== localOwnerId) {
               if (!state.player.processedZoneKbs.includes(zone.spawnTime)) {
                  const dx = state.player.x - zone.x;
                  const dy = state.player.y - zone.y;

@@ -90,3 +90,14 @@ test('materializing walls move players and pickups to the nearest clear point in
     assert.deepEqual(findClearArenaPosition(free, layout.walls), { x: free.x, y: free.y });
   }
 });
+
+test('valid positions stay fixed and corner overlaps use the shortest diagonal exit', () => {
+  const walls = getSoloArenaLayout(1).walls;
+  const nearBoundary = { x: 56, y: 450, radius: 16 };
+  assert.deepEqual(findClearArenaPosition(nearBoundary, walls), { x: 56, y: 450 });
+  const body = { x: 332, y: 252, radius: 16 };
+  const clear = findClearArenaPosition(body, walls);
+  assert.ok(isArenaPositionClear(clear.x, clear.y, body.radius, walls));
+  assert.ok(Math.abs((clear.x - body.x) - (clear.y - body.y)) < 0.0001);
+  assert.ok(Math.abs(Math.hypot(clear.x - body.x, clear.y - body.y) - (16.01 - Math.hypot(8, 8))) < 0.0001);
+});
