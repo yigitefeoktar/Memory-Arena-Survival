@@ -12696,9 +12696,11 @@ export default function GameCanvas() {
         state.camera.x = activeMapWidth < state.camera.width
           ? (activeMapWidth - state.camera.width) / 2
           : clamp(state.camera.x, 0, activeMapWidth - state.camera.width);
-        state.camera.y = activeMapHeight < state.camera.height
+        // Let the arena edges move clear of the HUD while following the player.
+        const verticalCameraMargin = Math.min(160, state.camera.height * 0.2);
+        state.camera.y = activeMapHeight + verticalCameraMargin * 2 < state.camera.height
           ? (activeMapHeight - state.camera.height) / 2
-          : clamp(state.camera.y, 0, activeMapHeight - state.camera.height);
+          : clamp(state.camera.y, -verticalCameraMargin, activeMapHeight - state.camera.height + verticalCameraMargin);
       }
 
       // Clear background
