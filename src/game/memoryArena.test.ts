@@ -26,6 +26,8 @@ import {
   createMemoryCoreSpawners,
   createShuffledShapeBag,
   createTriangleAiState,
+  createTriangleAttackCoordinator,
+  enforceTriangleAttackLimit,
   derivePlayerUpgradeRanks,
   ENEMY_FACTIONS,
   ENEMY_SHAPES,
@@ -62,6 +64,7 @@ import {
   turnAngleTowards,
   type ColoredCoreSpawnerState,
   type EnemyAiState,
+  type TriangleAttackEnemy,
 } from './memoryArena';
 
 test('3x3 arena composition creates a seamless 9000px world', () => {
@@ -684,6 +687,66 @@ test('triangle advances through telegraph, dash, hit-once, and recovery', () => 
   assert.equal(ai.phase, 'recover');
   ai = advanceTriangleAi(ai, { now: 6100, seesTarget: false, travelled: 0, collidedWithWall: false });
   assert.equal(ai.phase, 'wander');
+});
+
+test('one triangle holds the slot throughout preparation and dash, releasing it on wall impact', () => {
+  const enemies: TriangleAttackEnemy[] = Array.from({ length: 3 }, () => ({ shape: 'triangle', triangleAi: createTriangleAiState() }));
+  let attacks = createTriangleAttackCoordinator(enemies, 100);
+  const step = (enemy: TriangleAttackEnemy, now: number, collidedWithWall = false) => attacks.advance(enemy, enemy.triangleAi!, {
+    now, seesTarget: true, travelled: 0, collidedWithWall,
+  });
+  enemies.forEach(enemy => step(enemy, 100));
+  assert.deepEqual(enemies.map(enemy => enemy.triangleAi!.phase), ['telegraph', 'wander', 'wander']);
+  // Rebuilding ownership each frame must reserve the slot even when a waiting
+  // enemy updates before the attacker (and when the attacker is out of sight).
+  attacks = createTriangleAttackCoordinator(enemies, 1000);
+  step(enemies[1], 1000);
+  attacks.advance(enemies[0], enemies[0].triangleAi!, { now: 1000, seesTarget: false, travelled: 0, collidedWithWall: false });
+  step(enemies[2], 1000);
+  assert.deepEqual(enemies.map(enemy => enemy.triangleAi!.phase), ['dash', 'wander', 'wander']);
+  enemies[0].triangleAi = markTrianglePlayerHit(enemies[0].triangleAi!);
+  step(enemies[0], 1010);
+  assert.equal(enemies[0].triangleAi!.hitPlayer, true);
+  step(enemies[0], 1020, true);
+  step(enemies[1], 1020);
+  step(enemies[2], 1020);
+  assert.deepEqual(enemies.map(enemy => enemy.triangleAi!.phase), ['recover', 'telegraph', 'wander']);
+});
+
+test('killing the attacker releases the slot and a cleared wave cannot leave a stale owner', () => {
+  const attacker: TriangleAttackEnemy = { shape: 'triangle', triangleAi: { ...createTriangleAiState(), phase: 'dash' } };
+  const waiting: TriangleAttackEnemy = { shape: 'triangle', triangleAi: createTriangleAiState() };
+  let attacks = createTriangleAttackCoordinator([attacker, waiting], 100);
+  attacks.release(attacker);
+  attacks.advance(waiting, waiting.triangleAi!, { now: 100, seesTarget: true, travelled: 0, collidedWithWall: false });
+  assert.equal(waiting.triangleAi!.phase, 'telegraph');
+  const nextWave: TriangleAttackEnemy = { shape: 'triangle', triangleAi: createTriangleAiState() };
+  attacks = createTriangleAttackCoordinator([nextWave], 200);
+  attacks.advance(nextWave, nextWave.triangleAi!, { now: 200, seesTarget: true, travelled: 0, collidedWithWall: false });
+  assert.equal(nextWave.triangleAi!.phase, 'telegraph');
+});
+
+test('older saves keep one existing dash and return overlapping attackers to wandering', () => {
+  const enemies: TriangleAttackEnemy[] = [
+    { shape: 'triangle', triangleAi: { ...createTriangleAiState(10), phase: 'telegraph' } },
+    { shape: 'triangle', triangleAi: { ...createTriangleAiState(50), phase: 'dash', dashDistance: 200, hitPlayer: true } },
+    { shape: 'triangle', triangleAi: { ...createTriangleAiState(60), phase: 'dash' } },
+    { shape: 'triangle', triangleAi: { ...createTriangleAiState(20), phase: 'recover' } },
+  ];
+  assert.equal(enforceTriangleAttackLimit(enemies, 100), enemies[1]);
+  assert.deepEqual(enemies.map(enemy => enemy.triangleAi!.phase), ['wander', 'dash', 'wander', 'recover']);
+  assert.equal(enemies[1].triangleAi!.dashDistance, 200);
+  assert.equal(enemies[1].triangleAi!.hitPlayer, true);
+  assert.equal(enforceTriangleAttackLimit(enemies, 200), enemies[1]);
+});
+
+test('allied triangles do not occupy the player attack slot', () => {
+  const ally: TriangleAttackEnemy = { shape: 'triangle', isPlayerAlly: true, triangleAi: { ...createTriangleAiState(), phase: 'dash' } };
+  const enemy: TriangleAttackEnemy = { shape: 'triangle', triangleAi: createTriangleAiState() };
+  const attacks = createTriangleAttackCoordinator([ally, enemy], 100);
+  attacks.advance(enemy, enemy.triangleAi!, { now: 100, seesTarget: true, travelled: 0, collidedWithWall: false });
+  assert.equal(ally.triangleAi!.phase, 'dash');
+  assert.equal(enemy.triangleAi!.phase, 'telegraph');
 });
 
 test('triangle warning animation keeps the 900ms timing and settles before the dash', () => {

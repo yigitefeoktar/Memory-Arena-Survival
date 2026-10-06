@@ -14,7 +14,6 @@ import {
   ABILITY_BY_FACTION,
   addFactionEmergencyPressure,
   advanceSoloWaveBreak,
-  advanceTriangleAi,
   applyPlayerDamage,
   areEnemyFactionsHostile,
   calculateEnemySeparationSteering,
@@ -32,6 +31,8 @@ import {
   createInitialSoloWaveState,
   createMemoryCoreSpawners,
   createTriangleAiState,
+  createTriangleAttackCoordinator,
+  enforceTriangleAttackLimit,
   derivePlayerUpgradeRanks,
   ENEMY_COLOR_HEX,
   ENEMY_FACTIONS,
@@ -5741,6 +5742,7 @@ export default function GameCanvas() {
         cleanState.blocks = cleanState.blocks.filter(block => isArenaPositionClear(block.x, block.y, block.size / Math.SQRT2, loadedWalls));
       }
     }
+    if (isMemorySave) enforceTriangleAttackLimit(cleanState.enemies, loadNow);
     return {
       cleanUi,
       cleanState,
@@ -10223,6 +10225,7 @@ export default function GameCanvas() {
 
         // 3. Update Enemies
         const enemiesDefeatedByFactions = new Set<MemoryEnemy>();
+        const triangleAttacks = createTriangleAttackCoordinator(state.enemies, currentTime);
         for (let i = state.enemies.length - 1; i >= 0; i--) {
           const enemy = state.enemies[i];
 
@@ -10457,7 +10460,7 @@ export default function GameCanvas() {
               ));
               const seesTarget = targetIsCombatant && STATUS === 'PLAYING' && distanceToTarget <= MEMORY_ARENA_CONFIG.triangle.detectionRange && !blockedByWall;
               const beforeAi = enemy.triangleAi ?? createTriangleAiState(currentTime);
-              let triangleAi = advanceTriangleAi(beforeAi, {
+              let triangleAi = triangleAttacks.advance(enemy, beforeAi, {
                 now: currentTime,
                 seesTarget,
                 travelled: 0,
@@ -10609,6 +10612,7 @@ export default function GameCanvas() {
                       enemy.radius + candidate.radius,
                     )) {
                       enemiesDefeatedByFactions.add(candidate);
+                      triangleAttacks.release(candidate);
                       const defeatedColor = candidate.isPlayerAlly
                         ? PLAYER_COLOR_HEX
                         : ENEMY_COLOR_HEX[candidate.factionColor];
@@ -10637,7 +10641,7 @@ export default function GameCanvas() {
                   }
                 }
 
-                triangleAi = advanceTriangleAi(triangleAi, {
+                triangleAi = triangleAttacks.advance(enemy, triangleAi, {
                   now: currentTime,
                   seesTarget,
                   travelled,

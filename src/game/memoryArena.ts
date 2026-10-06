@@ -1391,6 +1391,56 @@ export function createTriangleAiState(now = 0): TriangleAiState {
   return { phase: 'wander', phaseStartedAt: now, dashDistance: 0, hitPlayer: false };
 }
 
+export interface TriangleAttackEnemy {
+  shape?: EnemyShape;
+  isPlayerAlly?: boolean;
+  triangleAi?: TriangleAiState;
+}
+
+function holdsTriangleAttackSlot(ai?: TriangleAiState): boolean {
+  return ai?.phase === 'telegraph' || ai?.phase === 'dash';
+}
+
+// Derive ownership from living enemies, including loaded saves, rather than
+// persisting a lock that could outlive a killed enemy or a cleared wave.
+export function enforceTriangleAttackLimit<T extends TriangleAttackEnemy>(enemies: readonly T[], now: number): T | null {
+  let owner: T | null = null;
+  for (const enemy of enemies) {
+    if (enemy.shape !== 'triangle' || enemy.isPlayerAlly || !holdsTriangleAttackSlot(enemy.triangleAi)) continue;
+    if (!owner ||
+        (enemy.triangleAi!.phase === 'dash' && owner.triangleAi!.phase !== 'dash') ||
+        (enemy.triangleAi!.phase === owner.triangleAi!.phase && enemy.triangleAi!.phaseStartedAt < owner.triangleAi!.phaseStartedAt)) {
+      owner = enemy;
+    }
+  }
+  for (const enemy of enemies) {
+    if (enemy !== owner && enemy.shape === 'triangle' && !enemy.isPlayerAlly && holdsTriangleAttackSlot(enemy.triangleAi)) {
+      enemy.triangleAi = createTriangleAiState(now);
+    }
+  }
+  return owner;
+}
+
+export function createTriangleAttackCoordinator<T extends TriangleAttackEnemy>(enemies: readonly T[], now: number) {
+  let owner = enforceTriangleAttackLimit(enemies, now);
+  return {
+    advance(enemy: T, current: TriangleAiState, input: TriangleStepInput): TriangleAiState {
+      if (owner?.isPlayerAlly) owner = null;
+      const next = advanceTriangleAi(current, {
+        ...input,
+        seesTarget: input.seesTarget && (Boolean(enemy.isPlayerAlly) || owner === null || owner === enemy),
+      });
+      enemy.triangleAi = next;
+      if (!enemy.isPlayerAlly && holdsTriangleAttackSlot(next)) owner = enemy;
+      else if (owner === enemy) owner = null;
+      return next;
+    },
+    release(enemy: T) {
+      if (owner === enemy) owner = null;
+    },
+  };
+}
+
 export function advanceTriangleAi(
   current: TriangleAiState,
   input: TriangleStepInput,
