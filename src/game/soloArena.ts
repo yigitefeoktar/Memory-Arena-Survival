@@ -1,4 +1,4 @@
-import { MEMORY_ARENA_CONFIG, restoreSoloWaveState, type SoloWaveState } from './memoryArena';
+import { MEMORY_ARENA_CONFIG, type SoloWaveState } from './memoryArena';
 import { getSpawnVisual, SPAWN_ANIMATION_MS } from './roundOpening';
 
 export interface ArenaWall { x: number; y: number; w: number; h: number }
@@ -51,7 +51,7 @@ export function getArenaMaterializeAtMs(wave: number) {
 // Derive everything from the saved wave countdown so pausing and loading retain
 // the exact geometry and transition phase without additional clocks or save data.
 export function getSoloArenaFrame(wave: SoloWaveState, reducedMotion = false) {
-  const elapsed = MEMORY_ARENA_CONFIG.waves.breakMs - restoreSoloWaveState(wave).breakRemainingMs;
+  const elapsed = MEMORY_ARENA_CONFIG.waves.breakMs - Math.min(wave.breakRemainingMs, MEMORY_ARENA_CONFIG.waves.breakMs);
   const materializeAt = getArenaMaterializeAtMs(wave.number);
   const outgoing = wave.phase === 'break' && elapsed < materializeAt;
   const layout = getSoloArenaLayout(wave.number + (wave.phase === 'break' && !outgoing ? 1 : 0));

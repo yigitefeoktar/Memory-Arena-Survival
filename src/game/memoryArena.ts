@@ -491,14 +491,21 @@ export function isValidPlayerUpgradeRanks(value: unknown): value is PlayerUpgrad
   ));
 }
 
-export function getPlayerLevelStats(ranks: PlayerUpgradeRanks): PlayerLevelStats {
+// Hard Mode restores the balance before Normal gained health and shorter waves.
+export function getSoloDifficultySettings(hardMode = false) {
+  return hardMode
+    ? { maxHp: 100, maximumStreaks: 5 }
+    : { maxHp: MEMORY_ARENA_CONFIG.player.maxHp, maximumStreaks: MEMORY_ARENA_CONFIG.waves.maximumStreaks };
+}
+
+export function getPlayerLevelStats(ranks: PlayerUpgradeRanks, hardMode = false): PlayerLevelStats {
   const progression = MEMORY_ARENA_CONFIG.progression;
   const uncappedBulletsPerSecond = 1.25 * Math.pow(progression.fireRateMultiplierPerUpgrade, ranks.fireRate);
   const bulletsPerSecond = Math.min(progression.maximumBulletsPerSecond, uncappedBulletsPerSecond);
   const streamCount: 1 | 3 = bulletsPerSecond > progression.threeStreamThresholdBulletsPerSecond ? 3 : 1;
   return {
     maxHp: Math.min(1_000_000_000, Math.round(
-      MEMORY_ARENA_CONFIG.player.maxHp * Math.pow(progression.hpMultiplierPerUpgrade, ranks.maxHp),
+      getSoloDifficultySettings(hardMode).maxHp * Math.pow(progression.hpMultiplierPerUpgrade, ranks.maxHp),
     )),
     regenerationPercentPerSecond:
       MEMORY_ARENA_CONFIG.player.regenerationPercentPerSecond +
@@ -1153,9 +1160,9 @@ export function createInitialSoloWaveState(): SoloWaveState {
   return { number: 1, completedStreaks: 0, phase: 'active', breakRemainingMs: 0 };
 }
 
-export function getSoloWaveStreakTarget(wave: number): number {
+export function getSoloWaveStreakTarget(wave: number, hardMode = false): number {
   return Math.min(
-    MEMORY_ARENA_CONFIG.waves.maximumStreaks,
+    getSoloDifficultySettings(hardMode).maximumStreaks,
     MEMORY_ARENA_CONFIG.waves.initialStreaks + Math.max(0, Math.floor(wave) - 1),
   );
 }
@@ -1183,7 +1190,7 @@ export function getSoloWaveRoster(wave: number): EnemyIdentity[] {
     Array.from({ length: MEMORY_ARENA_CONFIG.waves.enemiesPerIdentity }, () => identity));
 }
 
-export function getSoloWaveRescueSpawns(wave: SoloWaveState, chain: ChainState, living: readonly EnemyIdentity[]): EnemyIdentity[] {
+export function getSoloWaveRescueSpawns(wave: SoloWaveState, chain: ChainState, living: readonly EnemyIdentity[], hardMode = false): EnemyIdentity[] {
   if (wave.phase !== 'active') return [];
   if (living.length === 0) return getSoloWaveRoster(wave.number);
 
@@ -1203,7 +1210,7 @@ export function getSoloWaveRescueSpawns(wave: SoloWaveState, chain: ChainState, 
     add(chain.target, Math.max(0, needed + 1 - (counts.get(keyOf(chain.target)) ?? 0)));
   }
 
-  const remainingStreaks = getSoloWaveStreakTarget(wave.number) - wave.completedStreaks;
+  const remainingStreaks = getSoloWaveStreakTarget(wave.number, hardMode) - wave.completedStreaks;
   const desiredCapacity = Math.min(remainingStreaks + 1, MEMORY_ARENA_CONFIG.waves.reserveStreakCapacity);
   const capacity = () => identities.reduce((total, identity) => {
     const partialProgress = chain.target && keyOf(identity) === keyOf(chain.target) ? chain.progress : 0;
@@ -1224,17 +1231,17 @@ export function getSoloWaveSpeedMultiplier(wave: number): number {
   );
 }
 
-export function registerSoloWaveStreak(current: SoloWaveState): SoloWaveState {
+export function registerSoloWaveStreak(current: SoloWaveState, hardMode = false): SoloWaveState {
   if (current.phase !== 'active') return current;
   const completedStreaks = current.completedStreaks + 1;
-  return completedStreaks >= getSoloWaveStreakTarget(current.number)
+  return completedStreaks >= getSoloWaveStreakTarget(current.number, hardMode)
     ? { ...current, completedStreaks, phase: 'break', breakRemainingMs: MEMORY_ARENA_CONFIG.waves.breakMs }
     : { ...current, completedStreaks };
 }
 
-export function advanceSoloWaveBreak(current: SoloWaveState, elapsedMs: number): SoloWaveState {
+export function advanceSoloWaveBreak(current: SoloWaveState, elapsedMs: number, hardMode = false): SoloWaveState {
   if (current.phase !== 'break') return current;
-  const remaining = Math.max(0, restoreSoloWaveState(current).breakRemainingMs - Math.max(0, elapsedMs));
+  const remaining = Math.max(0, restoreSoloWaveState(current, hardMode).breakRemainingMs - Math.max(0, elapsedMs));
   return remaining > 0
     ? { ...current, breakRemainingMs: remaining }
     : { number: current.number + 1, completedStreaks: 0, phase: 'active', breakRemainingMs: 0 };
@@ -1256,10 +1263,10 @@ export function isValidSoloWaveState(value: unknown, streakCap: number = MEMORY_
       : wave.completedStreaks === streakTarget);
 }
 
-export function restoreSoloWaveState(wave: SoloWaveState): SoloWaveState {
-  const completedStreaks = Math.min(wave.completedStreaks, getSoloWaveStreakTarget(wave.number));
+export function restoreSoloWaveState(wave: SoloWaveState, hardMode = false): SoloWaveState {
+  const completedStreaks = Math.min(wave.completedStreaks, getSoloWaveStreakTarget(wave.number, hardMode));
   // Older active saves may already satisfy the new cap. Clear them without losing the run.
-  if (wave.phase === 'active' && completedStreaks >= getSoloWaveStreakTarget(wave.number)) {
+  if (wave.phase === 'active' && completedStreaks >= getSoloWaveStreakTarget(wave.number, hardMode)) {
     return { ...wave, completedStreaks, phase: 'break', breakRemainingMs: MEMORY_ARENA_CONFIG.waves.breakMs };
   }
   return { ...wave, completedStreaks, breakRemainingMs: Math.min(wave.breakRemainingMs, MEMORY_ARENA_CONFIG.waves.breakMs) };

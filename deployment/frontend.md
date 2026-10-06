@@ -13,7 +13,7 @@ npm test
 npm run build:frontend
 ```
 
-Vercel reads `vercel.json` and publishes only `dist/frontend`. Verify the production deployment reaches READY for the exact pushed SHA; check this stable URL, single-player and saved-run loading. The main menu must have no multiplayer, map selection or difficulty controls. GitHub's Vercel commit status provides deployment evidence.
+Vercel reads `vercel.json` and publishes only `dist/frontend`. Verify the production deployment reaches READY for the exact pushed SHA; check this stable URL, both solo difficulties and saved-run loading. The main menu defaults to Normal (125 HP, up to four streaks) and offers Hard Mode (100 HP, up to five streaks). Both heal only on wave clear; saves and retries retain their mode. Multiplayer and map selection remain hidden. GitHub's Vercel commit status provides deployment evidence.
 
 `deployment.json` explicitly declares `backend: null`. Frontend mode disables Socket.IO and server-provided analytics configuration. Do not deploy Express, create PC tasks/tunnels, or add another game's backend URL. Future multiplayer requires an explicitly authorized and tested backend.
 

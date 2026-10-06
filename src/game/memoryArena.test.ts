@@ -356,7 +356,7 @@ test('solo waves clear only after enough exact three-kill streaks and restart af
 });
 
 test('waves progress from two to four streaks and later waves clear at the cap', () => {
-  assert.deepEqual([1, 2, 3, 4, 5, 10, 100, 1_000_000].map(getSoloWaveStreakTarget), [2, 3, 4, 4, 4, 4, 4, 4]);
+  assert.deepEqual([1, 2, 3, 4, 5, 10, 100, 1_000_000].map(number => getSoloWaveStreakTarget(number)), [2, 3, 4, 4, 4, 4, 4, 4]);
   for (const number of [3, 4, 5, 10, 100, 999_999]) {
     let wave = { ...createInitialSoloWaveState(), number };
     for (let streak = 1; streak <= 4; streak++) {
@@ -370,6 +370,33 @@ test('waves progress from two to four streaks and later waves clear at the cap',
       number: number + 1, completedStreaks: 0, phase: 'active', breakRemainingMs: 0,
     });
   }
+});
+
+test('Hard Mode restores 100 HP and five-streak waves, healing only on the fifth streak', () => {
+  const ranks = createInitialPlayerUpgradeRanks();
+  assert.equal(getPlayerLevelStats(ranks).maxHp, 125);
+  assert.equal(getPlayerLevelStats(ranks, true).maxHp, 100);
+  assert.equal(getPlayerLevelStats({ ...ranks, maxHp: 1 }, true).maxHp, 140);
+  assert.deepEqual([1, 2, 3, 4, 10, 100].map(number => getSoloWaveStreakTarget(number, true)), [2, 3, 4, 5, 5, 5]);
+  const third = { ...createInitialSoloWaveState(), number: 10, completedStreaks: 3 };
+  const fourth = registerSoloWaveStreak(third, true);
+  assert.equal(fourth.phase, 'active');
+  assert.equal(restorePlayerHealthOnWaveClear(40, 100, third, fourth), 40);
+  assert.equal(isValidSoloWaveState(fourth, 5), true);
+  assert.deepEqual(restoreSoloWaveState(fourth, true), fourth);
+  const fifth = registerSoloWaveStreak(fourth, true);
+  assert.equal(fifth.phase, 'break');
+  assert.equal(fifth.completedStreaks, 5);
+  assert.equal(restorePlayerHealthOnWaveClear(40, 100, fourth, fifth), 100);
+  assert.equal(isValidSoloWaveState(fifth, 5), true);
+  assert.deepEqual(restoreSoloWaveState(fifth, true), fifth);
+  assert.deepEqual(advanceSoloWaveBreak(fifth, MEMORY_ARENA_CONFIG.waves.breakMs, true), {
+    number: 11, completedStreaks: 0, phase: 'active', breakRemainingMs: 0,
+  });
+  const identity = getSoloWaveIdentities(10)[0];
+  const living = Array.from({ length: 6 }, () => identity);
+  assert.deepEqual(getSoloWaveRescueSpawns(third, createInitialChainState(), living), []);
+  assert.equal(getSoloWaveRescueSpawns(third, createInitialChainState(), living, true).length, 3);
 });
 
 test('uncapped older saves retain progress or clear once they have earned four streaks', () => {

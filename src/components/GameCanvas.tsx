@@ -38,6 +38,7 @@ import {
   getMemoryThreatStats,
   getMissingEnemyCombinations,
   getPlayerLevelStats,
+  getSoloDifficultySettings,
   getRaidFormationOffset,
   getSoloWaveRescueSpawns,
   getSoloWaveSpeedMultiplier,
@@ -251,7 +252,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 16;
+const SAVE_VERSION = 17;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -4785,11 +4786,18 @@ export default function GameCanvas() {
       throw new Error("INVALID SAVE FILE");
     }
 
+    // Earlier solo versions always used the shared Normal balance. New saves
+    // retain their own mode, independent of the main-menu switch when loaded.
+    const cleanGameMode: GameMode = isMemorySave
+      ? (version >= 17 && rawUi.gameMode === 'hard' ? 'hard' : 'normal')
+      : ((rawUi.gameMode && isValidGameMode(rawUi.gameMode)) ? rawUi.gameMode : (rawUi.hardMode ? 'hard' : 'normal'));
+
     if (isMemorySave) {
       if (rawState.memoryMode !== true || !isValidChainState(normalizedRawChain)) {
         throw new Error("INVALID SAVE FILE");
       }
-      const savedStreakCap = version < 15 ? Infinity : version < 16 ? 5 : MEMORY_ARENA_CONFIG.waves.maximumStreaks;
+      const savedStreakCap = version < 15 ? Infinity : version < 16 ? 5
+        : getSoloDifficultySettings(cleanGameMode === 'hard').maximumStreaks;
       if (version >= 11 && (mapId !== (version >= 12 ? MEMORY_DEFAULT_MAP_ID : 'classic_arena') || !isValidSoloWaveState(rawState.soloWave, savedStreakCap) ||
           !Array.isArray(rawState.spawners) || rawState.spawners.length !== 0)) {
         throw new Error("INVALID SAVE FILE");
@@ -4853,7 +4861,7 @@ export default function GameCanvas() {
           ? { ...rawState.playerUpgradeRanks }
           : derivePlayerUpgradeRanks(rawState.chain.level))
       : createInitialPlayerUpgradeRanks();
-    const reconstructedPlayerLevelStats = getPlayerLevelStats(reconstructedPlayerUpgradeRanks);
+    const reconstructedPlayerLevelStats = getPlayerLevelStats(reconstructedPlayerUpgradeRanks, isMemorySave && cleanGameMode === 'hard');
     let reconstructedAbilityPickups: AbilityPickup[] = [];
     if (isMemorySave && version >= 2) {
       if (rawState.abilityPickups.length > ENEMY_FACTIONS.length) {
@@ -4902,10 +4910,6 @@ export default function GameCanvas() {
       }
       return loadNow;
     };
-
-    const cleanGameMode: GameMode = (rawUi.gameMode && isValidGameMode(rawUi.gameMode))
-      ? rawUi.gameMode
-      : (rawUi.hardMode ? 'hard' : 'normal');
 
     let px = rawPlayer.x;
     let py = rawPlayer.y;
@@ -5593,7 +5597,7 @@ export default function GameCanvas() {
       : createInitialFactionEmergencyStates(loadNow);
 
     const reconstructedSoloWave = isMemorySave && version >= 11
-      ? restoreSoloWaveState(rawState.soloWave)
+      ? restoreSoloWaveState(rawState.soloWave, cleanGameMode === 'hard')
       : createInitialSoloWaveState();
     if (isMemorySave && version >= 11) {
       reconstructedPlayer.hp = restorePlayerHealthOnWaveClear(
@@ -6457,7 +6461,7 @@ export default function GameCanvas() {
     state.player.processedZoneKbs = [];
     state.player.lastShoot = performance.now();
     state.playerUpgradeRanks = createInitialPlayerUpgradeRanks();
-    const initialPlayerStats = getPlayerLevelStats(state.playerUpgradeRanks);
+    const initialPlayerStats = getPlayerLevelStats(state.playerUpgradeRanks, state.memoryMode && selectedGameMode === 'hard');
     state.player.hp = initialPlayerStats.maxHp;
     state.player.maxHp = initialPlayerStats.maxHp;
     state.player.abilityLastUsed = performance.now() - MEMORY_ABILITY_SHARED_COOLDOWN;
@@ -6635,7 +6639,7 @@ export default function GameCanvas() {
 
     // Solo wave play uses its compact arena; multiplayer retains its map selection.
     const selectedMapId = MEMORY_DEFAULT_MAP_ID;
-    const selectedGameMode: GameMode = 'normal';
+    const selectedGameMode: GameMode = gameMode === 'hard' ? 'hard' : 'normal';
 
     // Clear any active pause-feedback timeout before clearing its state
     if (feedbackTimerRef.current) {
@@ -6669,7 +6673,7 @@ export default function GameCanvas() {
       state.player.recentBlocks = [];
       state.player.lastShoot = performance.now();
       state.playerUpgradeRanks = createInitialPlayerUpgradeRanks();
-      const initialPlayerStats = getPlayerLevelStats(state.playerUpgradeRanks);
+      const initialPlayerStats = getPlayerLevelStats(state.playerUpgradeRanks, selectedGameMode === 'hard');
       state.player.hp = initialPlayerStats.maxHp;
       state.player.maxHp = initialPlayerStats.maxHp;
       state.player.abilityLastUsed = performance.now() - MEMORY_ABILITY_SHARED_COOLDOWN;
@@ -9382,7 +9386,7 @@ export default function GameCanvas() {
             state.enemies = [];
             state.bullets = [];
             const previousSeconds = Math.ceil(state.soloWave.breakRemainingMs / 1000);
-            state.soloWave = advanceSoloWaveBreak(state.soloWave, dt * 1000);
+            state.soloWave = advanceSoloWaveBreak(state.soloWave, dt * 1000, state.gameMode === 'hard');
             const nextWalls = getSoloArenaFrame(state.soloWave).walls;
             if (activeWalls !== nextWalls) {
               activeWalls = nextWalls;
@@ -10107,7 +10111,7 @@ export default function GameCanvas() {
               // matching enemies remain to support the unfinished streaks.
               const living = state.enemies.filter(enemy => !enemy.isPlayerAlly && enemy.shape && enemy.factionColor)
                 .map(enemy => ({ shape: enemy.shape!, color: enemy.factionColor! }));
-              for (const identity of getSoloWaveRescueSpawns(state.soloWave, state.chain, living)) {
+              for (const identity of getSoloWaveRescueSpawns(state.soloWave, state.chain, living, state.gameMode === 'hard')) {
                 spawnAutonomousEnemy(identity, true);
               }
             }
@@ -11387,7 +11391,7 @@ export default function GameCanvas() {
         }
 
         const isLocalMenuOpen = mpRef.current.roomId && (mpMenuOpenRef.current || confirmResignRef.current);
-        const memoryPlayerStats = state.memoryMode ? getPlayerLevelStats(state.playerUpgradeRanks) : null;
+        const memoryPlayerStats = state.memoryMode ? getPlayerLevelStats(state.playerUpgradeRanks, state.gameMode === 'hard') : null;
         const playerFireIntervalMs = memoryPlayerStats?.volleyIntervalMs ?? FIRE_RATE;
         if (isShooting && !isOpeningProtectionActiveLocal(currentTime) && !isLocalMenuOpen && currentTime - state.player.lastShoot > playerFireIntervalMs) {
           const isGuest = !!(mpRef.current.roomId && !mpRef.current.isHost);
@@ -12411,7 +12415,7 @@ export default function GameCanvas() {
                   state.chain = chainTransition.state;
                   if (chainTransition.result === 'completed') {
                     const previousWave = state.soloWave;
-                    state.soloWave = registerSoloWaveStreak(state.soloWave);
+                    state.soloWave = registerSoloWaveStreak(state.soloWave, state.gameMode === 'hard');
                     state.player.hp = restorePlayerHealthOnWaveClear(
                       state.player.hp, state.player.maxHp, previousWave, state.soloWave,
                     );
@@ -13419,7 +13423,7 @@ export default function GameCanvas() {
         const pColor = state.memoryMode ? MEMORY_ARENA_PALETTE.player.body : pDef.n;
         const pGlow = state.memoryMode ? MEMORY_ARENA_PALETTE.player.glow : pDef.g;
         const pName = playerProfileRef.current.name || 'PLAYER';
-        const playerLevelStats = state.memoryMode ? getPlayerLevelStats(state.playerUpgradeRanks) : null;
+        const playerLevelStats = state.memoryMode ? getPlayerLevelStats(state.playerUpgradeRanks, state.gameMode === 'hard') : null;
         const visualRadius = playerLevelStats?.visualRadius ?? state.player.radius;
         beginSpawnDrawing('local-player', state.player.x, state.player.y, visualRadius, pColor);
 
@@ -13944,7 +13948,7 @@ export default function GameCanvas() {
       <AnimatePresence>
         {uiState.status === 'MENU' && (
           <MainMenu
-            onStart={() => startFreshSinglePlayerRun()}
+            onStart={hardMode => startFreshSinglePlayerRun(undefined, hardMode ? 'hard' : 'normal')}
             onLoad={() => {
               setLoadError(null);
               fileInputRef.current?.click();
@@ -14750,12 +14754,12 @@ export default function GameCanvas() {
                           boxShadow: '0 0 5px rgba(139, 92, 246, 0.24), 0 0 12px rgba(139, 92, 246, 0.08)',
                         }}
                         aria-live="polite"
-                        aria-label={`${Math.max(0, getSoloWaveStreakTarget(soloWaveUi.number) - soloWaveUi.completedStreaks)} streaks left before the wave ends`}
+                        aria-label={`${Math.max(0, getSoloWaveStreakTarget(soloWaveUi.number, uiState.gameMode === 'hard') - soloWaveUi.completedStreaks)} streaks left before the wave ends`}
                       >
                         <span className="flex skew-x-12 flex-col items-center gap-1 whitespace-nowrap">
                           <span className="text-[7px] font-black tracking-wider text-white/75 sm:text-[8px]">STREAKS LEFT</span>
                           <span className="text-lg font-black leading-none tabular-nums text-white sm:text-xl">
-                            {Math.max(0, getSoloWaveStreakTarget(soloWaveUi.number) - soloWaveUi.completedStreaks).toString().padStart(2, '0')}
+                            {Math.max(0, getSoloWaveStreakTarget(soloWaveUi.number, uiState.gameMode === 'hard') - soloWaveUi.completedStreaks).toString().padStart(2, '0')}
                           </span>
                         </span>
                       </div>

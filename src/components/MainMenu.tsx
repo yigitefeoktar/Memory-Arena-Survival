@@ -1,14 +1,18 @@
+import { useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
+import { getSoloDifficultySettings } from '../game/memoryArena';
 import './MainMenu.css';
 
 interface MainMenuProps {
-  onStart: () => void;
+  onStart: (hardMode: boolean) => void;
   onLoad: () => void;
   loadError: string | null;
   deviceType?: 'desktop' | 'mobile';
 }
 
 export default function MainMenu({ onStart, onLoad, loadError }: MainMenuProps) {
+  const [hardMode, setHardMode] = useState(false);
+  const difficulty = getSoloDifficultySettings(hardMode);
   const reduceMotion = useReducedMotion();
   const entrance = (delay: number, y = 16) => ({
     initial: reduceMotion ? false as const : { opacity: 0, y },
@@ -51,8 +55,24 @@ export default function MainMenu({ onStart, onLoad, loadError }: MainMenuProps) 
         </h1>
         <motion.div className="survival-menu-subtitle" {...entrance(0.35, 10)}>SURVIVAL</motion.div>
         <div className="survival-menu-actions">
+          <motion.div className="survival-menu-action-enter survival-menu-difficulty" {...entrance(0.4)}>
+            <button
+              type="button"
+              className="survival-menu-hard-toggle"
+              role="switch"
+              aria-checked={hardMode}
+              aria-describedby="survival-menu-difficulty-description"
+              onClick={() => setHardMode(previous => !previous)}
+            >
+              <span>HARD MODE</span>
+              <span className="survival-menu-switch-track" aria-hidden="true"><span /></span>
+            </button>
+            <p id="survival-menu-difficulty-description">
+              {difficulty.maxHp} HP · UP TO {difficulty.maximumStreaks} STREAKS / WAVE
+            </p>
+          </motion.div>
           <motion.div className="survival-menu-action-enter" {...entrance(0.45)}>
-            <button type="button" className="survival-menu-start" onClick={onStart}>
+            <button type="button" className="survival-menu-start" onClick={() => onStart(hardMode)}>
               START RUN
             </button>
           </motion.div>
