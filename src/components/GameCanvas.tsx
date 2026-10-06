@@ -13948,7 +13948,7 @@ export default function GameCanvas() {
       <AnimatePresence>
         {uiState.status === 'MENU' && (
           <MainMenu
-            onStart={hardMode => startFreshSinglePlayerRun(undefined, hardMode ? 'hard' : 'normal')}
+            onStart={() => startFreshSinglePlayerRun()}
             onLoad={() => {
               setLoadError(null);
               fileInputRef.current?.click();
