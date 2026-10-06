@@ -328,7 +328,7 @@ test('solo waves clear only after enough exact three-kill streaks and restart af
   let wave = createInitialSoloWaveState();
   let chain = createInitialChainState();
   assert.equal(getSoloWaveStreakTarget(1), 2);
-  assert.equal(getSoloWaveStreakTarget(4), 5);
+  assert.equal(getSoloWaveStreakTarget(4), 4);
   for (const kill of [redCircle, redCircle, blueSquare, blueSquare, blueSquare]) {
     const transition = registerPlayerEnemyKill(chain, kill);
     chain = transition.state;
@@ -355,14 +355,14 @@ test('solo waves clear only after enough exact three-kill streaks and restart af
   assert.equal(isValidSoloWaveState({ ...wave, completedStreaks: 3 }), false);
 });
 
-test('waves progress from two to five streaks and later waves clear at the cap', () => {
-  assert.deepEqual([1, 2, 3, 4, 5, 10, 100, 1_000_000].map(getSoloWaveStreakTarget), [2, 3, 4, 5, 5, 5, 5, 5]);
-  for (const number of [4, 5, 10, 100, 999_999]) {
+test('waves progress from two to four streaks and later waves clear at the cap', () => {
+  assert.deepEqual([1, 2, 3, 4, 5, 10, 100, 1_000_000].map(getSoloWaveStreakTarget), [2, 3, 4, 4, 4, 4, 4, 4]);
+  for (const number of [3, 4, 5, 10, 100, 999_999]) {
     let wave = { ...createInitialSoloWaveState(), number };
-    for (let streak = 1; streak <= 5; streak++) {
+    for (let streak = 1; streak <= 4; streak++) {
       wave = registerSoloWaveStreak(wave);
       assert.equal(wave.completedStreaks, streak);
-      assert.equal(wave.phase, streak === 5 ? 'break' : 'active');
+      assert.equal(wave.phase, streak === 4 ? 'break' : 'active');
       assert.equal(isValidSoloWaveState(wave), true);
     }
     assert.equal(registerSoloWaveStreak(wave), wave);
@@ -372,27 +372,39 @@ test('waves progress from two to five streaks and later waves clear at the cap',
   }
 });
 
-test('uncapped older saves retain progress or clear once they have earned five streaks', () => {
-  const oldActive = { number: 10, completedStreaks: 4, phase: 'active' as const, breakRemainingMs: 0 };
-  assert.equal(isValidSoloWaveState(oldActive, true), true);
+test('uncapped older saves retain progress or clear once they have earned four streaks', () => {
+  const oldActive = { number: 10, completedStreaks: 3, phase: 'active' as const, breakRemainingMs: 0 };
+  assert.equal(isValidSoloWaveState(oldActive, Infinity), true);
   assert.deepEqual(restoreSoloWaveState(oldActive), oldActive);
-  for (const completedStreaks of [5, 7, 10]) {
+  for (const completedStreaks of [4, 5, 7, 10]) {
     const old = { ...oldActive, completedStreaks };
     assert.equal(isValidSoloWaveState(old), false);
-    assert.equal(isValidSoloWaveState(old, true), true);
+    assert.equal(isValidSoloWaveState(old, Infinity), true);
     const restored = restoreSoloWaveState(old);
-    assert.deepEqual(restored, { ...oldActive, completedStreaks: 5, phase: 'break', breakRemainingMs: 1000 });
+    assert.deepEqual(restored, { ...oldActive, completedStreaks: 4, phase: 'break', breakRemainingMs: 1000 });
     assert.equal(isValidSoloWaveState(restored), true);
     assert.equal(restorePlayerHealthOnWaveClear(50, 100, old, restored), 100);
     assert.deepEqual(restoreSoloWaveState(restored), restored);
   }
   const oldBreak = { ...oldActive, completedStreaks: 11, phase: 'break' as const, breakRemainingMs: 200 };
-  assert.equal(isValidSoloWaveState(oldBreak, true), true);
+  assert.equal(isValidSoloWaveState(oldBreak, Infinity), true);
   const restoredBreak = restoreSoloWaveState(oldBreak);
-  assert.deepEqual(restoredBreak, { ...oldBreak, completedStreaks: 5 });
+  assert.deepEqual(restoredBreak, { ...oldBreak, completedStreaks: 4 });
   assert.equal(isValidSoloWaveState(restoredBreak), true);
   assert.equal(advanceSoloWaveBreak(restoredBreak, 200).number, 11);
-  assert.equal(isValidSoloWaveState({ ...oldActive, completedStreaks: 12 }, true), false);
+  assert.equal(isValidSoloWaveState({ ...oldActive, completedStreaks: 12 }, Infinity), false);
+});
+
+test('previous five-streak saves migrate to four without rejecting active or cleared waves', () => {
+  for (const number of [4, 10, 100]) {
+    const active = { number, completedStreaks: 4, phase: 'active' as const, breakRemainingMs: 0 };
+    assert.equal(isValidSoloWaveState(active, 5), true);
+    assert.equal(isValidSoloWaveState(active), false);
+    assert.equal(restoreSoloWaveState(active).phase, 'break');
+    const cleared = { ...active, completedStreaks: 5, phase: 'break' as const, breakRemainingMs: 200 };
+    assert.equal(isValidSoloWaveState(cleared, 5), true);
+    assert.deepEqual(restoreSoloWaveState(cleared), { ...cleared, completedStreaks: 4 });
+  }
 });
 
 test('opening waves start with sixteen enemies across four visible identities and scale to eight identities', () => {
@@ -666,18 +678,20 @@ test('triangle warning turns smoothly using the shortest angular path', () => {
 });
 
 test('damage persists through unfinished streaks and fully heals on wave clear', () => {
-  let hp = applyPlayerDamage(100, 30);
+  const maxHp = getPlayerLevelStats(createInitialPlayerUpgradeRanks()).maxHp;
+  assert.equal(maxHp, 125);
+  let hp = applyPlayerDamage(maxHp, 30);
   hp = applyPlayerDamage(hp, 12);
   hp = applyPlayerDamage(hp, 12);
-  assert.equal(hp, 46);
+  assert.equal(hp, 71);
   const openingWave = createInitialSoloWaveState();
-  assert.equal(restorePlayerHealthOnWaveClear(hp, 100, openingWave, openingWave), 46);
+  assert.equal(restorePlayerHealthOnWaveClear(hp, maxHp, openingWave, openingWave), 71);
   const unfinishedWave = registerSoloWaveStreak(openingWave);
-  hp = restorePlayerHealthOnWaveClear(hp, 100, openingWave, unfinishedWave);
-  assert.equal(hp, 46);
+  hp = restorePlayerHealthOnWaveClear(hp, maxHp, openingWave, unfinishedWave);
+  assert.equal(hp, 71);
   const clearedWave = registerSoloWaveStreak(unfinishedWave);
   assert.equal(clearedWave.phase, 'break');
-  assert.equal(restorePlayerHealthOnWaveClear(hp, 100, unfinishedWave, clearedWave), 100);
+  assert.equal(restorePlayerHealthOnWaveClear(hp, maxHp, unfinishedWave, clearedWave), 125);
   assert.equal(restorePlayerHealthOnWaveClear(1, 140, unfinishedWave, clearedWave), 140);
 });
 
@@ -796,7 +810,7 @@ test('levels cycle through shooting, HP and regeneration without ability cooldow
   }
   assert.deepEqual(stats, ['fireRate', 'maxHp', 'regeneration', 'fireRate', 'maxHp', 'regeneration']);
   assert.deepEqual(ranks, { fireRate: 2, maxHp: 2, regeneration: 2, cooldown: 0 });
-  assert.equal(getPlayerLevelStats(ranks).maxHp, 196);
+  assert.equal(getPlayerLevelStats(ranks).maxHp, 245);
   assert.ok(Math.abs(getPlayerLevelStats(ranks).regenerationPercentPerSecond - 0.035) < 1e-12);
 });
 

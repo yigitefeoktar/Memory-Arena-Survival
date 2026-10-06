@@ -251,7 +251,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 15;
+const SAVE_VERSION = 16;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -4789,7 +4789,8 @@ export default function GameCanvas() {
       if (rawState.memoryMode !== true || !isValidChainState(normalizedRawChain)) {
         throw new Error("INVALID SAVE FILE");
       }
-      if (version >= 11 && (mapId !== (version >= 12 ? MEMORY_DEFAULT_MAP_ID : 'classic_arena') || !isValidSoloWaveState(rawState.soloWave, version < 15) ||
+      const savedStreakCap = version < 15 ? Infinity : version < 16 ? 5 : MEMORY_ARENA_CONFIG.waves.maximumStreaks;
+      if (version >= 11 && (mapId !== (version >= 12 ? MEMORY_DEFAULT_MAP_ID : 'classic_arena') || !isValidSoloWaveState(rawState.soloWave, savedStreakCap) ||
           !Array.isArray(rawState.spawners) || rawState.spawners.length !== 0)) {
         throw new Error("INVALID SAVE FILE");
       }
@@ -5043,8 +5044,9 @@ export default function GameCanvas() {
       : loadNow - MEMORY_ABILITY_SHARED_COOLDOWN;
 
     const reconstructedHp = isMemorySave
-      ? (version >= 3
+      ? (version >= 16
           ? Math.min(rawPlayer.hp, reconstructedPlayerLevelStats.maxHp)
+          // Preserve the health percentage when older saves adopt the higher maximum.
           : reconstructedPlayerLevelStats.maxHp * Math.max(0, Math.min(1, rawPlayer.hp / rawPlayer.maxHp)))
       : MEMORY_ARENA_CONFIG.player.maxHp;
     const reconstructedPlayer = {

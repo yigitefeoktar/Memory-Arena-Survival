@@ -73,7 +73,7 @@ export const MEMORY_ARENA_CONFIG = {
     // The next wave begins as the final interior wall finishes materializing.
     breakMs: 1000,
     initialStreaks: 2,
-    maximumStreaks: 5,
+    maximumStreaks: 4,
     enemiesPerIdentity: 4,
     initialIdentities: 4,
     maximumIdentities: 8,
@@ -161,7 +161,7 @@ export const MEMORY_ARENA_CONFIG = {
     collectionPadding: 4,
   },
   player: {
-    maxHp: 100,
+    maxHp: 125,
     regenerationPercentPerSecond: 0.02,
   },
   progression: {
@@ -1240,12 +1240,11 @@ export function advanceSoloWaveBreak(current: SoloWaveState, elapsedMs: number):
     : { number: current.number + 1, completedStreaks: 0, phase: 'active', breakRemainingMs: 0 };
 }
 
-export function isValidSoloWaveState(value: unknown, legacyUncapped = false): value is SoloWaveState {
+export function isValidSoloWaveState(value: unknown, streakCap: number = MEMORY_ARENA_CONFIG.waves.maximumStreaks): value is SoloWaveState {
   if (!value || typeof value !== 'object') return false;
   const wave = value as Partial<SoloWaveState>;
-  const streakTarget = legacyUncapped
-    ? MEMORY_ARENA_CONFIG.waves.initialStreaks + Math.max(0, (wave.number ?? 0) - 1)
-    : getSoloWaveStreakTarget(wave.number ?? 0);
+  const streakTarget = Math.min(streakCap,
+    MEMORY_ARENA_CONFIG.waves.initialStreaks + Math.max(0, (wave.number ?? 0) - 1));
   return Number.isInteger(wave.number) && wave.number! >= 1 && wave.number! <= 1_000_000 &&
     Number.isInteger(wave.completedStreaks) && wave.completedStreaks! >= 0 &&
     wave.completedStreaks! <= streakTarget &&
