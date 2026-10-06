@@ -140,6 +140,62 @@
 
 .survival-menu-start:active { transform: translateY(1px); }
 
+.survival-menu-start-group { position: relative; }
+.survival-menu-start-group .survival-menu-start { padding-left: 52px; padding-right: 52px; }
+.survival-menu-start-group .survival-menu-start:hover,
+.survival-menu-start-group .survival-menu-start:active { transform: none; }
+.survival-menu-start-more {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 48px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #17100b;
+  cursor: pointer;
+}
+.survival-menu-start-more::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 25%;
+  bottom: 25%;
+  border-left: 1px solid #17100b33;
+}
+.survival-menu-start-more:hover,
+.survival-menu-start-more[aria-expanded="true"] { background: #17100b12; }
+.survival-menu-start-more[aria-expanded="true"] svg { transform: rotate(180deg); }
+.survival-menu .survival-menu-start-more:focus-visible { outline-offset: -5px; }
+.survival-menu-run-options {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(100%, 290px);
+  padding: 4px;
+  border: 1px solid #ff793e66;
+  background: #17100b;
+  box-shadow: 0 12px 30px #0009;
+  text-align: left;
+}
+.survival-menu-hard-run {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 100%;
+  padding: 16px 12px;
+  color: #f6efdf;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+.survival-menu-hard-run:hover { background: #ff793e18; }
+.survival-menu-hard-detail { color: #bfae98; font-size: 10px; letter-spacing: 0.02em; }
+.survival-menu .survival-menu-hard-run:focus-visible { outline-offset: -2px; }
+
 .survival-menu-load {
   width: 100%;
   min-height: 48px;
