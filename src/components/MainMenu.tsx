@@ -52,7 +52,7 @@ export default function MainMenu({ onStart, onLoad, loadError }: MainMenuProps) 
 
   return (
     <motion.div
-      className="survival-menu"
+      className={`survival-menu${hardMode ? ' survival-menu-hard' : ''}`}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}

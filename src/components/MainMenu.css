@@ -7,6 +7,14 @@
 }
 
 .survival-menu {
+  --menu-accent: #ff783d;
+  --menu-edge-rgb: 255, 121, 62;
+  --menu-start-gradient: linear-gradient(110deg, #f15b20, #ff7430 55%, #f45e20);
+  --menu-glow-rgb: 233, 83, 20;
+  --menu-inset: #ffb07550;
+  --menu-ember: #ffc17a;
+  --menu-ember-glow: #ff6b2d;
+  --menu-error: #ffb18d;
   position: absolute;
   inset: 0;
   z-index: 70;
@@ -16,6 +24,17 @@
   touch-action: pan-y;
   background: #0b0907;
   color: #f6efdf;
+}
+
+.survival-menu-hard {
+  --menu-accent: #ff4545;
+  --menu-edge-rgb: 255, 69, 69;
+  --menu-start-gradient: linear-gradient(110deg, #e32936, #ff4545 55%, #eb2e3b);
+  --menu-glow-rgb: 233, 35, 48;
+  --menu-inset: #ff9b9b50;
+  --menu-ember: #ff9b9b;
+  --menu-ember-glow: #ff4545;
+  --menu-error: #ff9b9b;
 }
 
 .survival-menu-art {
@@ -47,8 +66,8 @@
   width: 3px;
   height: 3px;
   border-radius: 50%;
-  background: #ffc17a;
-  box-shadow: 0 0 8px #ff6b2d;
+  background: var(--menu-ember);
+  box-shadow: 0 0 8px var(--menu-ember-glow);
   opacity: 0;
   animation: survival-menu-ember 9s linear infinite;
 }
@@ -102,7 +121,7 @@
 .survival-menu-subtitle {
   margin-top: 16px;
   padding-left: 0.75em;
-  color: #ff783d;
+  color: var(--menu-accent);
   font-family: var(--font-mono);
   font-size: clamp(14px, 1.65vw, 28px);
   letter-spacing: 0.75em;
@@ -119,11 +138,11 @@
   width: 100%;
   min-height: clamp(56px, 5vw, 84px);
   padding: 16px 12px;
-  border: 1px solid #ff793e;
+  border: 1px solid rgb(var(--menu-edge-rgb));
   border-radius: 0;
-  background: linear-gradient(110deg, #f15b20, #ff7430 55%, #f45e20);
+  background: var(--menu-start-gradient);
   color: #17100b;
-  box-shadow: 0 8px 40px #e9531414, inset 0 1px 0 #ffb07550;
+  box-shadow: 0 8px 40px rgba(var(--menu-glow-rgb), 0.08), inset 0 1px 0 var(--menu-inset);
   font-family: "Russo One", "Arial Black", sans-serif;
   font-size: clamp(18px, 1.85vw, 30px);
   font-weight: 400;
@@ -133,7 +152,7 @@
 }
 
 .survival-menu-start:hover {
-  box-shadow: 0 8px 40px #e9531438;
+  box-shadow: 0 8px 40px rgba(var(--menu-glow-rgb), 0.22);
   transform: translateY(-2px);
 }
 
@@ -171,7 +190,7 @@
   transition: box-shadow 160ms, transform 160ms;
 }
 .survival-menu-start-more:hover {
-  box-shadow: 0 8px 40px #e9531438;
+  box-shadow: 0 8px 40px rgba(var(--menu-glow-rgb), 0.22);
   transform: translateY(-2px);
 }
 .survival-menu-start-more:active { transform: translateY(1px); }
@@ -184,7 +203,7 @@
   right: 0;
   width: min(100%, 290px);
   padding: 4px;
-  border: 1px solid #ff793e66;
+  border: 1px solid rgba(var(--menu-edge-rgb), 0.4);
   background: #17100b;
   box-shadow: 0 12px 30px #0009;
   text-align: left;
@@ -213,10 +232,10 @@
   letter-spacing: 0.08em;
   cursor: pointer;
 }
-.survival-menu-run-mode:hover { background: #ff793e18; }
-.survival-menu-run-mode:has(input:checked) { background: #ff793e12; }
+.survival-menu-run-mode:hover { background: rgba(var(--menu-edge-rgb), 0.094); }
+.survival-menu-run-mode:has(input:checked) { background: rgba(var(--menu-edge-rgb), 0.071); }
 .survival-menu-run-mode:has(input:focus-visible) { outline: 2px solid #fff4df; outline-offset: -2px; }
-.survival-menu-run-mode input { margin-top: 2px; width: 14px; height: 14px; flex-shrink: 0; accent-color: #ff783d; cursor: pointer; }
+.survival-menu-run-mode input { margin-top: 2px; width: 14px; height: 14px; flex-shrink: 0; accent-color: var(--menu-accent); cursor: pointer; }
 .survival-menu-mode-copy { display: flex; flex-direction: column; gap: 7px; }
 .survival-menu-mode-detail { color: #bfae98; font-size: 10px; letter-spacing: 0.02em; }
 
@@ -236,7 +255,7 @@
 
 .survival-menu-load:hover { color: #fff4df; }
 .survival-menu button:focus-visible { outline: 2px solid #fff4df; outline-offset: 6px; }
-.survival-menu-error { color: #ffb18d; font-size: 12px; line-height: 1.5; margin: 10px 0 0; }
+.survival-menu-error { color: var(--menu-error); font-size: 12px; line-height: 1.5; margin: 10px 0 0; }
 
 @media (max-width: 700px) and (orientation: portrait) {
   .survival-menu-art { object-position: 70% center; }

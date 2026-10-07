@@ -13917,6 +13917,11 @@ export default function GameCanvas() {
             exit={{ opacity: 0 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.18 }}
             className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center overflow-hidden"
+            style={{
+              '--arena-accent': uiState.gameMode === 'hard' ? '#ff4545' : '#ff783d',
+              '--arena-accent-rgb': uiState.gameMode === 'hard' ? '255,69,69' : '255,120,61',
+              '--arena-cue-background': uiState.gameMode === 'hard' ? '#1d0608e6' : '#1d0d06e6',
+            } as React.CSSProperties}
           >
             {!shouldReduceMotion && (
               <>
@@ -13924,13 +13929,13 @@ export default function GameCanvas() {
                   initial={{ opacity: 0.5, scale: 0.2 }}
                   animate={{ opacity: 0, scale: 2.2 }}
                   transition={{ duration: 0.85, ease: 'easeOut' }}
-                  className="absolute h-[min(70vw,520px)] w-[min(70vw,520px)] rounded-full border-2 border-[#ff783d] shadow-[0_0_35px_#ff783d,inset_0_0_35px_#ff783d]"
+                  className="absolute h-[min(70vw,520px)] w-[min(70vw,520px)] rounded-full border-2 border-[var(--arena-accent)] shadow-[0_0_35px_var(--arena-accent),inset_0_0_35px_var(--arena-accent)]"
                 />
                 <motion.div
                   initial={{ opacity: 0.32, scale: 0.5 }}
                   animate={{ opacity: 0, scale: 1.7 }}
                   transition={{ duration: 0.6, ease: 'easeOut' }}
-                  className="absolute h-[min(90vw,680px)] w-[min(90vw,680px)] rounded-full bg-[radial-gradient(circle,rgba(255,120,61,0.25),transparent_65%)]"
+                  className="absolute h-[min(90vw,680px)] w-[min(90vw,680px)] rounded-full bg-[radial-gradient(circle,rgba(var(--arena-accent-rgb),0.25),transparent_65%)]"
                 />
               </>
             )}
@@ -13938,11 +13943,11 @@ export default function GameCanvas() {
               initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, scale: 1.2, y: 18 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               transition={{ duration: shouldReduceMotion ? 0 : 0.28, ease: 'easeOut' }}
-              className="relative w-[min(86vw,460px)] border-y-2 border-[#ff783d] bg-[#1d0d06]/90 px-6 py-4 text-center shadow-[0_0_28px_rgba(255,120,61,0.35)] backdrop-blur-sm"
+              className="relative w-[min(86vw,460px)] border-y-2 border-[var(--arena-accent)] bg-[var(--arena-cue-background)] px-6 py-4 text-center shadow-[0_0_28px_rgba(var(--arena-accent-rgb),0.35)] backdrop-blur-sm"
             >
-              <div className="mb-1 text-[9px] font-bold tracking-[0.5em] text-[#ff783d]">MEMORY ARENA // SYSTEM ONLINE</div>
-              <div className="font-display text-4xl tracking-[0.08em] text-white drop-shadow-[0_0_14px_#ff783d] sm:text-6xl">{arenaCue.title}</div>
-              <div className="mt-1 text-[10px] font-black tracking-[0.3em] text-[#ff783d] sm:text-xs">{arenaCue.detail}</div>
+              <div className="mb-1 text-[9px] font-bold tracking-[0.5em] text-[var(--arena-accent)]">MEMORY ARENA // SYSTEM ONLINE</div>
+              <div className="font-display text-4xl tracking-[0.08em] text-white drop-shadow-[0_0_14px_var(--arena-accent)] sm:text-6xl">{arenaCue.title}</div>
+              <div className="mt-1 text-[10px] font-black tracking-[0.3em] text-[var(--arena-accent)] sm:text-xs">{arenaCue.detail}</div>
             </motion.div>
           </motion.div>
         )}
