@@ -188,6 +188,18 @@
   background: #17100b;
   box-shadow: 0 12px 30px #0009;
   text-align: left;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity 100ms ease-in, transform 100ms ease-in, visibility 0s 100ms;
+}
+.survival-menu-run-options.is-open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  pointer-events: auto;
+  transition: opacity 150ms ease-out, transform 150ms ease-out, visibility 0s;
 }
 .survival-menu-run-mode {
   display: flex;
@@ -255,6 +267,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .survival-menu-run-options,
+  .survival-menu-run-options.is-open { transform: none; }
   .survival-menu button { transition: none; transform: none; }
   .survival-menu-start:hover,
   .survival-menu-start:active,

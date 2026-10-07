@@ -110,30 +110,35 @@ export default function MainMenu({ onStart, onLoad, loadError }: MainMenuProps) 
                 <path d="m6 9 6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
-            {difficultyOpen && (
-              <div id="survival-menu-run-options" className="survival-menu-run-options" role="radiogroup" aria-label="Difficulty">
-                {[false, true].map(isHard => {
-                  const difficulty = getSoloDifficultySettings(isHard);
-                  return (
-                    <label key={String(isHard)} className="survival-menu-run-mode">
-                      <input
-                        ref={isHard === hardMode ? selectedDifficultyRef : null}
-                        type="radio"
-                        name="survival-difficulty"
-                        value={isHard ? 'hard' : 'normal'}
-                        checked={isHard === hardMode}
-                        onChange={() => setHardMode(isHard)}
-                        aria-label={isHard ? 'Hard' : 'Normal'}
-                      />
-                      <span className="survival-menu-mode-copy">
-                        <span>{isHard ? 'HARD' : 'NORMAL'}</span>
-                        <span className="survival-menu-mode-detail">{difficulty.maxHp} HP · UP TO {difficulty.maximumStreaks} STREAKS / WAVE</span>
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            )}
+            <div
+              id="survival-menu-run-options"
+              className={`survival-menu-run-options${difficultyOpen ? ' is-open' : ''}`}
+              role="radiogroup"
+              aria-label="Difficulty"
+              aria-hidden={!difficultyOpen}
+              inert={!difficultyOpen}
+            >
+              {[false, true].map(isHard => {
+                const difficulty = getSoloDifficultySettings(isHard);
+                return (
+                  <label key={String(isHard)} className="survival-menu-run-mode">
+                    <input
+                      ref={isHard === hardMode ? selectedDifficultyRef : null}
+                      type="radio"
+                      name="survival-difficulty"
+                      value={isHard ? 'hard' : 'normal'}
+                      checked={isHard === hardMode}
+                      onChange={() => setHardMode(isHard)}
+                      aria-label={isHard ? 'Hard' : 'Normal'}
+                    />
+                    <span className="survival-menu-mode-copy">
+                      <span>{isHard ? 'HARD' : 'NORMAL'}</span>
+                      <span className="survival-menu-mode-detail">{difficulty.maxHp} HP · UP TO {difficulty.maximumStreaks} STREAKS / WAVE</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
           </motion.div>
           <motion.div className="survival-menu-action-enter" {...entrance(0.55)}>
             <button type="button" className="survival-menu-load" onClick={() => { setDifficultyOpen(false); onLoad(); }}>
