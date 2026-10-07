@@ -73,13 +73,11 @@ export const MEMORY_ARENA_CONFIG = {
     // The next wave begins as the final interior wall finishes materializing.
     breakMs: 1000,
     initialStreaks: 2,
-    maximumStreaks: 4,
-    enemiesPerIdentity: 4,
+    maximumStreaks: 3,
+    enemiesPerIdentity: 6,
     initialIdentities: 4,
     maximumIdentities: 8,
     reserveStreakCapacity: 5,
-    speedIncreasePerWave: 0.035,
-    maximumSpeedMultiplier: 1.35,
   },
   combat: {
     bulletRicochetEnabled: false,
@@ -117,8 +115,6 @@ export const MEMORY_ARENA_CONFIG = {
     maximumArmySize: 14,
     factionAbilityCooldownReductionMsPerTier: 1000,
     minimumFactionAbilityCooldownMs: 15000,
-    movementMultiplierPerTier: 0.025,
-    maximumMovementMultiplier: 1.15,
     fullVisualIntensityTier: 12,
   },
   raids: {
@@ -161,7 +157,7 @@ export const MEMORY_ARENA_CONFIG = {
     collectionPadding: 4,
   },
   player: {
-    maxHp: 125,
+    maxHp: 100,
     regenerationPercentPerSecond: 0.02,
   },
   progression: {
@@ -229,7 +225,6 @@ export interface MemoryThreatStats {
   replicationIntervalMs: number;
   armySize: number;
   factionAbilityCooldownMs: number;
-  enemyMovementMultiplier: number;
   visualIntensity: number;
 }
 
@@ -266,10 +261,6 @@ export function getMemoryThreatStats(elapsedRunMs: number, playerLevel: number):
       config.minimumFactionAbilityCooldownMs,
       MEMORY_ARENA_CONFIG.factionEmergency.cooldownMs -
         tier * config.factionAbilityCooldownReductionMsPerTier,
-    ),
-    enemyMovementMultiplier: Math.min(
-      config.maximumMovementMultiplier,
-      1 + tier * config.movementMultiplierPerTier,
     ),
     visualIntensity: Math.min(1, tier / config.fullVisualIntensityTier),
   };
@@ -503,6 +494,7 @@ export function getSoloDifficultySettings(hardMode = false) {
 export function getSavedSoloWaveStreakCap(version: number, hardMode = false): number {
   if (version < 15) return Infinity;
   if (version < 16 || (version === 17 && hardMode)) return 5;
+  if (version < 19) return 4;
   return getSoloDifficultySettings(hardMode).maximumStreaks;
 }
 
@@ -1232,11 +1224,10 @@ export function getSoloWaveRescueSpawns(wave: SoloWaveState, chain: ChainState, 
   return planned;
 }
 
-export function getSoloWaveSpeedMultiplier(wave: number): number {
-  return Math.min(
-    MEMORY_ARENA_CONFIG.waves.maximumSpeedMultiplier,
-    1 + (Math.max(1, wave) - 1) * MEMORY_ARENA_CONFIG.waves.speedIncreasePerWave,
-  );
+export function normalizeSavedSoloEnemySpeed(speed: number, wave: number, version: number): number {
+  // Earlier saves baked the wave speed boost into each enemy's speed.
+  const legacyBoost = Math.min(1.35, 1 + (Math.max(1, wave) - 1) * 0.035);
+  return version < 19 ? speed / legacyBoost : speed;
 }
 
 export function registerSoloWaveStreak(current: SoloWaveState, hardMode = false): SoloWaveState {

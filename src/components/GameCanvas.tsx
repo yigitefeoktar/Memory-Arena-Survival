@@ -42,7 +42,7 @@ import {
   getSavedSoloWaveStreakCap,
   getRaidFormationOffset,
   getSoloWaveRescueSpawns,
-  getSoloWaveSpeedMultiplier,
+  normalizeSavedSoloEnemySpeed,
   getSoloWaveStreakTarget,
   getSquareVolleyDirections,
   getTriangleTelegraphVisual,
@@ -254,7 +254,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 18;
+const SAVE_VERSION = 19;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -5466,7 +5466,9 @@ export default function GameCanvas() {
         y: e.y,
         radius: e.radius,
         lastShoot,
-        speed: e.speed,
+        speed: isMemorySave
+          ? normalizeSavedSoloEnemySpeed(e.speed, rawState.soloWave?.number ?? 1, version)
+          : e.speed,
         targetX: e.targetX,
         targetY: e.targetY,
         kbvx: ekbvx,
@@ -10103,7 +10105,7 @@ export default function GameCanvas() {
             radius: ENEMY_RADIUS,
             lastShoot: currentTime + Math.random() * 600,
             speed: state.memoryMode
-              ? (MEMORY_ENEMY_SPEED + Math.random() * 15) * getSoloWaveSpeedMultiplier(state.soloWave.number)
+              ? (MEMORY_ENEMY_SPEED + Math.random() * 15)
               : ENEMY_SPEED + Math.random() * 20,
             shape: identity.shape,
             factionColor: identity.color,
@@ -10376,7 +10378,7 @@ export default function GameCanvas() {
                 enemy,
                 targetX,
                 targetY,
-                enemy.speed * memoryThreat.enemyMovementMultiplier,
+                enemy.speed,
                 dt,
                 activeWalls,
               );
@@ -10413,7 +10415,7 @@ export default function GameCanvas() {
                   enemy,
                   raidDestination.x,
                   raidDestination.y,
-                  enemy.speed * memoryThreat.enemyMovementMultiplier,
+                  enemy.speed,
                   dt,
                   activeWalls,
                 );
@@ -10430,7 +10432,7 @@ export default function GameCanvas() {
                   enemy,
                   enemy.moveDx ?? 1,
                   enemy.moveDy ?? 0,
-                  enemy.speed * memoryThreat.enemyMovementMultiplier,
+                  enemy.speed,
                   dt,
                   activeWalls,
                 );
@@ -10522,7 +10524,7 @@ export default function GameCanvas() {
                     enemy,
                     raidDestination.x,
                     raidDestination.y,
-                    enemy.speed * memoryThreat.enemyMovementMultiplier,
+                    enemy.speed,
                     dt,
                     activeWalls,
                   );
@@ -10539,7 +10541,7 @@ export default function GameCanvas() {
                     enemy,
                     enemy.moveDx ?? 1,
                     enemy.moveDy ?? 0,
-                    enemy.speed * memoryThreat.enemyMovementMultiplier,
+                    enemy.speed,
                     dt,
                     activeWalls,
                   );
