@@ -39,7 +39,7 @@ import {
   getMemoryThreatStats,
   getMissingEnemyCombinations,
   getPlayerLevelStats,
-  getSoloDifficultySettings,
+  getSavedSoloWaveStreakCap,
   getRaidFormationOffset,
   getSoloWaveRescueSpawns,
   getSoloWaveSpeedMultiplier,
@@ -64,6 +64,7 @@ import {
   PLAYER_COLOR_HEX,
   PLAYER_UPGRADE_STATS,
   restorePlayerHealthOnWaveClear,
+  regeneratePlayerHealth,
   restoreSoloWaveState,
   registerPlayerEnemyKill,
   registerSoloWaveStreak,
@@ -253,7 +254,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 17;
+const SAVE_VERSION = 18;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -4797,8 +4798,7 @@ export default function GameCanvas() {
       if (rawState.memoryMode !== true || !isValidChainState(normalizedRawChain)) {
         throw new Error("INVALID SAVE FILE");
       }
-      const savedStreakCap = version < 15 ? Infinity : version < 16 ? 5
-        : getSoloDifficultySettings(cleanGameMode === 'hard').maximumStreaks;
+      const savedStreakCap = getSavedSoloWaveStreakCap(version, cleanGameMode === 'hard');
       if (version >= 11 && (mapId !== (version >= 12 ? MEMORY_DEFAULT_MAP_ID : 'classic_arena') || !isValidSoloWaveState(rawState.soloWave, savedStreakCap) ||
           !Array.isArray(rawState.spawners) || rawState.spawners.length !== 0)) {
         throw new Error("INVALID SAVE FILE");
@@ -9979,6 +9979,21 @@ export default function GameCanvas() {
         // Host ONLY logic from here down
         if (!mpRef.current.roomId || mpRef.current.isHost) {
 
+          if (state.memoryMode && state.gameMode === 'normal' && state.soloWave.phase === 'active' && STATUS === 'PLAYING' && state.player.hp > 0) {
+            const previousHp = state.player.hp;
+            state.player.hp = regeneratePlayerHealth(
+              previousHp,
+              state.player.maxHp,
+              getPlayerLevelStats(state.playerUpgradeRanks).regenerationPercentPerSecond,
+              dt,
+            );
+            if (Math.floor(previousHp) !== Math.floor(state.player.hp)) {
+              const nextUi = { ...uiRef.current, hp: state.player.hp };
+              uiRef.current = nextUi;
+              setUiState(nextUi);
+            }
+          }
+
           // Block Physics (Player / Enemies vs Blocks)
           for (let b = state.blocks.length - 1; b >= 0; b--) {
             const block = state.blocks[b];
@@ -13466,13 +13481,15 @@ export default function GameCanvas() {
 
         if (state.memoryMode && playerLevelStats) {
           const healthRestored = state.soloWave.phase === 'break' && state.player.hp > 0;
+          const isRegenerating = state.gameMode === 'normal' && uiRef.current.status === 'PLAYING' &&
+            state.soloWave.phase === 'active' && state.player.hp > 0 && state.player.hp < state.player.maxHp;
           const healProgress = 1 - state.soloWave.breakRemainingMs / MEMORY_ARENA_CONFIG.waves.breakMs;
           const auraColor = healthRestored ? MEMORY_ARENA_PALETTE.factions.green.bright : PLAYER_COLOR_HEX;
           ctx.save();
-          ctx.globalAlpha = healthRestored ? 0.25 : 0.08;
+          ctx.globalAlpha = healthRestored ? 0.25 : isRegenerating ? 0.16 : 0.08;
           ctx.fillStyle = auraColor;
           ctx.shadowColor = auraColor;
-          ctx.shadowBlur = healthRestored ? 20 : 12;
+          ctx.shadowBlur = healthRestored || isRegenerating ? 20 : 12;
           ctx.beginPath();
           ctx.arc(
             state.player.x,

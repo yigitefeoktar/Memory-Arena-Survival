@@ -134,6 +134,7 @@ export default function MainMenu({ onStart, onLoad, loadError }: MainMenuProps) 
                     <span className="survival-menu-mode-copy">
                       <span>{isHard ? 'HARD' : 'NORMAL'}</span>
                       <span className="survival-menu-mode-detail">{difficulty.maxHp} HP · UP TO {difficulty.maximumStreaks} STREAKS / WAVE</span>
+                      <span className="survival-menu-mode-detail">{isHard ? 'HEAL ON WAVE CLEAR ONLY' : `REGENERATION · ${difficulty.regenerationPercentPerSecond * 100}% HP / SEC`}</span>
                     </span>
                   </label>
                 );

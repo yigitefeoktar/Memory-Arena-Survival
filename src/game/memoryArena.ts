@@ -491,11 +491,19 @@ export function isValidPlayerUpgradeRanks(value: unknown): value is PlayerUpgrad
   ));
 }
 
-// Hard Mode restores the balance before Normal gained health and shorter waves.
+// Both modes share combat balance; Normal also regenerates during active waves.
 export function getSoloDifficultySettings(hardMode = false) {
-  return hardMode
-    ? { maxHp: 100, maximumStreaks: 5 }
-    : { maxHp: MEMORY_ARENA_CONFIG.player.maxHp, maximumStreaks: MEMORY_ARENA_CONFIG.waves.maximumStreaks };
+  return {
+    maxHp: MEMORY_ARENA_CONFIG.player.maxHp,
+    maximumStreaks: MEMORY_ARENA_CONFIG.waves.maximumStreaks,
+    regenerationPercentPerSecond: hardMode ? 0 : MEMORY_ARENA_CONFIG.player.regenerationPercentPerSecond,
+  };
+}
+
+export function getSavedSoloWaveStreakCap(version: number, hardMode = false): number {
+  if (version < 15) return Infinity;
+  if (version < 16 || (version === 17 && hardMode)) return 5;
+  return getSoloDifficultySettings(hardMode).maximumStreaks;
 }
 
 export function getPlayerLevelStats(ranks: PlayerUpgradeRanks, hardMode = false): PlayerLevelStats {
@@ -507,7 +515,7 @@ export function getPlayerLevelStats(ranks: PlayerUpgradeRanks, hardMode = false)
     maxHp: Math.min(1_000_000_000, Math.round(
       getSoloDifficultySettings(hardMode).maxHp * Math.pow(progression.hpMultiplierPerUpgrade, ranks.maxHp),
     )),
-    regenerationPercentPerSecond:
+    regenerationPercentPerSecond: hardMode ? 0 :
       MEMORY_ARENA_CONFIG.player.regenerationPercentPerSecond +
       ranks.regeneration * progression.regenerationPercentPerUpgrade,
     bulletsPerSecond,
@@ -1481,6 +1489,19 @@ export function markTrianglePlayerHit(current: TriangleAiState): TriangleAiState
 
 export function applyPlayerDamage(hp: number, damage: number): number {
   return Math.max(0, hp - Math.max(0, damage));
+}
+
+export function regeneratePlayerHealth(
+  hp: number,
+  maxHp: number,
+  regenerationPercentPerSecond: number,
+  deltaSeconds: number,
+): number {
+  if (hp <= 0) return hp;
+  return Math.min(
+    maxHp,
+    hp + maxHp * Math.max(0, regenerationPercentPerSecond) * Math.max(0, deltaSeconds),
+  );
 }
 
 export function restorePlayerHealthOnWaveClear(
