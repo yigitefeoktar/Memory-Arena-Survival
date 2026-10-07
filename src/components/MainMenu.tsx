@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
+import { getSoloDifficultySettings } from '../game/memoryArena';
 import './MainMenu.css';
 
 interface MainMenuProps {
@@ -11,14 +12,15 @@ interface MainMenuProps {
 
 export default function MainMenu({ onStart, onLoad, loadError }: MainMenuProps) {
   const [difficultyOpen, setDifficultyOpen] = useState(false);
+  const [hardMode, setHardMode] = useState(false);
   const startGroupRef = useRef<HTMLDivElement>(null);
   const difficultyButtonRef = useRef<HTMLButtonElement>(null);
-  const hardRunRef = useRef<HTMLButtonElement>(null);
+  const selectedDifficultyRef = useRef<HTMLInputElement>(null);
   const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     if (!difficultyOpen) return;
-    hardRunRef.current?.focus();
+    selectedDifficultyRef.current?.focus();
     const dismissOutside = (event: PointerEvent) => {
       if (event.target instanceof Node && !startGroupRef.current?.contains(event.target)) {
         setDifficultyOpen(false);
@@ -36,9 +38,9 @@ export default function MainMenu({ onStart, onLoad, loadError }: MainMenuProps) 
       document.removeEventListener('pointerdown', dismissOutside);
       document.removeEventListener('keydown', dismissOnEscape);
     };
-  }, [difficultyOpen]);
+  }, [difficultyOpen, hardMode]);
 
-  const startRun = (hardMode: boolean) => {
+  const startRun = () => {
     setDifficultyOpen(false);
     onStart(hardMode);
   };
@@ -91,14 +93,15 @@ export default function MainMenu({ onStart, onLoad, loadError }: MainMenuProps) 
             }}
             {...entrance(0.45)}
           >
-            <button type="button" className="survival-menu-start" onClick={() => startRun(false)}>
-              START RUN
+            <button type="button" className="survival-menu-start" onClick={startRun}>
+              <span>START RUN</span>
             </button>
             <button
               ref={difficultyButtonRef}
               type="button"
               className="survival-menu-start-more"
-              aria-label="More run options"
+              aria-label="Choose difficulty"
+              title={`Difficulty: ${hardMode ? 'Hard' : 'Normal'}`}
               aria-expanded={difficultyOpen}
               aria-controls="survival-menu-run-options"
               onClick={() => setDifficultyOpen(previous => !previous)}
@@ -108,11 +111,27 @@ export default function MainMenu({ onStart, onLoad, loadError }: MainMenuProps) 
               </svg>
             </button>
             {difficultyOpen && (
-              <div id="survival-menu-run-options" className="survival-menu-run-options" role="group" aria-label="Alternate run modes">
-                <button ref={hardRunRef} type="button" className="survival-menu-hard-run" onClick={() => startRun(true)}>
-                  <span>START HARD MODE</span>
-                  <span className="survival-menu-hard-detail">100 HP · UP TO 5 STREAKS / WAVE</span>
-                </button>
+              <div id="survival-menu-run-options" className="survival-menu-run-options" role="radiogroup" aria-label="Difficulty">
+                {[false, true].map(isHard => {
+                  const difficulty = getSoloDifficultySettings(isHard);
+                  return (
+                    <label key={String(isHard)} className="survival-menu-run-mode">
+                      <input
+                        ref={isHard === hardMode ? selectedDifficultyRef : null}
+                        type="radio"
+                        name="survival-difficulty"
+                        value={isHard ? 'hard' : 'normal'}
+                        checked={isHard === hardMode}
+                        onChange={() => setHardMode(isHard)}
+                        aria-label={isHard ? 'Hard' : 'Normal'}
+                      />
+                      <span className="survival-menu-mode-copy">
+                        <span>{isHard ? 'HARD' : 'NORMAL'}</span>
+                        <span className="survival-menu-mode-detail">{difficulty.maxHp} HP · UP TO {difficulty.maximumStreaks} STREAKS / WAVE</span>
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
             )}
           </motion.div>
