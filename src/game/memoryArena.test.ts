@@ -43,6 +43,8 @@ import {
   getSoloWaveRescueSpawns,
   getSoloWaveRoster,
   normalizeSavedSoloEnemySpeed,
+  normalizeSavedSoloPlayerBulletVelocity,
+  getSoloPlayerBulletTravelSeconds,
   getSoloWaveStreakTarget,
   getSquareVolleyDirections,
   getTriangleTelegraphVisual,
@@ -91,6 +93,31 @@ test('3x3 arena composition creates a seamless 9000px world', () => {
   assert.deepEqual(composed.spawners[8], { x: 6400, y: 6500, tile: 8 });
   assert.ok(composed.walls.some(wall => wall.x === 6108 && wall.y === 6200));
   assert.equal(composed.walls.filter(wall => wall.w === 9000 || wall.h === 9000).length, 4);
+});
+
+test('player shots keep their launch burst and travel at 300 px/sec across frame schedules', () => {
+  const speed = MEMORY_ARENA_CONFIG.playerWeapon.bulletSpeed;
+  assert.equal(speed, 300);
+  assert.ok(Math.abs(speed * getSoloPlayerBulletTravelSeconds(1000, 1000, 1100) - 42) < 1e-8);
+  assert.equal(speed * getSoloPlayerBulletTravelSeconds(1000, 1400, 1500), 30);
+  assert.equal(getSoloPlayerBulletTravelSeconds(1000, 900, 950), 0);
+  for (const frameMs of [1000 / 30, 1000 / 60, 1000 / 120, 73]) {
+    let traveled = 0;
+    for (let start = 1000; start < 1500; start += frameMs) {
+      traveled += speed * getSoloPlayerBulletTravelSeconds(1000, start, Math.min(1500, start + frameMs));
+    }
+    assert.ok(Math.abs(traveled - 180) < 1e-8);
+  }
+  const ranks = createInitialPlayerUpgradeRanks();
+  assert.equal(getPlayerLevelStats(ranks).volleyIntervalMs, 800);
+  assert.equal(getPlayerLevelStats(ranks, true).volleyIntervalMs, 800);
+});
+
+test('older player shots gain speed on load while retaining direction and ability multipliers', () => {
+  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(72, -96, 19), { dx: 180, dy: -240 });
+  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(144, -192, 19), { dx: 360, dy: -480 });
+  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(180, -240, 20), { dx: 180, dy: -240 });
+  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(0, 0, 19), { dx: 0, dy: 0 });
 });
 
 test('nearby enemies receive equal and opposite separation steering', () => {

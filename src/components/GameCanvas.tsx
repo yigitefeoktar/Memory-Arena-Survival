@@ -43,6 +43,8 @@ import {
   getRaidFormationOffset,
   getSoloWaveRescueSpawns,
   normalizeSavedSoloEnemySpeed,
+  normalizeSavedSoloPlayerBulletVelocity,
+  getSoloPlayerBulletTravelSeconds,
   getSoloWaveStreakTarget,
   getSquareVolleyDirections,
   getTriangleTelegraphVisual,
@@ -254,7 +256,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 19;
+const SAVE_VERSION = 20;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -5326,13 +5328,16 @@ export default function GameCanvas() {
       }
 
       const spawnTime = adjustTime(b.spawnTime);
+      const velocity = isMemorySave && b.isPlayer
+        ? normalizeSavedSoloPlayerBulletVelocity(b.dx, b.dy, version)
+        : { dx: b.dx, dy: b.dy };
 
       return {
         id: b.id,
         x: b.x,
         y: b.y,
-        dx: b.dx,
-        dy: b.dy,
+        dx: velocity.dx,
+        dy: velocity.dy,
         radius: b.radius,
         isPlayer: b.isPlayer,
         isPlayerAlly: Boolean(b.isPlayerAlly),
@@ -11467,8 +11472,9 @@ export default function GameCanvas() {
             const shootLen = Math.sqrt(shootDirX * shootDirX + shootDirY * shootDirY);
 
             if (shootLen > 0) {
-              bvx = (shootDirX / shootLen) * BULLET_SPEED;
-              bvy = (shootDirY / shootLen) * BULLET_SPEED;
+              const playerBulletSpeed = state.memoryMode ? MEMORY_ARENA_CONFIG.playerWeapon.bulletSpeed : BULLET_SPEED;
+              bvx = (shootDirX / shootLen) * playerBulletSpeed;
+              bvy = (shootDirY / shootLen) * playerBulletSpeed;
             }
 
             const localAllowedKeys: string[] = [];
@@ -11831,7 +11837,9 @@ export default function GameCanvas() {
             speedMultiplier = 3.5;
           }
 
-          const bulletTravelSeconds = hasMultiplayerCatchUp && bullet.isPlayer
+          const bulletTravelSeconds = state.memoryMode && bullet.isPlayer
+            ? getSoloPlayerBulletTravelSeconds(bullet.spawnTime, bulletStepStartTime, currentTime)
+            : hasMultiplayerCatchUp && bullet.isPlayer
             ? getPlayerBulletTravelSecondsBetween(
                 bullet.spawnTime,
                 bulletStepStartTime,
@@ -13256,6 +13264,31 @@ export default function GameCanvas() {
         } else if (bullet.factionColor) {
           color = ENEMY_COLOR_HEX[bullet.factionColor];
           glow = `${color}55`;
+        }
+
+        if (state.memoryMode && bullet.isPlayer && !bullet.isNeutral) {
+          const length = Math.hypot(bullet.dx, bullet.dy);
+          const dirX = length > 0 ? bullet.dx / length : 1;
+          const dirY = length > 0 ? bullet.dy / length : 0;
+          ctx.save();
+          ctx.lineCap = 'round';
+          ctx.strokeStyle = glow;
+          ctx.lineWidth = bullet.radius * 3.5;
+          ctx.beginPath();
+          ctx.moveTo(bullet.x - dirX * 5, bullet.y - dirY * 5);
+          ctx.lineTo(bullet.x + dirX * 3, bullet.y + dirY * 3);
+          ctx.stroke();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = bullet.radius * 1.4;
+          ctx.stroke();
+          ctx.strokeStyle = MEMORY_ARENA_PALETTE.player.body;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(bullet.x - dirX * 2, bullet.y - dirY * 2);
+          ctx.lineTo(bullet.x + dirX * 2, bullet.y + dirY * 2);
+          ctx.stroke();
+          ctx.restore();
+          continue;
         }
 
         ctx.fillStyle = glow;
