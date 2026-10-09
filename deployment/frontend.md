@@ -17,7 +17,7 @@ Vercel reads `vercel.json` and publishes only `dist/frontend`. Verify the produc
 
 `deployment.json` explicitly declares `backend: null`. Frontend mode disables Socket.IO and server-provided analytics configuration. Do not deploy Express, create PC tasks/tunnels, or add another game's backend URL. Future multiplayer requires an explicitly authorized and tested backend.
 
-Both difficulties use player shots with a 420 px/sec launch burst for 250 ms, then 300 px/sec sustained speed. The base fire interval remains 800 ms. Their short cyan capsule and white core distinguish them from unchanged enemy shots. Save version 20 migrates older in-flight player shot velocities while retaining direction and ability multipliers.
+Both difficulties use player shots at a constant 300 px/sec from launch, with no initial speed burst. The base fire interval remains 800 ms. Their short cyan capsule and white core distinguish them from unchanged enemy shots. Save version 20 migrates older in-flight player shot velocities while retaining direction and ability multipliers.
 
 Google Cloud billing was disabled on 2026-10-04. Its configuration is historical recovery material, not an available running fallback. Preserve remaining resources/settings and keep billing and deployment triggers disabled.
 

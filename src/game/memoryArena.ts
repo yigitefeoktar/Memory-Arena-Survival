@@ -162,8 +162,6 @@ export const MEMORY_ARENA_CONFIG = {
   },
   playerWeapon: {
     bulletSpeed: 300,
-    launchSpeed: 420,
-    launchDurationMs: 250,
   },
   progression: {
     hpMultiplierPerUpgrade: 1.4,
@@ -1242,10 +1240,7 @@ export function normalizeSavedSoloPlayerBulletVelocity(dx: number, dy: number, v
 
 export function getSoloPlayerBulletTravelSeconds(spawnTime: number, startTime: number, endTime: number): number {
   const start = Math.max(spawnTime, startTime);
-  const durationMs = Math.max(0, endTime - start);
-  const weapon = MEMORY_ARENA_CONFIG.playerWeapon;
-  const launchMs = Math.max(0, Math.min(endTime, spawnTime + weapon.launchDurationMs) - start);
-  return (durationMs + launchMs * (weapon.launchSpeed / weapon.bulletSpeed - 1)) / 1000;
+  return Math.max(0, endTime - start) / 1000;
 }
 
 export function registerSoloWaveStreak(current: SoloWaveState, hardMode = false): SoloWaveState {

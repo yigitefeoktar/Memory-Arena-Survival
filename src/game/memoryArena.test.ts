@@ -95,10 +95,11 @@ test('3x3 arena composition creates a seamless 9000px world', () => {
   assert.equal(composed.walls.filter(wall => wall.w === 9000 || wall.h === 9000).length, 4);
 });
 
-test('player shots keep their launch burst and travel at 300 px/sec across frame schedules', () => {
+test('player shots travel at a constant 300 px/sec from launch across frame schedules', () => {
   const speed = MEMORY_ARENA_CONFIG.playerWeapon.bulletSpeed;
   assert.equal(speed, 300);
-  assert.ok(Math.abs(speed * getSoloPlayerBulletTravelSeconds(1000, 1000, 1100) - 42) < 1e-8);
+  assert.equal(speed * getSoloPlayerBulletTravelSeconds(1000, 1000, 1100), 30);
+  assert.equal(speed * getSoloPlayerBulletTravelSeconds(1000, 1200, 1300), 30);
   assert.equal(speed * getSoloPlayerBulletTravelSeconds(1000, 1400, 1500), 30);
   assert.equal(getSoloPlayerBulletTravelSeconds(1000, 900, 950), 0);
   for (const frameMs of [1000 / 30, 1000 / 60, 1000 / 120, 73]) {
@@ -106,7 +107,7 @@ test('player shots keep their launch burst and travel at 300 px/sec across frame
     for (let start = 1000; start < 1500; start += frameMs) {
       traveled += speed * getSoloPlayerBulletTravelSeconds(1000, start, Math.min(1500, start + frameMs));
     }
-    assert.ok(Math.abs(traveled - 180) < 1e-8);
+    assert.ok(Math.abs(traveled - 150) < 1e-8);
   }
   const ranks = createInitialPlayerUpgradeRanks();
   assert.equal(getPlayerLevelStats(ranks).volleyIntervalMs, 800);

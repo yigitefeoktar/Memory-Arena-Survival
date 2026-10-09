@@ -11832,8 +11832,8 @@ export default function GameCanvas() {
           let speedMultiplier = 1;
           const timeAlive = currentTime - bullet.spawnTime;
 
-          // Initial speed burst to avoid player running into their own bullets
-          if (bullet.isPlayer && timeAlive < 250) {
+          // Legacy play retains its launch burst; solo shots use constant speed.
+          if (!state.memoryMode && bullet.isPlayer && timeAlive < 250) {
             speedMultiplier = 3.5;
           }
 
