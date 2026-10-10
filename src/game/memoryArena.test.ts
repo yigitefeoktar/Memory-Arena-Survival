@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { getMapDimensions, isValidMapId, VALID_MAP_IDS } from '../shared/matchSettings';
 import { clearLegacyAbilities } from './legacyAbilities';
+import { traceSoloPlayerBullet } from './soloPlayerBullet';
 import {
   ABILITY_BY_FACTION,
   addFactionEmergencyPressure,
@@ -95,19 +96,19 @@ test('3x3 arena composition creates a seamless 9000px world', () => {
   assert.equal(composed.walls.filter(wall => wall.w === 9000 || wall.h === 9000).length, 4);
 });
 
-test('player shots travel at a constant 300 px/sec from launch across frame schedules', () => {
+test('player shots travel at a constant 900 px/sec from launch across frame schedules', () => {
   const speed = MEMORY_ARENA_CONFIG.playerWeapon.bulletSpeed;
-  assert.equal(speed, 300);
-  assert.equal(speed * getSoloPlayerBulletTravelSeconds(1000, 1000, 1100), 30);
-  assert.equal(speed * getSoloPlayerBulletTravelSeconds(1000, 1200, 1300), 30);
-  assert.equal(speed * getSoloPlayerBulletTravelSeconds(1000, 1400, 1500), 30);
+  assert.equal(speed, 900);
+  assert.equal(speed * getSoloPlayerBulletTravelSeconds(1000, 1000, 1100), 90);
+  assert.equal(speed * getSoloPlayerBulletTravelSeconds(1000, 1200, 1300), 90);
+  assert.equal(speed * getSoloPlayerBulletTravelSeconds(1000, 1400, 1500), 90);
   assert.equal(getSoloPlayerBulletTravelSeconds(1000, 900, 950), 0);
   for (const frameMs of [1000 / 30, 1000 / 60, 1000 / 120, 73]) {
     let traveled = 0;
     for (let start = 1000; start < 1500; start += frameMs) {
       traveled += speed * getSoloPlayerBulletTravelSeconds(1000, start, Math.min(1500, start + frameMs));
     }
-    assert.ok(Math.abs(traveled - 150) < 1e-8);
+    assert.ok(Math.abs(traveled - 450) < 1e-8);
   }
   const ranks = createInitialPlayerUpgradeRanks();
   assert.equal(getPlayerLevelStats(ranks).volleyIntervalMs, 800);
@@ -115,10 +116,76 @@ test('player shots travel at a constant 300 px/sec from launch across frame sche
 });
 
 test('older player shots gain speed on load while retaining direction and ability multipliers', () => {
-  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(72, -96, 19), { dx: 180, dy: -240 });
-  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(144, -192, 19), { dx: 360, dy: -480 });
-  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(180, -240, 20), { dx: 180, dy: -240 });
+  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(72, -96, 19), { dx: 540, dy: -720 });
+  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(144, -192, 19), { dx: 1080, dy: -1440 });
+  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(180, -240, 20), { dx: 540, dy: -720 });
+  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(540, -720, 21), { dx: 540, dy: -720 });
   assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(0, 0, 19), { dx: 0, dy: 0 });
+});
+
+test('fast solo shots hit the closest enemy even when the frame endpoint passes both enemies', () => {
+  const hit = traceSoloPlayerBullet({
+    x: 0, y: 0, dx: 900, dy: 0, radius: 5, durationSeconds: 0.1, surfaces: [],
+    targets: [
+      { id: 'far', x: 65, y: 0, radius: 10, priority: 2, data: 'far' },
+      { id: 'near', x: 40, y: 0, radius: 10, priority: 2, data: 'near' },
+    ],
+  });
+  assert.equal(hit.target, 'near');
+  assert.equal(hit.x, 30);
+});
+
+test('fast solo shots stop at arena walls and build walls before targets behind them', () => {
+  for (const kind of ['wall', 'build'] as const) {
+    const options = {
+      x: 0, y: 0, dx: 900, dy: 0, radius: 5, durationSeconds: 0.1,
+      surfaces: [{ id: 'cover', kind, x: 40, y: -20, w: 10, h: 40 }],
+      targets: [{ id: 'behind', x: 65, y: 0, radius: 10, priority: 2, data: 'behind' }],
+    };
+    const blocked = traceSoloPlayerBullet(options);
+    assert.equal(blocked.target, null);
+    assert.equal(blocked.surface?.id, 'cover');
+    assert.equal(blocked.x, 35);
+    const inFront = traceSoloPlayerBullet({ ...options, targets: [{ id: 'front', x: 25, y: 0, radius: 10, priority: 2, data: 'front' }] });
+    assert.equal(inFront.target, 'front');
+    assert.equal(inFront.surface, null);
+  }
+});
+
+test('fast solo shots reach a blue shield before its enemy, while hitting nearer unshielded enemies first', () => {
+  const options = {
+    x: 0, y: 0, dx: 900, dy: 0, radius: 5, durationSeconds: 0.1, surfaces: [],
+    targets: [
+      { id: 'enemy', x: 65, y: 0, radius: 23, priority: 2, data: 'enemy' },
+      { id: 'shield', x: 65, y: 0, radius: 47, priority: 0, data: 'shield' },
+    ],
+  };
+  assert.equal(traceSoloPlayerBullet(options).target, 'shield');
+  assert.equal(traceSoloPlayerBullet({ ...options, targets: [...options.targets,
+    { id: 'front', x: 10, y: 0, radius: 5, priority: 2, data: 'front' },
+  ] }).target, 'front');
+});
+
+test('solo shot impacts stay consistent from 10 to 120 FPS and diagonal near misses remain misses', () => {
+  for (const dt of [0.1, 1 / 30, 1 / 60, 1 / 120]) {
+    let x = 0;
+    let hit = null;
+    for (let step = 0; step < 120; step++) {
+      const next = traceSoloPlayerBullet({
+        x, y: 0, dx: 900, dy: 0, radius: 5, durationSeconds: dt, surfaces: [],
+        targets: [{ id: 'enemy', x: 55, y: 0, radius: 23, priority: 2, data: 'enemy' }],
+      });
+      x = next.x;
+      if (next.target) { hit = next.target; break; }
+    }
+    assert.equal(hit, 'enemy');
+    assert.ok(Math.abs(x - 32) < 1e-8);
+  }
+  const miss = traceSoloPlayerBullet({
+    x: 0, y: 0, dx: 900, dy: 900, radius: 5, durationSeconds: 0.1, surfaces: [],
+    targets: [{ id: 'enemy', x: 55, y: 0, radius: 23, priority: 2, data: 'enemy' }],
+  });
+  assert.equal(miss.target, null);
 });
 
 test('nearby enemies receive equal and opposite separation steering', () => {

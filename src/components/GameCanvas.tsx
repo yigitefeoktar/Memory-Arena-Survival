@@ -10,6 +10,7 @@ import {
   type GameplayRunOrigin,
 } from '../analytics/gameplayAnalytics';
 import { clearLegacyAbilities } from '../game/legacyAbilities';
+import { traceSoloPlayerBullet } from '../game/soloPlayerBullet';
 import {
   ABILITY_BY_FACTION,
   addFactionEmergencyPressure,
@@ -256,7 +257,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 20;
+const SAVE_VERSION = 21;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -11855,6 +11856,8 @@ export default function GameCanvas() {
 
           const bulletRicochetEnabled = !state.memoryMode || MEMORY_ARENA_CONFIG.combat.bulletRicochetEnabled;
           let bulletDestroyed = false;
+          const usesSoloPlayerSweep = state.memoryMode && bullet.isPlayer && !isAuthoritativeMultiplayerBullet;
+          let soloPlayerTargetHit: { type: 'enemy' | 'bouncer' | 'shield'; index: number } | null = null;
           let normalsToProcess: { nx: number; ny: number }[] = [];
           let trailX = bullet.x;
           let trailY = bullet.y;
@@ -12095,6 +12098,44 @@ export default function GameCanvas() {
             if (hasMultiplayerCatchUp) {
               delete (bullet as any).multiplayerCatchUpFromTime;
             }
+          } else if (usesSoloPlayerSweep) {
+            const allowedKeys = new Set(bullet.allowedBlockKeys ?? []);
+            const hit = traceSoloPlayerBullet<{ type: 'enemy' | 'bouncer' | 'shield'; index: number }>({
+              x: bulletBeforeX,
+              y: bulletBeforeY,
+              dx: bullet.dx,
+              dy: bullet.dy,
+              radius: bullet.radius,
+              durationSeconds: bulletTravelSeconds,
+              surfaces: [
+                ...activeWalls.map((wall, index) => ({ ...wall, id: `wall:${index}`, kind: 'wall' as const })),
+                ...state.blocks.filter(block => !allowedKeys.has(`${block.x}_${block.y}`)).map((block, index) => ({
+                  id: `build:${index}`, kind: 'build' as const,
+                  x: block.x - block.size / 2, y: block.y - block.size / 2, w: block.size, h: block.size,
+                })),
+              ],
+              targets: [
+                ...activeBlueShieldEnemies.map((enemy, index) => ({
+                  id: `shield:${index}`, x: enemy.x, y: enemy.y,
+                  radius: MEMORY_ARENA_CONFIG.factionEmergency.blueShieldRadius + bullet.radius,
+                  priority: 0, data: { type: 'shield' as const, index },
+                })),
+                ...state.bouncers.map((bouncer, index) => ({
+                  id: `bouncer:${index}`, x: bouncer.x, y: bouncer.y, radius: bouncer.radius + bullet.radius,
+                  priority: 1, data: { type: 'bouncer' as const, index },
+                })),
+                ...state.enemies.flatMap((enemy, index) => enemy.isPlayerAlly ? [] : [{
+                  id: `enemy:${index}`, x: enemy.x, y: enemy.y, radius: enemy.radius + bullet.radius,
+                  priority: 2, data: { type: 'enemy' as const, index },
+                }]),
+              ],
+            });
+            bullet.x = hit.x;
+            bullet.y = hit.y;
+            trailX = hit.x;
+            trailY = hit.y;
+            soloPlayerTargetHit = hit.target;
+            normalsToProcess = hit.surface?.normals ?? [];
           } else {
             // Outside authoritative multiplayer: direct movement and direct resolveWallCollisions
             bullet.x = targetX;
@@ -12167,7 +12208,10 @@ export default function GameCanvas() {
 
           const bulletIsBlue = !bullet.isPlayer && !bullet.isPlayerAlly && bullet.factionColor === 'blue';
           if (!bulletIsBlue && activeBlueShieldEnemies.length > 0) {
-            let shieldHit: { enemy: MemoryEnemy; t: number; x: number; y: number } | null = null;
+            let shieldHit: { enemy: MemoryEnemy; t: number; x: number; y: number } | null =
+              soloPlayerTargetHit?.type === 'shield'
+                ? { enemy: activeBlueShieldEnemies[soloPlayerTargetHit.index], t: 0, x: bullet.x, y: bullet.y }
+                : null;
             for (const shieldEnemy of activeBlueShieldEnemies) {
               const combinedRadius = MEMORY_ARENA_CONFIG.factionEmergency.blueShieldRadius + bullet.radius;
               if (
@@ -12214,6 +12258,7 @@ export default function GameCanvas() {
               bullet.ownerId = undefined;
               bullet.colorIdx = undefined;
               bullet.factionColor = 'blue';
+              bullet.damage ??= MEMORY_ARENA_CONFIG.circle.bulletDamage;
               bullet.bounceCount++;
               spawnParticles(bullet.x, bullet.y, ENEMY_COLOR_HEX.blue, 7);
             }
@@ -12309,6 +12354,8 @@ export default function GameCanvas() {
               const dy = bouncer.y - bullet.y;
               const hitThisBouncer = isAuthoritativeMultiplayerBullet
                 ? authoritativeTargetHit?.type === 'bouncer' && authoritativeTargetHit.index === b
+                : usesSoloPlayerSweep
+                ? soloPlayerTargetHit?.type === 'bouncer' && soloPlayerTargetHit.index === b
                 : dx * dx + dy * dy < (bouncer.radius + bullet.radius) ** 2;
               if (hitThisBouncer) {
                 spawnDestructionBurst(state, bouncer.x, bouncer.y, '#ff3333', 1.2, Boolean(shouldReduceMotion));
@@ -12422,6 +12469,8 @@ export default function GameCanvas() {
               const dy = enemy.y - bullet.y;
               const hitThisEnemy = isAuthoritativeMultiplayerBullet
                 ? authoritativeTargetHit?.type === 'enemy' && authoritativeTargetHit.index === e
+                : usesSoloPlayerSweep
+                ? soloPlayerTargetHit?.type === 'enemy' && soloPlayerTargetHit.index === e
                 : dx * dx + dy * dy < (enemy.radius + bullet.radius) ** 2;
               if (hitThisEnemy) {
                 // Kill enemy
