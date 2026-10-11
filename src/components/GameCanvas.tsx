@@ -2840,7 +2840,7 @@ export default function GameCanvas() {
 
   useEffect(() => {
     if (uiState.status !== 'PLAYING') return;
-    preload('/images/game-over-arena.webp', { as: 'image' });
+    preload('/images/game-over-aftermath.webp', { as: 'image' });
     preload('/fonts/Anton-Regular.ttf', { as: 'font', type: 'font/ttf', crossOrigin: 'anonymous' });
   }, [uiState.status]);
 

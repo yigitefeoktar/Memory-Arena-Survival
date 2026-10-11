@@ -35,10 +35,10 @@ export default function GameOverScreen({ score, highestWave, hardMode, onRetry, 
     setLeaving(true);
   };
 
-  const reveal = (delay: number, y = 16): Variants => ({
-    enter: { opacity: 0, y: reduceMotion ? 0 : y },
-    show: { opacity: 1, y: 0, transition: { duration: reduceMotion ? 0 : 0.45, delay: reduceMotion ? 0 : delay, ease: settle } },
-    leave: { opacity: 0, y: reduceMotion ? 0 : -12, transition: { duration: reduceMotion ? 0 : 0.16 } },
+  const reveal = (delay: number, x = -24): Variants => ({
+    enter: { opacity: 0, x: reduceMotion ? 0 : x },
+    show: { opacity: 1, x: 0, transition: { duration: reduceMotion ? 0 : 0.6, delay: reduceMotion ? 0 : delay, ease: settle } },
+    leave: { opacity: 0, x: reduceMotion ? 0 : -18, transition: { duration: reduceMotion ? 0 : 0.22 } },
   });
 
   return (
@@ -54,7 +54,7 @@ export default function GameOverScreen({ score, highestWave, hardMode, onRetry, 
       variants={{
         enter: { opacity: 0 },
         show: { opacity: 1, transition: { duration: reduceMotion ? 0 : 0.2 } },
-        leave: { opacity: 0, transition: { duration: reduceMotion ? 0 : 0.26, delay: reduceMotion ? 0 : 0.14 } },
+        leave: { opacity: 0, transition: { duration: reduceMotion ? 0 : 0.3, delay: reduceMotion ? 0 : 0.14 } },
       }}
       onAnimationComplete={definition => {
         if (definition !== 'leave') return;
@@ -68,14 +68,14 @@ export default function GameOverScreen({ score, highestWave, hardMode, onRetry, 
       <div className="game-over-backdrop" aria-hidden="true">
         <motion.img
           className="game-over-art"
-          src="/images/game-over-arena.webp"
+          src="/images/game-over-aftermath.webp"
           alt=""
           aria-hidden="true"
           decoding="async"
           variants={{
-            enter: { scale: 1.065 },
-            show: { scale: 1, transition: { duration: reduceMotion ? 0 : 1.2, ease: settle } },
-            leave: { scale: reduceMotion ? 1 : 1.035, transition: { duration: reduceMotion ? 0 : 0.4, ease: 'easeIn' } },
+            enter: { scale: 1.045 },
+            show: { scale: 1, transition: { duration: reduceMotion ? 0 : 1.5, ease: settle } },
+            leave: { scale: reduceMotion ? 1 : 1.025, transition: { duration: reduceMotion ? 0 : 0.44, ease: 'easeIn' } },
           }}
         />
         <div className="game-over-shade" aria-hidden="true" />
@@ -86,45 +86,51 @@ export default function GameOverScreen({ score, highestWave, hardMode, onRetry, 
         )}
       </div>
       <div className="game-over-content">
-        <motion.header className="game-over-header" variants={reveal(0.05, -8)}>
+        <motion.header className="game-over-header" variants={reveal(0.06, -16)}>
           <div className="game-over-brand">MEMORY ARENA<span>SURVIVAL</span></div>
-          <span className="game-over-mode">{hardMode ? 'HARD' : 'NORMAL'}</span>
         </motion.header>
         <div className="game-over-results">
-          <motion.h2
-            ref={titleRef}
-            tabIndex={-1}
-            id="game-over-title"
-            className="game-over-title"
-            variants={{
-              enter: { opacity: 0, scale: 1.12, y: 18 },
-              show: { opacity: 1, scale: 1, y: 0, transition: { duration: reduceMotion ? 0 : 0.55, delay: reduceMotion ? 0 : 0.08, ease: settle } },
-              leave: { opacity: 0, scale: reduceMotion ? 1 : 0.98, y: reduceMotion ? 0 : -22, transition: { duration: reduceMotion ? 0 : 0.22 } },
-            }}
-          >ANNIHILATED</motion.h2>
+          <motion.div className="game-over-mode" variants={reveal(0.16, -18)}>{hardMode ? 'HARD' : 'NORMAL'}</motion.div>
+          <div className="game-over-title-frame">
+            <motion.h2
+              ref={titleRef}
+              tabIndex={-1}
+              id="game-over-title"
+              className="game-over-title"
+              variants={{
+                enter: { opacity: 0, x: -32, y: 6 },
+                show: { opacity: 1, x: 0, y: 0, transition: { duration: reduceMotion ? 0 : 0.65, delay: reduceMotion ? 0 : 0.23, ease: settle } },
+                leave: { opacity: 0, x: reduceMotion ? 0 : -26, y: 0, transition: { duration: reduceMotion ? 0 : 0.24 } },
+              }}
+            ><span>ANNIHILATED</span></motion.h2>
+          </div>
           <motion.div
             className="game-over-rule"
             aria-hidden="true"
             variants={{
               enter: { scaleX: 0 },
-              show: { scaleX: 1, transition: { duration: reduceMotion ? 0 : 0.55, delay: reduceMotion ? 0 : 0.16, ease: settle } },
+              show: { scaleX: 1, transition: { duration: reduceMotion ? 0 : 0.65, delay: reduceMotion ? 0 : 0.34, ease: settle } },
               leave: { scaleX: 0, transition: { duration: reduceMotion ? 0 : 0.2 } },
             }}
           />
           <dl id="game-over-stats" className="game-over-stats">
-            <motion.div variants={reveal(0.24)}>
+            <motion.div variants={reveal(0.4)}>
               <dt>FINAL SCORE</dt>
               <dd>{score.toLocaleString('en-US')}</dd>
             </motion.div>
-            <motion.div variants={reveal(0.31)}>
+            <motion.div variants={reveal(0.47)}>
               <dt>HIGHEST WAVE</dt>
               <dd>{String(highestWave).padStart(2, '0')}</dd>
             </motion.div>
           </dl>
-          <motion.div className="game-over-actions" variants={reveal(0.38, 22)}>
-            <button type="button" className="game-over-retry" disabled={leaving} onClick={() => leave('retry')}>RETRY ARENA</button>
-            <button type="button" className="game-over-menu" disabled={leaving} onClick={() => leave('menu')}>MAIN MENU</button>
-          </motion.div>
+          <div className="game-over-actions">
+            <motion.div className="game-over-action" variants={reveal(0.54)}>
+              <button type="button" className="game-over-retry" disabled={leaving} onClick={() => leave('retry')}>RETRY ARENA</button>
+            </motion.div>
+            <motion.div className="game-over-action" variants={reveal(0.62)}>
+              <button type="button" className="game-over-menu" disabled={leaving} onClick={() => leave('menu')}>MAIN MENU</button>
+            </motion.div>
+          </div>
         </div>
       </div>
     </motion.section>
