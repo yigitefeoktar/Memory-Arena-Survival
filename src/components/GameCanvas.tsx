@@ -1,5 +1,7 @@
 import { Check, Copy, Shuffle } from 'lucide-react';
 import MainMenu from './MainMenu';
+import GameOverScreen from './GameOverScreen';
+import { preload } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
@@ -2835,6 +2837,12 @@ export default function GameCanvas() {
   uiRef.current = uiState;
 
   const shouldReduceMotion = useReducedMotion();
+
+  useEffect(() => {
+    if (uiState.status !== 'PLAYING') return;
+    preload('/images/game-over-arena.webp', { as: 'image' });
+    preload('/fonts/Anton-Regular.ttf', { as: 'font', type: 'font/ttf', crossOrigin: 'anonymous' });
+  }, [uiState.status]);
 
   const [presentationStage, setPresentationStage] = useState<'idle' | 'impact' | 'results'>('idle');
   const presentationStageRef = useRef<'idle' | 'impact' | 'results'>('idle');
@@ -15276,72 +15284,26 @@ export default function GameCanvas() {
       )}
 
       {uiState.status === 'GAME_OVER' && !mpState.roomId && presentationStage === 'results' && (
-        <motion.div
-          initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: shouldReduceMotion ? 0 : 0.18 }}
-          className="absolute inset-0 bg-red-950/90 flex flex-col items-center justify-center p-3 sm:p-6 text-center backdrop-blur-md z-[70] overflow-y-auto"
-        >
-          <motion.div
-            initial={shouldReduceMotion ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.94, y: 16 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ duration: shouldReduceMotion ? 0 : 0.25, ease: 'easeOut' }}
-            className="max-w-xl w-full bg-[#0a0000] border-2 border-[#ff003c] p-4 sm:p-8 md:p-12 shadow-[10px_10px_0_#ff003c] max-h-[92vh] overflow-y-auto"
-          >
-            <motion.h2
-              initial={shouldReduceMotion ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 1.15, y: -4 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              transition={{ duration: shouldReduceMotion ? 0 : 0.15, delay: shouldReduceMotion ? 0 : 0.05 }}
-              className="text-4xl sm:text-6xl md:text-7xl font-black text-[#ff003c] mb-2 sm:mb-4 tracking-tighter uppercase"
-              style={{ fontFamily: 'var(--font-display, Anton, sans-serif)' }}
-            >
-              ANNIHILATED
-            </motion.h2>
-
-            <motion.div
-              initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: shouldReduceMotion ? 0 : 0.2, delay: shouldReduceMotion ? 0 : 0.15 }}
-              className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-8 text-xs sm:text-sm font-mono text-red-200/80 mb-4 sm:mb-6 md:mb-10 uppercase tracking-widest border-t border-b border-red-500/30 py-3 sm:py-6"
-            >
-              <div>FINAL SCORE: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{uiState.score}</span></div>
-              <div>HIGHEST WAVE: <span className="text-white font-bold text-xl sm:text-2xl ml-2">{soloWaveUi.number}</span></div>
-            </motion.div>
-
-            <motion.div
-              initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: shouldReduceMotion ? 0 : 0.2, delay: shouldReduceMotion ? 0 : 0.22 }}
-              className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center"
-            >
-              <button
-                onClick={() => {
-                  startFreshSinglePlayerRun(uiState.mapId, uiState.gameMode, 'retry');
-                }}
-                className="flex-1 py-3 sm:py-4 bg-[#ff003c] hover:bg-white text-black border-2 border-[#ff003c] font-black tracking-[0.2em] transition-all duration-200 uppercase text-sm sm:text-base md:text-lg active:translate-x-1 active:translate-y-1 active:shadow-none hover:shadow-[5px_5px_0_#fff] pointer-events-auto"
-              >
-                RETRY ARENA
-              </button>
-              <button
-                onClick={() => {
-                  emitLeaveRoom();
-                  clearPendingGuestShots(true);
-                  clearPendingAbilityRequests();
-                  activeMultiplayerRoundIdRef.current = 0;
-                  multiplayerStartPendingRef.current = false;
-                  setMultiplayerStartPending(false);
-                  cancelPendingMatchSettingsUpdate();
-                  setMpState(prev => ({ ...prev, roomId: null, isHost: false, error: '' }));
-                  endActiveAnalyticsRunAsAbandoned('quit_to_menu');
-                  setUiState(prev => ({ ...prev, status: 'MENU' }));
-                }}
-                className="flex-1 py-3 sm:py-4 bg-transparent hover:bg-white/10 text-[#ff003c] hover:text-white border-2 border-[#ff003c] font-black tracking-[0.2em] transition-all duration-200 uppercase text-sm sm:text-base md:text-lg active:translate-x-1 active:translate-y-1 active:shadow-none hover:shadow-[5px_5px_0_rgba(255,0,60,0.4)] pointer-events-auto"
-              >
-                MAIN MENU
-              </button>
-            </motion.div>
-          </motion.div>
-        </motion.div>
+        <GameOverScreen
+          score={uiState.score}
+          highestWave={soloWaveUi.number}
+          hardMode={uiState.gameMode === 'hard'}
+          onRetry={() => startFreshSinglePlayerRun(uiState.mapId, uiState.gameMode, 'retry')}
+          onMainMenu={() => {
+            emitLeaveRoom();
+            clearPendingGuestShots(true);
+            clearPendingAbilityRequests();
+            activeMultiplayerRoundIdRef.current = 0;
+            multiplayerStartPendingRef.current = false;
+            setMultiplayerStartPending(false);
+            cancelPendingMatchSettingsUpdate();
+            setMpState(prev => ({ ...prev, roomId: null, isHost: false, error: '' }));
+            endActiveAnalyticsRunAsAbandoned('quit_to_menu');
+            resetEndPresentation();
+            releaseAllInputs();
+            setUiState(prev => ({ ...prev, status: 'MENU' }));
+          }}
+        />
       )}
 
       {mpState.roomId && (uiState.status === 'GAME_OVER' || uiState.status === 'VICTORY') && presentationStage === 'results' && (() => {
