@@ -161,7 +161,7 @@ export const MEMORY_ARENA_CONFIG = {
     regenerationPercentPerSecond: 0.02,
   },
   playerWeapon: {
-    bulletSpeed: 900,
+    bulletSpeed: 120,
   },
   progression: {
     hpMultiplierPerUpgrade: 1.4,
@@ -1234,7 +1234,7 @@ export function normalizeSavedSoloEnemySpeed(speed: number, wave: number, versio
 }
 
 export function normalizeSavedSoloPlayerBulletVelocity(dx: number, dy: number, version: number) {
-  const savedSpeed = version < 20 ? 120 : version < 21 ? 300 : MEMORY_ARENA_CONFIG.playerWeapon.bulletSpeed;
+  const savedSpeed = version < 20 ? 120 : version < 21 ? 300 : version < 22 ? 900 : MEMORY_ARENA_CONFIG.playerWeapon.bulletSpeed;
   const factor = MEMORY_ARENA_CONFIG.playerWeapon.bulletSpeed / savedSpeed;
   return { dx: dx * factor, dy: dy * factor };
 }

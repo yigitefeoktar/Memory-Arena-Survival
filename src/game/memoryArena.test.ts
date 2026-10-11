@@ -96,30 +96,33 @@ test('3x3 arena composition creates a seamless 9000px world', () => {
   assert.equal(composed.walls.filter(wall => wall.w === 9000 || wall.h === 9000).length, 4);
 });
 
-test('player shots travel at a constant 900 px/sec from launch across frame schedules', () => {
+test('player shots travel at the original constant 120 px/sec with the higher firing rate', () => {
   const speed = MEMORY_ARENA_CONFIG.playerWeapon.bulletSpeed;
-  assert.equal(speed, 900);
-  assert.equal(speed * getSoloPlayerBulletTravelSeconds(1000, 1000, 1100), 90);
-  assert.equal(speed * getSoloPlayerBulletTravelSeconds(1000, 1200, 1300), 90);
-  assert.equal(speed * getSoloPlayerBulletTravelSeconds(1000, 1400, 1500), 90);
+  assert.equal(speed, 120);
+  assert.equal(speed * getSoloPlayerBulletTravelSeconds(1000, 1000, 1100), 12);
+  assert.equal(speed * getSoloPlayerBulletTravelSeconds(1000, 1200, 1300), 12);
+  assert.equal(speed * getSoloPlayerBulletTravelSeconds(1000, 1400, 1500), 12);
   assert.equal(getSoloPlayerBulletTravelSeconds(1000, 900, 950), 0);
   for (const frameMs of [1000 / 30, 1000 / 60, 1000 / 120, 73]) {
     let traveled = 0;
     for (let start = 1000; start < 1500; start += frameMs) {
       traveled += speed * getSoloPlayerBulletTravelSeconds(1000, start, Math.min(1500, start + frameMs));
     }
-    assert.ok(Math.abs(traveled - 450) < 1e-8);
+    assert.ok(Math.abs(traveled - 60) < 1e-8);
   }
   const ranks = createInitialPlayerUpgradeRanks();
   assert.equal(getPlayerLevelStats(ranks).volleyIntervalMs, 800);
   assert.equal(getPlayerLevelStats(ranks, true).volleyIntervalMs, 800);
 });
 
-test('older player shots gain speed on load while retaining direction and ability multipliers', () => {
-  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(72, -96, 19), { dx: 540, dy: -720 });
-  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(144, -192, 19), { dx: 1080, dy: -1440 });
-  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(180, -240, 20), { dx: 540, dy: -720 });
-  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(540, -720, 21), { dx: 540, dy: -720 });
+test('saved player shots restore original speed while retaining direction and ability multipliers', () => {
+  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(72, -96, 19), { dx: 72, dy: -96 });
+  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(144, -192, 19), { dx: 144, dy: -192 });
+  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(180, -240, 20), { dx: 72, dy: -96 });
+  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(540, -720, 21), { dx: 72, dy: -96 });
+  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(1080, -1440, 21), { dx: 144, dy: -192 });
+  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(72, -96, 22), { dx: 72, dy: -96 });
+  assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(144, -192, 22), { dx: 144, dy: -192 });
   assert.deepEqual(normalizeSavedSoloPlayerBulletVelocity(0, 0, 19), { dx: 0, dy: 0 });
 });
 
