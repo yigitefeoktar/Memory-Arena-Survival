@@ -12,7 +12,7 @@ import {
   type GameplayRunOrigin,
 } from '../analytics/gameplayAnalytics';
 import { clearLegacyAbilities } from '../game/legacyAbilities';
-import { traceSoloPlayerBullet } from '../game/soloPlayerBullet';
+import { getSoloPlayerBulletSpawn, traceSoloPlayerBullet } from '../game/soloPlayerBullet';
 import {
   ABILITY_BY_FACTION,
   addFactionEmergencyPressure,
@@ -20,6 +20,7 @@ import {
   applyPlayerDamage,
   areEnemyFactionsHostile,
   calculateEnemySeparationSteering,
+  getEnemySeparationDisplacements,
   canEnemyFactionDamageSpawner,
   canMemoryProjectileDamageEnemies,
   composeThreeByThreeArena,
@@ -259,7 +260,7 @@ const CONVERSION_PULL_SPEED = 700;
 const GAMEPLAY_ANALYTICS_SAMPLE_INTERVAL_MS = 5000;
 
 const SAVE_FORMAT = "memory-arena-save";
-const SAVE_VERSION = 22;
+const SAVE_VERSION = 23;
 const MAX_SAVE_FILE_BYTES = 5 * 1024 * 1024;
 const QUICK_SAVE_STORAGE_KEY = "memory-arena-quicksave-v1";
 
@@ -10119,7 +10120,7 @@ export default function GameCanvas() {
             radius: ENEMY_RADIUS,
             lastShoot: currentTime + Math.random() * 600,
             speed: state.memoryMode
-              ? (MEMORY_ENEMY_SPEED + Math.random() * 15)
+              ? (MEMORY_ENEMY_SPEED + Math.random() * 15) * MEMORY_ARENA_CONFIG.navigation.enemyMovementSpeedMultiplier
               : ENEMY_SPEED + Math.random() * 20,
             shape: identity.shape,
             factionColor: identity.color,
@@ -10948,6 +10949,24 @@ export default function GameCanvas() {
           state.enemies = state.enemies.filter(enemy => !enemiesDefeatedByFactions.has(enemy));
         }
 
+        if (state.memoryMode && STATUS === 'PLAYING') {
+          const separation = getEnemySeparationDisplacements(state.enemies, dt);
+          state.enemies.forEach((enemy, index) => {
+            const spawnedAt = enemy.id ? entitySpawnTimesRef.current.get(enemy.id) : undefined;
+            if ((spawnedAt !== undefined && currentTime - spawnedAt < SPAWN_ANIMATION_MS) ||
+                enemy.triangleAi?.phase === 'telegraph' || enemy.triangleAi?.phase === 'dash' ||
+                currentTime < (enemy.conversionPullUntil ?? 0)) return;
+            const previousX = enemy.x;
+            const previousY = enemy.y;
+            const resolved = resolveWallCollisions(
+              previousX + separation[index].x, previousY + separation[index].y,
+              enemy.radius, activeWalls, previousX, previousY,
+            );
+            enemy.x = resolved.x;
+            enemy.y = resolved.y;
+          });
+        }
+
         const overlapResolution = resolveEnemyOverlaps(state.enemies, (enemy, _index, previous) => {
           const constrained = resolveWallCollisions(
             enemy.x,
@@ -11487,7 +11506,7 @@ export default function GameCanvas() {
             }
 
             const localAllowedKeys: string[] = [];
-            if (state.player.recentBlocks) {
+            if (!state.memoryMode && state.player.recentBlocks) {
               for (const rb of state.player.recentBlocks) {
                 const blockObj = state.blocks.find(b => b.x === rb.x && b.y === rb.y);
                 if (blockObj) {
@@ -11529,17 +11548,26 @@ export default function GameCanvas() {
               const bulletSpeed = Math.hypot(bvx, bvy);
               const directionX = bulletSpeed > 0 ? bvx / bulletSpeed : 0;
               const directionY = bulletSpeed > 0 ? bvy / bulletSpeed : 0;
-              const perpendicularX = -directionY;
-              const perpendicularY = directionX;
               const streamOffsets = state.memoryMode && memoryPlayerStats?.streamCount === 3
                 ? [-12, 0, 12]
                 : [0];
-              const muzzleForward = state.memoryMode ? state.player.radius + BULLET_RADIUS + 2 : 0;
+              const muzzleSurfaces = state.memoryMode ? [
+                ...activeWalls.map((wall, index) => ({ ...wall, id: `wall:${index}`, kind: 'wall' as const })),
+                ...state.blocks.map((block, index) => ({
+                  id: `build:${index}`, kind: 'build' as const,
+                  x: block.x - block.size / 2, y: block.y - block.size / 2, w: block.size, h: block.size,
+                })),
+              ] : [];
 
               streamOffsets.forEach((streamOffset, streamIndex) => {
                 const bulletId = streamIndex === 0 ? localBulletId : 'bh_' + state.nextEntityId++;
-                const spawnX = state.player.x + directionX * muzzleForward + perpendicularX * streamOffset;
-                const spawnY = state.player.y + directionY * muzzleForward + perpendicularY * streamOffset;
+                const spawn = state.memoryMode ? getSoloPlayerBulletSpawn({
+                  x: state.player.x, y: state.player.y, directionX, directionY,
+                  playerRadius: state.player.radius, bulletRadius: BULLET_RADIUS, streamOffset,
+                  surfaces: muzzleSurfaces,
+                }) : { x: state.player.x, y: state.player.y };
+                if (!spawn) return;
+                const { x: spawnX, y: spawnY } = spawn;
                 state.bullets.push({
                   id: bulletId,
                   clientShotId,
@@ -15666,9 +15694,6 @@ function moveMemoryEnemyTowards(
   let moveDy = directPathBlocked && enemy.wallFollowDy !== undefined
     ? enemy.wallFollowDy
     : directDy;
-  const steeredDirection = blendEnemyMovementWithSeparation(enemy, moveDx, moveDy);
-  moveDx = steeredDirection.x;
-  moveDy = steeredDirection.y;
   const previousX = enemy.x;
   const previousY = enemy.y;
   const step = Math.min(targetDistance, speed * dt);
@@ -15713,9 +15738,6 @@ function moveMemoryEnemyInDirection(
   const directionLength = Math.hypot(directionX, directionY);
   let moveDx = directionLength > 0.0001 ? directionX / directionLength : 0;
   let moveDy = directionLength > 0.0001 ? directionY / directionLength : 0;
-  const steeredDirection = blendEnemyMovementWithSeparation(enemy, moveDx, moveDy);
-  moveDx = steeredDirection.x;
-  moveDy = steeredDirection.y;
   const previousX = enemy.x;
   const previousY = enemy.y;
   const step = speed * dt;

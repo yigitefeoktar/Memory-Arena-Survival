@@ -1,9 +1,31 @@
 import {
   findEarliestCircleTargetHit,
   traceReflectedBulletMotion,
+  sweepCircleAgainstAabb,
   type AxisAlignedSurface,
   type CircleTarget,
 } from '../shared/multiplayerBulletPhysics';
+
+// Check the entire muzzle path: its endpoint can already be beyond a thin wall.
+export function getSoloPlayerBulletSpawn(options: {
+  x: number; y: number; directionX: number; directionY: number;
+  playerRadius: number; bulletRadius: number; streamOffset: number;
+  surfaces: AxisAlignedSurface[];
+}) {
+  const { x, y, directionX, directionY, playerRadius, bulletRadius, streamOffset, surfaces } = options;
+  const forward = playerRadius + bulletRadius + 2;
+  const spawn = {
+    x: x + directionX * forward - directionY * streamOffset,
+    y: y + directionY * forward + directionX * streamOffset,
+  };
+  for (const surface of surfaces) {
+    const closestX = Math.max(surface.x, Math.min(spawn.x, surface.x + surface.w));
+    const closestY = Math.max(surface.y, Math.min(spawn.y, surface.y + surface.h));
+    if (Math.hypot(spawn.x - closestX, spawn.y - closestY) < bulletRadius ||
+        sweepCircleAgainstAabb(x, y, spawn.x, spawn.y, bulletRadius, surface)) return null;
+  }
+  return spawn;
+}
 
 // Solo shots stop at their first impact rather than reflecting off arena walls.
 export function traceSoloPlayerBullet<T>(options: {

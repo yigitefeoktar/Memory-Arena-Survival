@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { getMapDimensions, isValidMapId, VALID_MAP_IDS } from '../shared/matchSettings';
 import { clearLegacyAbilities } from './legacyAbilities';
-import { traceSoloPlayerBullet } from './soloPlayerBullet';
+import { getSoloPlayerBulletSpawn, traceSoloPlayerBullet } from './soloPlayerBullet';
 import {
   ABILITY_BY_FACTION,
   addFactionEmergencyPressure,
@@ -12,6 +12,7 @@ import {
   applyPlayerDamage,
   areEnemyFactionsHostile,
   calculateEnemySeparationSteering,
+  getEnemySeparationDisplacements,
   canEnemyFactionDamageSpawner,
   canMemoryProjectileDamageEnemies,
   collectAbilityPickup,
@@ -202,6 +203,66 @@ test('nearby enemies receive equal and opposite separation steering', () => {
   assert.ok(steering[1].x > 0);
   assert.ok(Math.abs(steering[0].x + steering[1].x) < 1e-9);
   assert.deepEqual(steering[2], { x: 0, y: 0 });
+});
+
+test('solo muzzle paths cannot jump through a wall when the player is touching it', () => {
+  for (const kind of ['wall', 'build'] as const) {
+    for (const [directionX, directionY] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const vertical = directionX !== 0;
+      const surface = { id: 'thin', kind, x: vertical ? 100 : 0, y: vertical ? 0 : 100, w: vertical ? 2 : 200, h: vertical ? 200 : 2 };
+      const options = {
+        x: vertical ? (directionX > 0 ? 84 : 118) : 50,
+        y: vertical ? 50 : (directionY > 0 ? 84 : 118),
+        directionX, directionY, playerRadius: 16, bulletRadius: 5, streamOffset: 0, surfaces: [surface],
+      };
+      assert.equal(getSoloPlayerBulletSpawn(options), null);
+      assert.ok(getSoloPlayerBulletSpawn({ ...options, directionX: -directionX, directionY: -directionY }));
+    }
+  }
+});
+
+test('muzzle checks allow parallel shots and independently block obstructed side streams and corners', () => {
+  const options = {
+    x: 84, y: 80, directionX: 0, directionY: -1,
+    playerRadius: 16, bulletRadius: 5, streamOffset: 0,
+    surfaces: [{ id: 'wall', kind: 'wall' as const, x: 100, y: 0, w: 20, h: 200 }],
+  };
+  assert.deepEqual(getSoloPlayerBulletSpawn(options), { x: 84, y: 57 });
+  assert.equal(getSoloPlayerBulletSpawn({ ...options, streamOffset: 12 }), null);
+  assert.ok(getSoloPlayerBulletSpawn({ ...options, streamOffset: -12 }));
+  assert.equal(getSoloPlayerBulletSpawn({
+    ...options, x: 84, y: 84, directionX: Math.SQRT1_2, directionY: Math.SQRT1_2,
+    surfaces: [{ id: 'corner', kind: 'wall', x: 100, y: 100, w: 20, h: 20 }],
+  }), null);
+});
+
+test('separation gradually opens a gap even for stationary enemies, with consistent frame schedules', () => {
+  const distances: number[] = [];
+  for (const fps of [30, 60, 120]) {
+    const bodies = [{ id: 'left', x: 0, y: 0, radius: 16 }, { id: 'right', x: 40, y: 0, radius: 16 }];
+    for (let frame = 0; frame < fps; frame++) {
+      const movements = getEnemySeparationDisplacements(bodies, 1 / fps);
+      bodies.forEach((body, index) => {
+        assert.ok(Math.hypot(movements[index].x, movements[index].y) <= 24 / fps + 1e-8);
+        body.x += movements[index].x;
+        body.y += movements[index].y;
+      });
+    }
+    distances.push(bodies[1].x - bodies[0].x);
+    assert.ok(distances.at(-1)! > 55 && distances.at(-1)! < 80);
+    assert.ok(Math.abs(bodies[0].x + bodies[1].x - 40) < 1e-8);
+  }
+  assert.ok(Math.max(...distances) - Math.min(...distances) < 0.3);
+  const distant = [{ x: 0, y: 0, radius: 16 }, { x: 100, y: 0, radius: 16 }];
+  assert.deepEqual(getEnemySeparationDisplacements(distant, 1), [{ x: 0, y: 0 }, { x: 0, y: 0 }]);
+  assert.deepEqual(getEnemySeparationDisplacements(distant, 0), [{ x: 0, y: 0 }, { x: 0, y: 0 }]);
+});
+
+test('dense and coincident crowds cannot amplify the gentle separation speed', () => {
+  const bodies = Array.from({ length: 48 }, (_, index) => ({ id: String(index), x: 0, y: 0, radius: 16 }));
+  const drift = getEnemySeparationDisplacements(bodies, 0.1);
+  assert.deepEqual(drift, getEnemySeparationDisplacements(bodies, 0.1));
+  for (const movement of drift) assert.ok(Math.hypot(movement.x, movement.y) <= 2.4 + 1e-8);
 });
 
 test('overlap resolution preserves a dense allowance while separating stacked enemies', () => {
@@ -574,11 +635,13 @@ test('opening waves start with 24 enemies across four identities and scale to 48
   }
 });
 
-test('old saves lose baked wave speed boosts while current speeds stay unchanged', () => {
+test('older saves slow regular enemy movement once and remove baked wave speed boosts', () => {
   for (const wave of [1, 5, 11, 100]) {
     const boost = Math.min(1.35, 1 + (wave - 1) * 0.035);
-    assert.ok(Math.abs(normalizeSavedSoloEnemySpeed(60 * boost, wave, 18) - 60) < 1e-9);
-    assert.equal(normalizeSavedSoloEnemySpeed(60, wave, 19), 60);
+    assert.ok(Math.abs(normalizeSavedSoloEnemySpeed(60 * boost, wave, 18) - 45) < 1e-9);
+    assert.equal(normalizeSavedSoloEnemySpeed(60, wave, 19), 45);
+    assert.equal(normalizeSavedSoloEnemySpeed(45, wave, 22), 33.75);
+    assert.equal(normalizeSavedSoloEnemySpeed(33.75, wave, 23), 33.75);
     assert.equal(normalizeSavedSoloEnemySpeed(0, wave, 18), 0);
   }
   assert.equal('enemyMovementMultiplier' in getMemoryThreatStats(0, 1), false);

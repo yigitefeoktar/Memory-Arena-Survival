@@ -96,6 +96,9 @@ export const MEMORY_ARENA_CONFIG = {
     nearbySpawnOffscreenPadding: 40,
   },
   navigation: {
+    enemyMovementSpeedMultiplier: 0.75,
+    soloSeparationRangeMultiplier: 2.5,
+    soloSeparationSpeed: 24,
     wallFollowOutwardWeight: 0.28,
     pathClearanceInset: 0.5,
     separationSteeringRangeMultiplier: 1.45,
@@ -361,7 +364,7 @@ function getEnemyPairNormal(
  */
 export function calculateEnemySeparationSteering(
   enemies: readonly EnemySeparationBody[],
-  rangeMultiplier = MEMORY_ARENA_CONFIG.navigation.separationSteeringRangeMultiplier,
+  rangeMultiplier: number = MEMORY_ARENA_CONFIG.navigation.separationSteeringRangeMultiplier,
 ): MovementVector[] {
   const steering = enemies.map(() => ({ x: 0, y: 0 }));
   for (let firstIndex = 0; firstIndex < enemies.length; firstIndex++) {
@@ -386,6 +389,14 @@ export function calculateEnemySeparationSteering(
     if (length <= 1 || length <= 0.0001) return vector;
     return { x: vector.x / length, y: vector.y / length };
   });
+}
+
+/** Slow outward drift independent of pursuit direction, with a capped speed. */
+export function getEnemySeparationDisplacements(enemies: readonly EnemySeparationBody[], elapsedSeconds: number): MovementVector[] {
+  const navigation = MEMORY_ARENA_CONFIG.navigation;
+  const step = navigation.soloSeparationSpeed * Math.max(0, elapsedSeconds);
+  return calculateEnemySeparationSteering(enemies, navigation.soloSeparationRangeMultiplier)
+    .map(vector => ({ x: vector.x * step, y: vector.y * step }));
 }
 
 /**
@@ -1230,7 +1241,8 @@ export function getSoloWaveRescueSpawns(wave: SoloWaveState, chain: ChainState, 
 export function normalizeSavedSoloEnemySpeed(speed: number, wave: number, version: number): number {
   // Earlier saves baked the wave speed boost into each enemy's speed.
   const legacyBoost = Math.min(1.35, 1 + (Math.max(1, wave) - 1) * 0.035);
-  return version < 19 ? speed / legacyBoost : speed;
+  const unboostedSpeed = version < 19 ? speed / legacyBoost : speed;
+  return version < 23 ? unboostedSpeed * MEMORY_ARENA_CONFIG.navigation.enemyMovementSpeedMultiplier : unboostedSpeed;
 }
 
 export function normalizeSavedSoloPlayerBulletVelocity(dx: number, dy: number, version: number) {
