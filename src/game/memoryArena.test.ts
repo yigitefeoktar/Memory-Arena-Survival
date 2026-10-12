@@ -13,6 +13,7 @@ import {
   areEnemyFactionsHostile,
   calculateEnemySeparationSteering,
   getEnemySeparationDisplacements,
+  limitEnemyCrowdApproach,
   canEnemyFactionDamageSpawner,
   canMemoryProjectileDamageEnemies,
   collectAbilityPickup,
@@ -263,6 +264,21 @@ test('dense and coincident crowds cannot amplify the gentle separation speed', (
   const drift = getEnemySeparationDisplacements(bodies, 0.1);
   assert.deepEqual(drift, getEnemySeparationDisplacements(bodies, 0.1));
   for (const movement of drift) assert.ok(Math.hypot(movement.x, movement.y) <= 2.4 + 1e-8);
+});
+
+test('enemies ease off head-on pursuit and preserve a gap without snapping apart', () => {
+  for (const fps of [30, 60, 120]) {
+    const bodies = [{ id: 'left', x: 0, y: 0, radius: 16 }, { id: 'right', x: 40, y: 0, radius: 16 }];
+    for (let frame = 0; frame < 3 * fps; frame++) {
+      const drift = getEnemySeparationDisplacements(bodies, 1 / fps);
+      const movements = bodies.map((_body, index) => limitEnemyCrowdApproach(bodies, index, { x: (index === 0 ? 45 : -45) / fps, y: 0 }));
+      bodies.forEach((body, index) => { body.x += movements[index].x + drift[index].x; });
+      assert.ok(bodies[1].x - bodies[0].x > 35, 'pursuit must not overcome spacing and force overlap corrections');
+    }
+    const sideways = limitEnemyCrowdApproach(bodies, 0, { x: 0, y: 1 });
+    assert.deepEqual(sideways, { x: 0, y: 1 });
+    assert.deepEqual(limitEnemyCrowdApproach(bodies, 0, { x: -1, y: 0 }), { x: -1, y: 0 });
+  }
 });
 
 test('overlap resolution preserves a dense allowance while separating stacked enemies', () => {

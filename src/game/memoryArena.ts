@@ -399,6 +399,28 @@ export function getEnemySeparationDisplacements(enemies: readonly EnemySeparatio
     .map(vector => ({ x: vector.x * step, y: vector.y * step }));
 }
 
+/** Ease off movement into a nearby neighbour so pursuit cannot overwhelm the slow drift. */
+export function limitEnemyCrowdApproach(enemies: readonly EnemySeparationBody[], index: number, movement: MovementVector): MovementVector {
+  const body = enemies[index];
+  let x = movement.x;
+  let y = movement.y;
+  for (let otherIndex = 0; otherIndex < enemies.length; otherIndex++) {
+    if (otherIndex === index) continue;
+    const other = enemies[otherIndex];
+    const contactDistance = body.radius + other.radius;
+    const easeDistance = contactDistance * 1.6;
+    const distance = Math.hypot(other.x - body.x, other.y - body.y);
+    if (distance >= easeDistance) continue;
+    const normal = getEnemyPairNormal(body, index, other, otherIndex);
+    const inwardMovement = x * normal.x + y * normal.y;
+    if (inwardMovement <= 0) continue;
+    const weight = Math.min(1, (easeDistance - distance) / Math.max(0.0001, easeDistance - contactDistance));
+    x -= normal.x * inwardMovement * weight;
+    y -= normal.y * inwardMovement * weight;
+  }
+  return { x, y };
+}
+
 /**
  * Resolves excessive circle overlap in a few bounded passes. A small amount of
  * overlap remains intentional so a crowd still reads as dense rather than rigid.

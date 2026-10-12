@@ -21,6 +21,7 @@ import {
   areEnemyFactionsHostile,
   calculateEnemySeparationSteering,
   getEnemySeparationDisplacements,
+  limitEnemyCrowdApproach,
   canEnemyFactionDamageSpawner,
   canMemoryProjectileDamageEnemies,
   composeThreeByThreeArena,
@@ -10256,6 +10257,9 @@ export default function GameCanvas() {
           : [];
 
         // 3. Update Enemies
+        const enemyMovementStarts = new Map(state.enemies.map(enemy => [enemy, {
+          id: enemy.id, x: enemy.x, y: enemy.y, radius: enemy.radius,
+        }]));
         const enemiesDefeatedByFactions = new Set<MemoryEnemy>();
         const triangleAttacks = createTriangleAttackCoordinator(state.enemies, currentTime);
         for (let i = state.enemies.length - 1; i >= 0; i--) {
@@ -10950,17 +10954,20 @@ export default function GameCanvas() {
         }
 
         if (state.memoryMode && STATUS === 'PLAYING') {
-          const separation = getEnemySeparationDisplacements(state.enemies, dt);
+          const spacingBodies = state.enemies.map(enemy => enemyMovementStarts.get(enemy)!);
+          const separation = getEnemySeparationDisplacements(spacingBodies, dt);
           state.enemies.forEach((enemy, index) => {
             const spawnedAt = enemy.id ? entitySpawnTimesRef.current.get(enemy.id) : undefined;
             if ((spawnedAt !== undefined && currentTime - spawnedAt < SPAWN_ANIMATION_MS) ||
                 enemy.triangleAi?.phase === 'telegraph' || enemy.triangleAi?.phase === 'dash' ||
                 currentTime < (enemy.conversionPullUntil ?? 0)) return;
-            const previousX = enemy.x;
-            const previousY = enemy.y;
+            const previous = spacingBodies[index];
+            const movement = limitEnemyCrowdApproach(spacingBodies, index, {
+              x: enemy.x - previous.x, y: enemy.y - previous.y,
+            });
             const resolved = resolveWallCollisions(
-              previousX + separation[index].x, previousY + separation[index].y,
-              enemy.radius, activeWalls, previousX, previousY,
+              previous.x + movement.x + separation[index].x, previous.y + movement.y + separation[index].y,
+              enemy.radius, activeWalls, previous.x, previous.y,
             );
             enemy.x = resolved.x;
             enemy.y = resolved.y;
