@@ -15285,7 +15285,7 @@ export default function GameCanvas() {
 
       {uiState.status === 'GAME_OVER' && !mpState.roomId && presentationStage === 'results' && (
         <GameOverScreen
-          score={uiState.score}
+          survivedMs={stateRef.current.memoryRunElapsedMs}
           highestWave={soloWaveUi.number}
           hardMode={uiState.gameMode === 'hard'}
           onRetry={() => startFreshSinglePlayerRun(uiState.mapId, uiState.gameMode, 'retry')}

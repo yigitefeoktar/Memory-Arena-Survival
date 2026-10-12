@@ -3,7 +3,7 @@ import { motion, useReducedMotion, type Variants } from 'motion/react';
 import './GameOverScreen.css';
 
 interface GameOverScreenProps {
-  score: number;
+  survivedMs: number;
   highestWave: number;
   hardMode: boolean;
   onRetry: () => void;
@@ -12,11 +12,16 @@ interface GameOverScreenProps {
 
 const settle = [0.16, 1, 0.3, 1] as const;
 
-export default function GameOverScreen({ score, highestWave, hardMode, onRetry, onMainMenu }: GameOverScreenProps) {
+export default function GameOverScreen({ survivedMs, highestWave, hardMode, onRetry, onMainMenu }: GameOverScreenProps) {
   const reduceMotion = useReducedMotion();
   const [leaving, setLeaving] = useState(false);
   const pendingAction = useRef<'retry' | 'menu' | null>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const totalSeconds = Math.floor(Math.max(0, survivedMs) / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = String(Math.floor(totalSeconds / 60) % 60).padStart(2, '0');
+  const seconds = String(totalSeconds % 60).padStart(2, '0');
+  const timeSurvived = hours > 0 ? `${hours}:${minutes}:${seconds}` : `${minutes}:${seconds}`;
 
   useEffect(() => {
     titleRef.current?.focus({ preventScroll: true });
@@ -90,7 +95,7 @@ export default function GameOverScreen({ score, highestWave, hardMode, onRetry, 
           <div className="game-over-brand">MEMORY ARENA<span>SURVIVAL</span></div>
         </motion.header>
         <div className="game-over-results">
-          <motion.div className="game-over-mode" variants={reveal(0.16, -18)}>{hardMode ? 'HARD' : 'NORMAL'}</motion.div>
+          {hardMode && <motion.div className="game-over-mode" variants={reveal(0.16, -18)}>HARD</motion.div>}
           <div className="game-over-title-frame">
             <motion.h2
               ref={titleRef}
@@ -115,8 +120,8 @@ export default function GameOverScreen({ score, highestWave, hardMode, onRetry, 
           />
           <dl id="game-over-stats" className="game-over-stats">
             <motion.div variants={reveal(0.4)}>
-              <dt>FINAL SCORE</dt>
-              <dd>{score.toLocaleString('en-US')}</dd>
+              <dt>TIME SURVIVED</dt>
+              <dd className="game-over-time">{timeSurvived}</dd>
             </motion.div>
             <motion.div variants={reveal(0.47)}>
               <dt>HIGHEST WAVE</dt>
