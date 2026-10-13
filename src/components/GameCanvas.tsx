@@ -13358,31 +13358,6 @@ export default function GameCanvas() {
           glow = `${color}55`;
         }
 
-        if (state.memoryMode && bullet.isPlayer && !bullet.isNeutral) {
-          const length = Math.hypot(bullet.dx, bullet.dy);
-          const dirX = length > 0 ? bullet.dx / length : 1;
-          const dirY = length > 0 ? bullet.dy / length : 0;
-          ctx.save();
-          ctx.lineCap = 'round';
-          ctx.strokeStyle = glow;
-          ctx.lineWidth = bullet.radius * 3.5;
-          ctx.beginPath();
-          ctx.moveTo(bullet.x - dirX * 5, bullet.y - dirY * 5);
-          ctx.lineTo(bullet.x + dirX * 3, bullet.y + dirY * 3);
-          ctx.stroke();
-          ctx.strokeStyle = color;
-          ctx.lineWidth = bullet.radius * 1.4;
-          ctx.stroke();
-          ctx.strokeStyle = MEMORY_ARENA_PALETTE.player.body;
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.moveTo(bullet.x - dirX * 2, bullet.y - dirY * 2);
-          ctx.lineTo(bullet.x + dirX * 2, bullet.y + dirY * 2);
-          ctx.stroke();
-          ctx.restore();
-          continue;
-        }
-
         ctx.fillStyle = glow;
         ctx.beginPath();
         ctx.arc(bullet.x, bullet.y, bullet.radius * 2.5, 0, Math.PI * 2);
