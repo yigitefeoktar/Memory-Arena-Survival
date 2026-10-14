@@ -91,9 +91,6 @@ export default function GameOverScreen({ survivedMs, highestWave, hardMode, onRe
         )}
       </div>
       <div className="game-over-content">
-        <motion.header className="game-over-header" variants={reveal(0.06, -16)}>
-          <div className="game-over-brand">MEMORY ARENA<span>SURVIVAL</span></div>
-        </motion.header>
         <div className="game-over-results">
           {hardMode && <motion.div className="game-over-mode" variants={reveal(0.16, -18)}>HARD</motion.div>}
           <div className="game-over-title-frame">
