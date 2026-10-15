@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { getSoloDifficultySettings } from '../game/memoryArena';
 import './MainMenu.css';
@@ -12,15 +12,25 @@ interface MainMenuProps {
 
 export default function MainMenu({ onStart, onLoad, loadError }: MainMenuProps) {
   const [difficultyOpen, setDifficultyOpen] = useState(false);
+  const [difficultyAbove, setDifficultyAbove] = useState(false);
   const [hardMode, setHardMode] = useState(false);
   const startGroupRef = useRef<HTMLDivElement>(null);
   const difficultyButtonRef = useRef<HTMLButtonElement>(null);
+  const difficultyOptionsRef = useRef<HTMLDivElement>(null);
   const selectedDifficultyRef = useRef<HTMLInputElement>(null);
   const reduceMotion = useReducedMotion();
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!difficultyOpen) return;
-    selectedDifficultyRef.current?.focus();
+    const placeOptions = () => {
+      const anchor = startGroupRef.current?.getBoundingClientRect();
+      const panelHeight = difficultyOptionsRef.current?.offsetHeight ?? 0;
+      if (!anchor) return;
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      setDifficultyAbove(anchor.bottom + panelHeight + 12 > viewportHeight && anchor.top > panelHeight + 12);
+    };
+    placeOptions();
+    selectedDifficultyRef.current?.focus({ preventScroll: true });
     const dismissOutside = (event: PointerEvent) => {
       if (event.target instanceof Node && !startGroupRef.current?.contains(event.target)) {
         setDifficultyOpen(false);
@@ -34,9 +44,13 @@ export default function MainMenu({ onStart, onLoad, loadError }: MainMenuProps) 
     };
     document.addEventListener('pointerdown', dismissOutside);
     document.addEventListener('keydown', dismissOnEscape);
+    window.addEventListener('resize', placeOptions);
+    window.visualViewport?.addEventListener('resize', placeOptions);
     return () => {
       document.removeEventListener('pointerdown', dismissOutside);
       document.removeEventListener('keydown', dismissOnEscape);
+      window.removeEventListener('resize', placeOptions);
+      window.visualViewport?.removeEventListener('resize', placeOptions);
     };
   }, [difficultyOpen, hardMode]);
 
@@ -111,8 +125,9 @@ export default function MainMenu({ onStart, onLoad, loadError }: MainMenuProps) 
               </svg>
             </button>
             <div
+              ref={difficultyOptionsRef}
               id="survival-menu-run-options"
-              className={`survival-menu-run-options${difficultyOpen ? ' is-open' : ''}`}
+              className={`survival-menu-run-options${difficultyOpen ? ' is-open' : ''}${difficultyAbove ? ' is-above' : ''}`}
               role="radiogroup"
               aria-label="Difficulty"
               aria-hidden={!difficultyOpen}

@@ -3053,7 +3053,12 @@ export default function GameCanvas() {
     uiRef.current.status === 'PLAYING' &&
     isRoundOpeningBlocked(roundOpeningRef.current, now, bannerShowingRef.current || openingCueVisibleRef.current);
 
-  const isMobileRef = useRef(typeof window !== 'undefined' && /Mobi|Android|iPhone|iPad|iPod|Windows Phone/i.test(navigator.userAgent));
+  // iPad Safari can identify as a Mac; input capabilities survive that UA change.
+  const isMobileRef = useRef(typeof window !== 'undefined' && (
+    window.matchMedia('(pointer: coarse)').matches ||
+    (navigator.maxTouchPoints > 1 && /Macintosh|MacIntel/i.test(navigator.userAgent + navigator.platform)) ||
+    /Mobi|Android|iPhone|iPad|iPod|Windows Phone/i.test(navigator.userAgent)
+  ));
   const [confirmResign, setConfirmResign] = useState(false);
   const confirmResignRef = useRef(confirmResign);
   confirmResignRef.current = confirmResign;
@@ -14870,7 +14875,7 @@ export default function GameCanvas() {
                               );
                             })}
                           </div>
-                          <span className="text-[9px] font-black tabular-nums">{uiState.chainProgress}<span className="opacity-45">/{MEMORY_ARENA_CONFIG.chain.requiredKills}</span></span>
+                          <span className="hidden min-[380px]:inline text-[9px] font-black tabular-nums">{uiState.chainProgress}<span className="opacity-45">/{MEMORY_ARENA_CONFIG.chain.requiredKills}</span></span>
                         </div>
                       </div>
 
@@ -14986,7 +14991,7 @@ export default function GameCanvas() {
                           setConfirmResign(false);
                         }
                       }}
-                      className="w-[84px] sm:w-[120px] lg:w-[144px] h-[34px] sm:h-[42px] lg:h-[48px] border-2 border-[#FBBF24] hover:bg-[#FBBF24] hover:text-black text-[#FBBF24] font-black tracking-[0.15em] sm:tracking-widest text-[9px] sm:text-xs uppercase transition-all duration-200 shadow-[0_0_8px_rgba(251,191,36,0.2)] hover:shadow-[0_0_15px_rgba(251,191,36,0.6)] active:scale-95 flex items-center justify-center -skew-x-12 focus:outline-none"
+                      className="w-[84px] sm:w-[120px] lg:w-[144px] h-[44px] lg:h-[48px] border-2 border-[#FBBF24] hover:bg-[#FBBF24] hover:text-black text-[#FBBF24] font-black tracking-[0.12em] sm:tracking-widest text-[10px] sm:text-xs uppercase transition-all duration-200 shadow-[0_0_8px_rgba(251,191,36,0.2)] hover:shadow-[0_0_15px_rgba(251,191,36,0.6)] active:scale-95 flex items-center justify-center -skew-x-12 focus:outline-none"
                     >
                       <span className="skew-x-12 whitespace-nowrap">
                         {mpState.roomId ? (mpMenuOpen ? '▶ RESUME' : '|| MENU') : (uiState.status === 'PAUSED' ? '▶ RESUME' : '|| PAUSE')}
@@ -15009,7 +15014,7 @@ export default function GameCanvas() {
                           setConfirmResign(true);
                         }
                       }}
-                      className="w-[84px] sm:w-[120px] lg:w-[144px] h-[34px] sm:h-[42px] lg:h-[48px] border-2 border-[#ff003c] hover:bg-[#ff003c] hover:text-white text-[#ff003c] font-black tracking-[0.15em] sm:tracking-widest text-[9px] sm:text-xs uppercase transition-all duration-200 shadow-[0_0_8px_rgba(255,0,60,0.2)] hover:shadow-[0_0_15px_rgba(255,0,60,0.6)] active:scale-95 flex items-center justify-center -skew-x-12"
+                      className="w-[84px] sm:w-[120px] lg:w-[144px] h-[44px] lg:h-[48px] border-2 border-[#ff003c] hover:bg-[#ff003c] hover:text-white text-[#ff003c] font-black tracking-[0.12em] sm:tracking-widest text-[10px] sm:text-xs uppercase transition-all duration-200 shadow-[0_0_8px_rgba(255,0,60,0.2)] hover:shadow-[0_0_15px_rgba(255,0,60,0.6)] active:scale-95 flex items-center justify-center -skew-x-12"
                     >
                       <span className="skew-x-12 whitespace-nowrap">
                         <span className="inline-block scale-[1.3] -translate-y-[1px] mr-0.5">×</span> QUIT

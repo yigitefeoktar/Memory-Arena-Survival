@@ -104,13 +104,14 @@
   100% { opacity: 0; transform: translate3d(16px, -45px, 0) rotate(80deg); }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 700px), (max-width: 1024px) and (orientation: portrait) {
   .game-over-content { width: 100%; padding-right: max(6vw, env(safe-area-inset-right)); padding-left: max(6vw, env(safe-area-inset-left)); }
+  .game-over-results { max-width: 600px; margin-inline: auto; }
   .game-over-art { object-position: 60% center; }
   .game-over-shade { background: linear-gradient(90deg, #080808d9, #08080895), linear-gradient(0deg, #08080870, transparent); }
   .game-over-mode { padding: 7px 12px; font-size: 12px; }
   .game-over-title-frame { margin-top: 18px; }
-  .game-over-title { font-size: 17.5vw; }
+  .game-over-title { font-size: min(17.5vw, 112px); }
   .game-over-rule, .game-over-stats, .game-over-actions { width: 100%; }
   .game-over-rule { margin-top: 16px; }
   .game-over-stats { margin-top: 24px; gap: 8vw; }
