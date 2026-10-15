@@ -35,13 +35,18 @@
 
 .game-over-content {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   min-height: 100%;
   width: 48%;
-  padding: max(32px, 14vh, env(safe-area-inset-top)) 0 max(28px, 6vh, env(safe-area-inset-bottom)) max(7.2vw, env(safe-area-inset-left));
+  padding-block: max(32px, env(safe-area-inset-top), env(safe-area-inset-bottom));
+  padding-left: max(7.2vw, env(safe-area-inset-left));
 }
-.game-over-results { width: 100%; }
+.game-over-results { width: 100%; flex-shrink: 0; }
 .game-over-mode { display: inline-block; border: 1px solid var(--over-accent); padding: 8px 14px; color: var(--over-accent); background: #080808b3; font: 500 clamp(10px, 1.1vw, 18px) var(--font-mono); letter-spacing: 0.28em; }
 .game-over-title-frame { margin-top: 1.8vh; }
+.game-over-title-frame:first-child { margin-top: 0; }
 .game-over-title {
   width: fit-content;
   max-width: 100%;
@@ -100,7 +105,7 @@
 }
 
 @media (max-width: 700px) {
-  .game-over-content { width: 100%; padding: max(32px, 8vh, env(safe-area-inset-top)) max(6vw, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(6vw, env(safe-area-inset-left)); }
+  .game-over-content { width: 100%; padding-right: max(6vw, env(safe-area-inset-right)); padding-left: max(6vw, env(safe-area-inset-left)); }
   .game-over-art { object-position: 60% center; }
   .game-over-shade { background: linear-gradient(90deg, #080808d9, #08080895), linear-gradient(0deg, #08080870, transparent); }
   .game-over-mode { padding: 7px 12px; font-size: 12px; }
@@ -118,7 +123,7 @@
 }
 
 @media (max-height: 500px) and (orientation: landscape) {
-  .game-over-content { width: 54%; padding-top: max(16px, env(safe-area-inset-top)); padding-bottom: max(16px, env(safe-area-inset-bottom)); padding-left: max(5vw, env(safe-area-inset-left)); padding-right: 0; }
+  .game-over-content { width: 54%; padding-block: max(16px, env(safe-area-inset-top), env(safe-area-inset-bottom)); padding-left: max(5vw, env(safe-area-inset-left)); padding-right: 0; }
   .game-over-mode { padding: 4px 10px; font-size: 9px; }
   .game-over-title-frame { margin-top: 8px; }
   .game-over-title { font-size: min(7.2vw, 15vh); }
