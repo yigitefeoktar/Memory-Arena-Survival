@@ -45,6 +45,7 @@ import {
   getSoloWaveIdentities,
   getSoloWaveRescueSpawns,
   getSoloWaveRoster,
+  isSoloTutorialTarget,
   normalizeSavedSoloEnemySpeed,
   normalizeSavedSoloPlayerBulletVelocity,
   getSoloPlayerBulletTravelSeconds,
@@ -627,16 +628,16 @@ test('old Hard saves validate under their original cap and migrate to the shared
   }
 });
 
-test('opening waves start with 24 enemies across four identities and scale to 48', () => {
-  const opening = getSoloWaveIdentities(1);
+test('wave two starts with 24 enemies across four identities and later waves scale to 48', () => {
+  const opening = getSoloWaveIdentities(2);
   assert.equal(opening.length, 4);
   assert.equal(new Set(opening.map(identity => identity.color)).size, 4);
   assert.equal(new Set(opening.map(identity => identity.shape)).size, 3);
   assert.equal(getSoloWaveIdentities(4).length, 5);
   assert.equal(getSoloWaveIdentities(13).length, 8);
-  assert.equal(getSoloWaveRoster(1).length, 24);
+  assert.equal(getSoloWaveRoster(2).length, 24);
   assert.equal(getSoloWaveRoster(13).length, 48);
-  for (const wave of [1, 3, 4, 10, 100]) {
+  for (const wave of [2, 3, 4, 10, 100]) {
     const identities = getSoloWaveIdentities(wave);
     assert.equal(new Set(identities.map(identity => `${identity.color}:${identity.shape}`)).size, identities.length);
     const initial = getSoloWaveRoster(wave);
@@ -649,6 +650,82 @@ test('opening waves start with 24 enemies across four identities and scale to 48
     assert.deepEqual(getSoloWaveRescueSpawns(waveState, createInitialChainState(), [...initial, ...reinforcements]), []);
     assert.deepEqual(reinforcements, []);
   }
+});
+
+test('wave one teaches shooting with three circles before introducing a second color', () => {
+  const wave = createInitialSoloWaveState();
+  const chain = createInitialChainState();
+  const opening = getSoloWaveRescueSpawns(wave, chain, []);
+  assert.equal(opening.length, 3);
+  assert.ok(opening.every(enemy => enemy.shape === 'circle' && enemy.color === 'red'));
+  assert.deepEqual(opening, getSoloWaveRoster(1));
+  assert.deepEqual(getSoloWaveRescueSpawns(wave, chain, opening), []);
+  const firstKill = registerPlayerEnemyKill(chain, opening[0]).state;
+  const secondColor = getSoloWaveRescueSpawns(wave, firstKill, opening.slice(1));
+  assert.equal(secondColor.length, 3);
+  assert.ok(secondColor.every(enemy => enemy.shape === 'circle' && enemy.color === 'blue'));
+});
+
+test('both tutorial difficulties clear in six matching kills and return to the regular second wave', () => {
+  for (const hard of [false, true]) {
+    let wave = createInitialSoloWaveState();
+    let chain = createInitialChainState();
+    let living = getSoloWaveRescueSpawns(wave, chain, [], hard);
+    for (let kill = 0; kill < 6; kill++) {
+      const color = kill < 3 ? 'red' : 'blue';
+      const index = living.findIndex(enemy => enemy.color === color);
+      assert.ok(index >= 0, 'the next matching target must always be available');
+      const [enemy] = living.splice(index, 1);
+      const transition = registerPlayerEnemyKill(chain, enemy);
+      chain = transition.state;
+      if (transition.result === 'completed') wave = registerSoloWaveStreak(wave, hard);
+      living.push(...getSoloWaveRescueSpawns(wave, chain, living, hard));
+      assert.ok(living.length <= 6);
+    }
+    assert.equal(wave.phase, 'break');
+    assert.equal(wave.completedStreaks, 2);
+    assert.deepEqual(getSoloWaveRescueSpawns(wave, chain, [], hard), []);
+    const nextWave = advanceSoloWaveBreak(wave, MEMORY_ARENA_CONFIG.waves.breakMs, hard);
+    assert.equal(nextWave.number, 2);
+    assert.equal(getSoloWaveRoster(nextWave.number).length, 24);
+    assert.equal(getSoloWaveStreakTarget(nextWave.number, hard), 3);
+  }
+});
+
+test('tutorial switching and save restoration keep matching targets available without growing the roster', () => {
+  const wave = createInitialSoloWaveState();
+  let chain = createInitialChainState();
+  let living = getSoloWaveRoster(1);
+  for (let kill = 0; kill < 40; kill++) {
+    const index = living.findIndex(enemy => enemy.color === (kill % 2 === 0 ? 'red' : 'blue'));
+    assert.ok(index >= 0);
+    const [enemy] = living.splice(index, 1);
+    chain = registerPlayerEnemyKill(chain, enemy).state;
+    chain = JSON.parse(JSON.stringify(chain));
+    living.push(...getSoloWaveRescueSpawns(wave, chain, living));
+    assert.ok(living.length <= 6);
+    assert.equal(living.filter(enemy => enemy.color === chain.target!.color).length, 2);
+    assert.deepEqual(getSoloWaveRescueSpawns(wave, chain, living), []);
+  }
+  const oldTarget = { shape: 'triangle' as const, color: 'yellow' as const };
+  const oldChain = registerPlayerEnemyKill(createInitialChainState(), oldTarget).state;
+  assert.equal(getSoloWaveRescueSpawns(wave, oldChain, []).filter(enemy => enemy.shape === 'triangle' && enemy.color === 'yellow').length, 2);
+});
+
+test('Shoot These tags follow the exact current identity only during the active first wave', () => {
+  const wave = createInitialSoloWaveState();
+  const enemy = { shape: 'circle' as const, factionColor: 'red' as const };
+  const chain = registerPlayerEnemyKill(createInitialChainState(), { shape: 'circle', color: 'red' }).state;
+  assert.equal(isSoloTutorialTarget(wave, createInitialChainState(), enemy), false);
+  assert.equal(isSoloTutorialTarget(wave, chain, enemy), true);
+  assert.equal(isSoloTutorialTarget(wave, chain, { ...enemy, factionColor: 'blue' }), false);
+  assert.equal(isSoloTutorialTarget(wave, chain, { ...enemy, shape: 'square' }), false);
+  assert.equal(isSoloTutorialTarget(wave, chain, { ...enemy, isPlayerAlly: true }), false);
+  assert.equal(isSoloTutorialTarget({ ...wave, number: 2 }, chain, enemy), false);
+  assert.equal(isSoloTutorialTarget({ ...wave, phase: 'break', completedStreaks: 2 }, chain, enemy), false);
+  const retargeted = registerPlayerEnemyKill(chain, { shape: 'circle', color: 'blue' }).state;
+  assert.equal(isSoloTutorialTarget(wave, retargeted, enemy), false);
+  assert.equal(isSoloTutorialTarget(wave, retargeted, { ...enemy, factionColor: 'blue' }), true);
 });
 
 test('older saves slow regular enemy movement once and remove baked wave speed boosts', () => {
@@ -665,8 +742,8 @@ test('older saves slow regular enemy movement once and remove baked wave speed b
 });
 
 test('a partial chain receives a spare target before its last matching enemies are gone', () => {
-  const wave = createInitialSoloWaveState();
-  const roster = getSoloWaveRoster(1);
+  const wave = { ...createInitialSoloWaveState(), number: 2 };
+  const roster = getSoloWaveRoster(2);
   assert.deepEqual(getSoloWaveRescueSpawns(wave, createInitialChainState(), []), roster);
   const chain = registerPlayerEnemyKill(createInitialChainState(), roster[0]).state;
   assert.deepEqual(getSoloWaveRescueSpawns(wave, chain, roster.slice(4)), [roster[0]]);
@@ -675,20 +752,20 @@ test('a partial chain receives a spare target before its last matching enemies a
 });
 
 test('reinforcements arrive while one streak is still possible and stabilize the roster', () => {
-  const wave = { ...createInitialSoloWaveState(), completedStreaks: 1 };
-  const identity = getSoloWaveIdentities(1)[0];
+  const wave = { ...createInitialSoloWaveState(), number: 2, completedStreaks: 2 };
+  const identity = getSoloWaveIdentities(2)[0];
   const living = [identity, identity, identity];
   const reinforcements = getSoloWaveRescueSpawns(wave, createInitialChainState(), living);
   assert.equal(reinforcements.length, 3);
   assert.deepEqual(getSoloWaveRescueSpawns(wave, createInitialChainState(), [...living, ...reinforcements]), []);
 
-  const activeWave = createInitialSoloWaveState();
-  const roster = getSoloWaveRoster(1);
+  const activeWave = { ...createInitialSoloWaveState(), number: 2 };
+  const roster = getSoloWaveRoster(2);
   const stranded = [roster[0], roster[6]];
   const rescue = getSoloWaveRescueSpawns(activeWave, createInitialChainState(), stranded);
-  assert.equal(rescue.length, 9);
+  assert.equal(rescue.length, 12);
   assert.deepEqual(getSoloWaveRescueSpawns(activeWave, createInitialChainState(), [...stranded, ...rescue]), []);
-  assert.deepEqual(getSoloWaveRescueSpawns({ ...activeWave, completedStreaks: 2, phase: 'break' }, createInitialChainState(), []), []);
+  assert.deepEqual(getSoloWaveRescueSpawns({ ...activeWave, completedStreaks: 3, phase: 'break' }, createInitialChainState(), []), []);
 });
 
 test('completing a streak preserves existing player levels and spawners are chain-neutral', () => {

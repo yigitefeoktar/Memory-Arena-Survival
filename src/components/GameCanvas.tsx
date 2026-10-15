@@ -47,6 +47,7 @@ import {
   getSavedSoloWaveStreakCap,
   getRaidFormationOffset,
   getSoloWaveRescueSpawns,
+  isSoloTutorialTarget,
   normalizeSavedSoloEnemySpeed,
   normalizeSavedSoloPlayerBulletVelocity,
   getSoloPlayerBulletTravelSeconds,
@@ -10077,7 +10078,25 @@ export default function GameCanvas() {
             ...(Object.values(state.multiplayerPlayers) as Array<{ x: number; y: number }>).map(player => ({ x: player.x, y: player.y })),
             ...state.enemies.map(enemy => ({ x: enemy.x, y: enemy.y })),
           ];
-          const spawn = (preferNearby ? getSafeSpawnAroundPlayer(activeWalls, state.player, state.camera, avoidPositions) : null)
+          // Keep the small tutorial roster visible and within a short bullet flight.
+          let tutorialSpawn: { x: number; y: number } | null = null;
+          if (state.memoryMode && state.soloWave.number === 1) {
+            for (let attempt = 0; attempt < 80; attempt++) {
+              const angle = Math.random() * Math.PI * 2;
+              const radius = 115 + Math.random() * 35;
+              const x = state.player.x + Math.cos(angle) * radius;
+              const y = state.player.y + Math.sin(angle) * radius;
+              if (Math.abs(x - state.player.x) > state.camera.width / 2 - ENEMY_RADIUS - 12 ||
+                  Math.abs(y - state.player.y) > state.camera.height / 2 - ENEMY_RADIUS - 12) continue;
+              if (isPositionSafe(x, y, activeWalls, ENEMY_RADIUS + 12, avoidPositions, 75) &&
+                  !activeWalls.some(wall => lineIntersectsRect(state.player.x, state.player.y, x, y, wall.x, wall.y, wall.w, wall.h))) {
+                tutorialSpawn = { x, y };
+                break;
+              }
+            }
+          }
+          const spawn = tutorialSpawn
+            ?? (preferNearby ? getSafeSpawnAroundPlayer(activeWalls, state.player, state.camera, avoidPositions) : null)
             ?? getSafeSpawn(activeWalls, ENEMY_RADIUS + 12, avoidPositions, state.memoryMode ? 90 : ENEMY_RADIUS * 2 + 8)
             ?? getSafeSpawn(activeWalls, ENEMY_RADIUS + 2, avoidPositions, 65)
             ?? getSafeSpawn(activeWalls, ENEMY_RADIUS + 2, avoidPositions.slice(0, 1), 180);
@@ -10147,8 +10166,7 @@ export default function GameCanvas() {
         if (STATUS === 'PLAYING') {
           if (state.memoryMode) {
             if (state.soloWave.phase === 'active') {
-              // Spawn the wave's fixed roster at once, then reinforce before too few
-              // matching enemies remain to support the unfinished streaks.
+              // Wave one introduces shooting, then matching; later waves use the full roster.
               const living = state.enemies.filter(enemy => !enemy.isPlayerAlly && enemy.shape && enemy.factionColor)
                 .map(enemy => ({ shape: enemy.shape!, color: enemy.factionColor! }));
               for (const identity of getSoloWaveRescueSpawns(state.soloWave, state.chain, living, state.gameMode === 'hard')) {
@@ -13784,6 +13802,40 @@ export default function GameCanvas() {
 
       ctx.restore(); // Reset transform to draw fixed UI
 
+      if (state.memoryMode && !openingBlocked && STATUS === 'PLAYING') {
+        const placedTags: { x: number; y: number }[] = [];
+        for (const enemy of state.enemies) {
+          if (!isSoloTutorialTarget(state.soloWave, state.chain, enemy)) continue;
+          const screenX = enemy.x - state.camera.x;
+          const screenY = enemy.y - state.camera.y;
+          if (screenX < 0 || screenX > canvas.width || screenY < 0 || screenY > canvas.height) continue;
+          const x = Math.max(47, Math.min(canvas.width - 47, screenX));
+          let y = Math.max(14, screenY - enemy.radius - 29);
+          // Stack nearby labels so each matching target remains readable.
+          while (placedTags.some(tag => Math.abs(tag.x - x) < 94 && Math.abs(tag.y - y) < 25)) y -= 25;
+          y = Math.max(14, y);
+          placedTags.push({ x, y });
+          ctx.save();
+          ctx.strokeStyle = ENEMY_COLOR_HEX[enemy.factionColor!];
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(x, y + 10);
+          ctx.lineTo(screenX, screenY - enemy.radius - 4);
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(6, 8, 14, 0.94)';
+          ctx.beginPath();
+          ctx.roundRect(x - 44, y - 10, 88, 20, 5);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#F4FBFF';
+          ctx.font = '700 11px "JetBrains Mono", monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('Shoot These', x, y);
+          ctx.restore();
+        }
+      }
+
       const drawObjectiveTag = (
         text: string,
         worldTargetX: number | null,
@@ -14860,8 +14912,8 @@ export default function GameCanvas() {
                           boxShadow: '0 0 5px rgba(139, 92, 246, 0.24), 0 0 12px rgba(139, 92, 246, 0.08)',
                         }}
                       >
-                        <div className="flex h-full skew-x-12 items-center gap-1 px-2 sm:gap-2 sm:px-3" aria-label={`Chain progress ${uiState.chainProgress} of ${MEMORY_ARENA_CONFIG.chain.requiredKills}`}>
-                          <span className="hidden text-[9px] font-black tracking-wider sm:inline">CHAIN</span>
+                        <div className="flex h-full skew-x-12 items-center gap-1 px-2 sm:gap-2 sm:px-3" aria-label={`Streak progress ${uiState.chainProgress} of ${MEMORY_ARENA_CONFIG.chain.requiredKills}`}>
+                          <span className="hidden text-[9px] font-black tracking-wider sm:inline">STREAK</span>
                           <div className="grid min-w-0 flex-1 grid-cols-3 gap-1.5">
                             {Array.from({ length: MEMORY_ARENA_CONFIG.chain.requiredKills }, (_, index) => {
                               const isComplete = index < uiState.chainProgress;
@@ -14875,7 +14927,7 @@ export default function GameCanvas() {
                               );
                             })}
                           </div>
-                          <span className="hidden min-[380px]:inline text-[9px] font-black tabular-nums">{uiState.chainProgress}<span className="opacity-45">/{MEMORY_ARENA_CONFIG.chain.requiredKills}</span></span>
+                          <span className="text-[9px] font-black tabular-nums">{uiState.chainProgress}<span className="opacity-45">/{MEMORY_ARENA_CONFIG.chain.requiredKills}</span></span>
                         </div>
                       </div>
 
@@ -14897,6 +14949,23 @@ export default function GameCanvas() {
                         </span>
                       </div>
                     </div>
+                    {soloWaveUi.number === 1 && soloWaveUi.phase === 'active' && (
+                      <div
+                        className="mt-16 w-[min(460px,calc(100vw-1.5rem))] rounded-md border border-white/15 bg-[#06080e]/90 px-3 py-2 text-[11px] leading-relaxed text-white backdrop-blur-sm sm:mt-3 sm:text-xs"
+                        data-testid="wave-one-tutorial"
+                        role="status"
+                      >
+                        <p className="font-bold text-[#67E8F9]">
+                          {uiState.chainProgress === 0 && soloWaveUi.completedStreaks === 0
+                            ? (uiState.deviceType === 'mobile' ? 'Drag the right stick to aim & shoot.' : 'Aim with mouse. Hold left click to shoot.')
+                            : '3 kills in a row, same shape + color = 1 streak.'}
+                        </p>
+                        <p className="mt-0.5 text-white/75">
+                          {soloWaveUi.completedStreaks > 0 ? '1 down! ' : ''}Complete 2 streaks to clear wave 1.
+                          <span className="ml-2 font-bold text-white">{soloWaveUi.completedStreaks}/2</span>
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
 

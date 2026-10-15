@@ -1204,6 +1204,7 @@ export function getSoloWaveStreakTarget(wave: number, hardMode = false): number 
 }
 
 export function getSoloWaveIdentities(wave: number): EnemyIdentity[] {
+  if (wave === 1) return [{ shape: 'circle', color: 'red' }, { shape: 'circle', color: 'blue' }];
   const all = Array.from({ length: ENEMY_FACTIONS.length * ENEMY_SHAPES.length }, (_, index) => {
     const colorIndex = index % ENEMY_FACTIONS.length;
     const shapeCycle = Math.floor(index / ENEMY_FACTIONS.length);
@@ -1222,12 +1223,28 @@ export function getSoloWaveIdentities(wave: number): EnemyIdentity[] {
 }
 
 export function getSoloWaveRoster(wave: number): EnemyIdentity[] {
+  // Three easy-to-recognize targets teach shooting before another color arrives.
+  if (wave === 1) return Array.from({ length: MEMORY_ARENA_CONFIG.chain.requiredKills }, () => ({ shape: 'circle', color: 'red' }));
   return getSoloWaveIdentities(wave).flatMap(identity =>
     Array.from({ length: MEMORY_ARENA_CONFIG.waves.enemiesPerIdentity }, () => identity));
 }
 
 export function getSoloWaveRescueSpawns(wave: SoloWaveState, chain: ChainState, living: readonly EnemyIdentity[], hardMode = false): EnemyIdentity[] {
   if (wave.phase !== 'active') return [];
+  if (wave.number === 1) {
+    const identities = wave.completedStreaks === 0 && !chain.target
+      ? getSoloWaveIdentities(1).slice(0, 1)
+      : getSoloWaveIdentities(1);
+    // Retain a usable target when resuming an older wave-one save of any shape.
+    if (chain.target && !identities.some(identity => identity.shape === chain.target!.shape && identity.color === chain.target!.color)) {
+      identities.push(chain.target);
+    }
+    return identities.flatMap(identity => {
+      const progress = chain.target?.shape === identity.shape && chain.target.color === identity.color ? chain.progress : 0;
+      const count = living.filter(enemy => enemy.shape === identity.shape && enemy.color === identity.color).length;
+      return Array.from({ length: Math.max(0, MEMORY_ARENA_CONFIG.chain.requiredKills - progress - count) }, () => identity);
+    });
+  }
   if (living.length === 0) return getSoloWaveRoster(wave.number);
 
   const identities = getSoloWaveIdentities(wave.number);
@@ -1258,6 +1275,13 @@ export function getSoloWaveRescueSpawns(wave: SoloWaveState, chain: ChainState, 
     nextIdentity = (nextIdentity + 1) % identities.length;
   }
   return planned;
+}
+
+export function isSoloTutorialTarget(wave: SoloWaveState, chain: ChainState, enemy: {
+  shape?: EnemyShape; factionColor?: EnemyFactionColor; isPlayerAlly?: boolean;
+}): boolean {
+  return wave.number === 1 && wave.phase === 'active' && !enemy.isPlayerAlly && chain.progress > 0 &&
+    chain.target !== null && enemy.shape === chain.target.shape && enemy.factionColor === chain.target.color;
 }
 
 export function normalizeSavedSoloEnemySpeed(speed: number, wave: number, version: number): number {
