@@ -1,6 +1,7 @@
 import { Check, Copy, Shuffle } from 'lucide-react';
 import MainMenu from './MainMenu';
 import GameOverScreen from './GameOverScreen';
+import './StreakTutorialTag.css';
 import { preload } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -14972,6 +14973,22 @@ export default function GameCanvas() {
                         </span>
                       </div>
                     </div>
+                    {soloWaveUi.number === 1 && soloWaveUi.phase === 'active' && uiState.status === 'PLAYING' && (
+                      <div
+                        className="streak-tutorial-tag"
+                        data-tutorial-step={soloWaveUi.completedStreaks === 0 ? 'streak' : 'wave'}
+                        role="status"
+                        aria-atomic="true"
+                      >
+                        <div className="streak-tutorial-tag-frame">
+                          <p>
+                            {soloWaveUi.completedStreaks === 0
+                              ? 'Kill 3 of the same shape and color in a row for a streak.'
+                              : 'Complete one more streak to clear wave 1.'}
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
