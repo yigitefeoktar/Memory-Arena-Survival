@@ -14972,23 +14972,6 @@ export default function GameCanvas() {
                         </span>
                       </div>
                     </div>
-                    {soloWaveUi.number === 1 && soloWaveUi.phase === 'active' && (
-                      <div
-                        className="mt-16 w-[min(460px,calc(100vw-1.5rem))] rounded-md border border-white/15 bg-[#06080e]/90 px-3 py-2 text-[11px] leading-relaxed text-white backdrop-blur-sm sm:mt-3 sm:text-xs"
-                        data-testid="wave-one-tutorial"
-                        role="status"
-                      >
-                        <p className="font-bold text-[#67E8F9]">
-                          {uiState.chainProgress === 0 && soloWaveUi.completedStreaks === 0
-                            ? (uiState.deviceType === 'mobile' ? 'Drag the right stick to aim & shoot.' : 'Aim with mouse. Hold left click to shoot.')
-                            : '3 kills in a row, same shape + color = 1 streak.'}
-                        </p>
-                        <p className="mt-0.5 text-white/75">
-                          {soloWaveUi.completedStreaks > 0 ? '1 down! ' : ''}Complete 2 streaks to clear wave 1.
-                          <span className="ml-2 font-bold text-white">{soloWaveUi.completedStreaks}/2</span>
-                        </p>
-                      </div>
-                    )}
                   </div>
                 )}
 
