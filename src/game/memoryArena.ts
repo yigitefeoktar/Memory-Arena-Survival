@@ -1204,7 +1204,11 @@ export function getSoloWaveStreakTarget(wave: number, hardMode = false): number 
 }
 
 export function getSoloWaveIdentities(wave: number): EnemyIdentity[] {
-  if (wave === 1) return [{ shape: 'circle', color: 'red' }, { shape: 'circle', color: 'blue' }];
+  if (wave === 1) return [
+    { shape: 'circle', color: 'red' },
+    { shape: 'circle', color: 'green' },
+    { shape: 'circle', color: 'blue' },
+  ];
   const all = Array.from({ length: ENEMY_FACTIONS.length * ENEMY_SHAPES.length }, (_, index) => {
     const colorIndex = index % ENEMY_FACTIONS.length;
     const shapeCycle = Math.floor(index / ENEMY_FACTIONS.length);
@@ -1223,8 +1227,8 @@ export function getSoloWaveIdentities(wave: number): EnemyIdentity[] {
 }
 
 export function getSoloWaveRoster(wave: number): EnemyIdentity[] {
-  // Three easy-to-recognize targets teach shooting before another color arrives.
-  if (wave === 1) return Array.from({ length: MEMORY_ARENA_CONFIG.chain.requiredKills }, () => ({ shape: 'circle', color: 'red' }));
+  if (wave === 1) return getSoloWaveIdentities(1).flatMap(identity =>
+    Array.from({ length: MEMORY_ARENA_CONFIG.chain.requiredKills }, () => identity));
   return getSoloWaveIdentities(wave).flatMap(identity =>
     Array.from({ length: MEMORY_ARENA_CONFIG.waves.enemiesPerIdentity }, () => identity));
 }
@@ -1232,17 +1236,25 @@ export function getSoloWaveRoster(wave: number): EnemyIdentity[] {
 export function getSoloWaveRescueSpawns(wave: SoloWaveState, chain: ChainState, living: readonly EnemyIdentity[], hardMode = false): EnemyIdentity[] {
   if (wave.phase !== 'active') return [];
   if (wave.number === 1) {
-    const identities = wave.completedStreaks === 0 && !chain.target
-      ? getSoloWaveIdentities(1).slice(0, 1)
-      : getSoloWaveIdentities(1);
-    // Retain a usable target when resuming an older wave-one save of any shape.
-    if (chain.target && !identities.some(identity => identity.shape === chain.target!.shape && identity.color === chain.target!.color)) {
-      identities.push(chain.target);
-    }
+    const identities = getSoloWaveIdentities(1);
+    const required = MEMORY_ARENA_CONFIG.chain.requiredKills;
+    const countOf = (identity: EnemyIdentity) => living.filter(enemy =>
+      enemy.shape === identity.shape && enemy.color === identity.color).length;
+    const target = chain.target;
+    // Fresh runs start with all three choices. A resumed, depleted tutorial must
+    // also offer a completable choice, without adding the active target color.
+    const needsChoice = target
+      ? countOf(target) < required - chain.progress
+      : !identities.some(identity => countOf(identity) >= required);
     return identities.flatMap(identity => {
-      const progress = chain.target?.shape === identity.shape && chain.target.color === identity.color ? chain.progress : 0;
-      const count = living.filter(enemy => enemy.shape === identity.shape && enemy.color === identity.color).length;
-      return Array.from({ length: Math.max(0, MEMORY_ARENA_CONFIG.chain.requiredKills - progress - count) }, () => identity);
+      if (identity.color === target?.color) return [];
+      const count = countOf(identity);
+      const opening = !target && wave.completedStreaks === 0 && chain.completedChains === 0;
+      // A wrong-color kill resets progress to one and leaves a partial group of
+      // the previous color. Restore that group; completed groups stay depleted.
+      const interrupted = target && chain.progress === 1 && count > 0;
+      if (!opening && !needsChoice && !interrupted) return [];
+      return Array.from({ length: Math.max(0, required - count) }, () => identity);
     });
   }
   if (living.length === 0) return getSoloWaveRoster(wave.number);
@@ -1277,11 +1289,23 @@ export function getSoloWaveRescueSpawns(wave: SoloWaveState, chain: ChainState, 
   return planned;
 }
 
-export function isSoloTutorialTarget(wave: SoloWaveState, chain: ChainState, enemy: {
+export function getSoloTutorialTargets<T extends {
   shape?: EnemyShape; factionColor?: EnemyFactionColor; isPlayerAlly?: boolean;
-}): boolean {
-  return wave.number === 1 && wave.phase === 'active' && !enemy.isPlayerAlly && chain.progress > 0 &&
-    chain.target !== null && enemy.shape === chain.target.shape && enemy.factionColor === chain.target.color;
+}>(wave: SoloWaveState, chain: ChainState, enemies: readonly T[]): T[] {
+  if (wave.number !== 1 || wave.phase !== 'active') return [];
+  const hostile = enemies.filter(enemy => !enemy.isPlayerAlly);
+  const needed = MEMORY_ARENA_CONFIG.chain.requiredKills - chain.progress;
+  if (chain.target && chain.progress > 0) {
+    const matching = hostile.filter(enemy =>
+      enemy.shape === chain.target!.shape && enemy.factionColor === chain.target!.color);
+    if (matching.length >= needed) return matching.slice(0, needed);
+  }
+  // One stable choice per available color, including between the two streaks.
+  // Older depleted saves may need to choose a new color before they can finish.
+  return getSoloWaveIdentities(1).flatMap(identity => {
+    const matching = hostile.filter(enemy => enemy.shape === identity.shape && enemy.factionColor === identity.color);
+    return matching.length >= MEMORY_ARENA_CONFIG.chain.requiredKills ? [matching[0]] : [];
+  });
 }
 
 export function normalizeSavedSoloEnemySpeed(speed: number, wave: number, version: number): number {

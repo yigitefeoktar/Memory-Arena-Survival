@@ -48,7 +48,7 @@ import {
   getSavedSoloWaveStreakCap,
   getRaidFormationOffset,
   getSoloWaveRescueSpawns,
-  isSoloTutorialTarget,
+  getSoloTutorialTargets,
   normalizeSavedSoloEnemySpeed,
   normalizeSavedSoloPlayerBulletVelocity,
   getSoloPlayerBulletTravelSeconds,
@@ -10089,7 +10089,7 @@ export default function GameCanvas() {
               const y = state.player.y + Math.sin(angle) * radius;
               if (Math.abs(x - state.player.x) > state.camera.width / 2 - ENEMY_RADIUS - 12 ||
                   Math.abs(y - state.player.y) > state.camera.height / 2 - ENEMY_RADIUS - 12) continue;
-              if (isPositionSafe(x, y, activeWalls, ENEMY_RADIUS + 12, avoidPositions, 75) &&
+              if (isPositionSafe(x, y, activeWalls, ENEMY_RADIUS + 12, avoidPositions, 60) &&
                   !activeWalls.some(wall => lineIntersectsRect(state.player.x, state.player.y, x, y, wall.x, wall.y, wall.w, wall.h))) {
                 tutorialSpawn = { x, y };
                 break;
@@ -10167,7 +10167,7 @@ export default function GameCanvas() {
         if (STATUS === 'PLAYING') {
           if (state.memoryMode) {
             if (state.soloWave.phase === 'active') {
-              // Wave one introduces shooting, then matching; later waves use the full roster.
+              // Tutorial recovery never adds the current target color.
               const living = state.enemies.filter(enemy => !enemy.isPlayerAlly && enemy.shape && enemy.factionColor)
                 .map(enemy => ({ shape: enemy.shape!, color: enemy.factionColor! }));
               for (const identity of getSoloWaveRescueSpawns(state.soloWave, state.chain, living, state.gameMode === 'hard')) {
@@ -13805,8 +13805,7 @@ export default function GameCanvas() {
 
       if (state.memoryMode && !openingBlocked && STATUS === 'PLAYING') {
         const placedTags: { x: number; y: number }[] = [];
-        for (const enemy of state.enemies) {
-          if (!isSoloTutorialTarget(state.soloWave, state.chain, enemy)) continue;
+        for (const enemy of getSoloTutorialTargets<MemoryEnemy>(state.soloWave, state.chain, state.enemies)) {
           const screenX = enemy.x - state.camera.x;
           const screenY = enemy.y - state.camera.y;
           if (screenX < 0 || screenX > canvas.width || screenY < 0 || screenY > canvas.height) continue;

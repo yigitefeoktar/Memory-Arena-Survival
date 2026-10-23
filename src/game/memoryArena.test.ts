@@ -45,7 +45,7 @@ import {
   getSoloWaveIdentities,
   getSoloWaveRescueSpawns,
   getSoloWaveRoster,
-  isSoloTutorialTarget,
+  getSoloTutorialTargets,
   normalizeSavedSoloEnemySpeed,
   normalizeSavedSoloPlayerBulletVelocity,
   getSoloPlayerBulletTravelSeconds,
@@ -652,35 +652,45 @@ test('wave two starts with 24 enemies across four identities and later waves sca
   }
 });
 
-test('wave one teaches shooting with three circles before introducing a second color', () => {
+test('wave one starts with three red, green and blue circles and tags one choice per color', () => {
   const wave = createInitialSoloWaveState();
   const chain = createInitialChainState();
   const opening = getSoloWaveRescueSpawns(wave, chain, []);
-  assert.equal(opening.length, 3);
-  assert.ok(opening.every(enemy => enemy.shape === 'circle' && enemy.color === 'red'));
+  assert.equal(opening.length, 9);
+  for (const color of ['red', 'green', 'blue']) {
+    assert.equal(opening.filter(enemy => enemy.shape === 'circle' && enemy.color === color).length, 3);
+  }
   assert.deepEqual(opening, getSoloWaveRoster(1));
   assert.deepEqual(getSoloWaveRescueSpawns(wave, chain, opening), []);
-  const firstKill = registerPlayerEnemyKill(chain, opening[0]).state;
-  const secondColor = getSoloWaveRescueSpawns(wave, firstKill, opening.slice(1));
-  assert.equal(secondColor.length, 3);
-  assert.ok(secondColor.every(enemy => enemy.shape === 'circle' && enemy.color === 'blue'));
+  const enemies = opening.map((enemy, id) => ({ id, shape: enemy.shape, factionColor: enemy.color }));
+  const targets = getSoloTutorialTargets(wave, chain, enemies);
+  assert.deepEqual(targets.map(enemy => enemy.factionColor), ['red', 'green', 'blue']);
+  assert.deepEqual(getSoloTutorialTargets(wave, chain, enemies), targets, 'choices do not flicker between enemies');
 });
 
-test('both tutorial difficulties clear in six matching kills and return to the regular second wave', () => {
+test('both tutorial difficulties allow every starting color and clear two streaks without reinforcements', () => {
   for (const hard of [false, true]) {
+   for (const first of ['red', 'green', 'blue']) {
+    for (const second of ['red', 'green', 'blue'].filter(color => color !== first)) {
     let wave = createInitialSoloWaveState();
     let chain = createInitialChainState();
     let living = getSoloWaveRescueSpawns(wave, chain, [], hard);
     for (let kill = 0; kill < 6; kill++) {
-      const color = kill < 3 ? 'red' : 'blue';
+      const color = kill < 3 ? first : second;
       const index = living.findIndex(enemy => enemy.color === color);
       assert.ok(index >= 0, 'the next matching target must always be available');
       const [enemy] = living.splice(index, 1);
       const transition = registerPlayerEnemyKill(chain, enemy);
       chain = transition.state;
       if (transition.result === 'completed') wave = registerSoloWaveStreak(wave, hard);
-      living.push(...getSoloWaveRescueSpawns(wave, chain, living, hard));
-      assert.ok(living.length <= 6);
+      assert.deepEqual(getSoloWaveRescueSpawns(wave, chain, living, hard), [], 'correct kills never replenish the roster');
+      const targets = getSoloTutorialTargets(wave, chain, living.map(enemy => ({ shape: enemy.shape, factionColor: enemy.color })));
+      if (chain.target) {
+        assert.equal(targets.length, 3 - chain.progress);
+        assert.ok(targets.every(target => target.factionColor === color));
+      } else if (wave.phase === 'active') {
+        assert.equal(targets.length, 2, 'the second streak offers one enemy of each remaining color');
+      }
     }
     assert.equal(wave.phase, 'break');
     assert.equal(wave.completedStreaks, 2);
@@ -689,43 +699,71 @@ test('both tutorial difficulties clear in six matching kills and return to the r
     assert.equal(nextWave.number, 2);
     assert.equal(getSoloWaveRoster(nextWave.number).length, 24);
     assert.equal(getSoloWaveStreakTarget(nextWave.number, hard), 3);
+    }
+   }
   }
 });
 
-test('tutorial switching and save restoration keep matching targets available without growing the roster', () => {
-  const wave = createInitialSoloWaveState();
-  let chain = createInitialChainState();
-  let living = getSoloWaveRoster(1);
-  for (let kill = 0; kill < 40; kill++) {
-    const index = living.findIndex(enemy => enemy.color === (kill % 2 === 0 ? 'red' : 'blue'));
+test('wrong tutorial kills restore only other colors and stay completable on either streak', () => {
+ for (const completedStreaks of [0, 1]) {
+  const wave = { ...createInitialSoloWaveState(), completedStreaks };
+  let chain = { ...createInitialChainState(), completedChains: completedStreaks };
+  let living = getSoloWaveRoster(1).filter(enemy => completedStreaks === 0 || enemy.color !== 'red');
+  const choices = completedStreaks === 0 ? ['red', 'green', 'blue'] : ['green', 'blue'];
+  for (let kill = 0; kill < 120; kill++) {
+    const index = living.findIndex(enemy => enemy.color === choices[kill % choices.length]);
     assert.ok(index >= 0);
     const [enemy] = living.splice(index, 1);
-    chain = registerPlayerEnemyKill(chain, enemy).state;
+    const transition = registerPlayerEnemyKill(chain, enemy);
+    chain = transition.state;
     chain = JSON.parse(JSON.stringify(chain));
-    living.push(...getSoloWaveRescueSpawns(wave, chain, living));
-    assert.ok(living.length <= 6);
+    const reinforcements = getSoloWaveRescueSpawns(wave, chain, living);
+    assert.ok(reinforcements.every(spawn => spawn.shape === 'circle' && spawn.color !== chain.target!.color));
+    if (transition.result === 'retargeted') assert.ok(reinforcements.length > 0);
+    else assert.deepEqual(reinforcements, []);
+    living.push(...reinforcements);
+    assert.ok(living.length <= 9);
     assert.equal(living.filter(enemy => enemy.color === chain.target!.color).length, 2);
+    const targets = getSoloTutorialTargets(wave, chain, living.map(enemy => ({ shape: enemy.shape, factionColor: enemy.color })));
+    assert.equal(targets.length, 2);
+    assert.ok(targets.every(target => target.factionColor === chain.target!.color));
     assert.deepEqual(getSoloWaveRescueSpawns(wave, chain, living), []);
   }
-  const oldTarget = { shape: 'triangle' as const, color: 'yellow' as const };
-  const oldChain = registerPlayerEnemyKill(createInitialChainState(), oldTarget).state;
-  assert.equal(getSoloWaveRescueSpawns(wave, oldChain, []).filter(enemy => enemy.shape === 'triangle' && enemy.color === 'yellow').length, 2);
+ }
 });
 
-test('Shoot These tags follow the exact current identity only during the active first wave', () => {
+test('depleted older tutorials recover with circle choices without ever adding the current target color', () => {
   const wave = createInitialSoloWaveState();
-  const enemy = { shape: 'circle' as const, factionColor: 'red' as const };
+  const oldTarget = { shape: 'triangle' as const, color: 'yellow' as const };
+  const oldChain = registerPlayerEnemyKill(createInitialChainState(), oldTarget).state;
+  const recovered = getSoloWaveRescueSpawns(wave, oldChain, []);
+  assert.equal(recovered.length, 9);
+  assert.ok(recovered.every(enemy => enemy.shape === 'circle' && enemy.color !== oldTarget.color));
+  assert.equal(getSoloTutorialTargets(wave, oldChain, recovered.map(enemy => ({ shape: enemy.shape, factionColor: enemy.color }))).length, 3);
+  // Missing active targets can also occur when older in-flight shots hit together.
+  for (const color of ['red', 'green', 'blue'] as const) {
+    const chain = registerPlayerEnemyKill(createInitialChainState(), { shape: 'circle', color }).state;
+    const rescue = getSoloWaveRescueSpawns(wave, chain, []);
+    assert.equal(rescue.length, 6);
+    assert.ok(rescue.every(enemy => enemy.shape === 'circle' && enemy.color !== color));
+    assert.equal(getSoloTutorialTargets(wave, chain, rescue.map(enemy => ({ shape: enemy.shape, factionColor: enemy.color }))).length, 2);
+  }
+});
+
+test('tutorial tags follow the chosen identity, exclude allies, and disappear outside wave one', () => {
+  const wave = createInitialSoloWaveState();
+  const enemies = getSoloWaveRoster(1).map((enemy, id) => ({ id, shape: enemy.shape, factionColor: enemy.color }));
   const chain = registerPlayerEnemyKill(createInitialChainState(), { shape: 'circle', color: 'red' }).state;
-  assert.equal(isSoloTutorialTarget(wave, createInitialChainState(), enemy), false);
-  assert.equal(isSoloTutorialTarget(wave, chain, enemy), true);
-  assert.equal(isSoloTutorialTarget(wave, chain, { ...enemy, factionColor: 'blue' }), false);
-  assert.equal(isSoloTutorialTarget(wave, chain, { ...enemy, shape: 'square' }), false);
-  assert.equal(isSoloTutorialTarget(wave, chain, { ...enemy, isPlayerAlly: true }), false);
-  assert.equal(isSoloTutorialTarget({ ...wave, number: 2 }, chain, enemy), false);
-  assert.equal(isSoloTutorialTarget({ ...wave, phase: 'break', completedStreaks: 2 }, chain, enemy), false);
+  const living = enemies.slice(1);
+  assert.deepEqual(getSoloTutorialTargets(wave, chain, living), living.filter(enemy => enemy.factionColor === 'red'));
+  assert.deepEqual(getSoloTutorialTargets(wave, chain, living.map(enemy => ({ ...enemy, isPlayerAlly: true }))), []);
+  assert.deepEqual(getSoloTutorialTargets(wave, chain, living.map(enemy => ({ ...enemy, shape: 'square' as const }))), []);
+  assert.deepEqual(getSoloTutorialTargets({ ...wave, number: 2 }, chain, living), []);
+  assert.deepEqual(getSoloTutorialTargets({ ...wave, phase: 'break', completedStreaks: 2 }, chain, living), []);
   const retargeted = registerPlayerEnemyKill(chain, { shape: 'circle', color: 'blue' }).state;
-  assert.equal(isSoloTutorialTarget(wave, retargeted, enemy), false);
-  assert.equal(isSoloTutorialTarget(wave, retargeted, { ...enemy, factionColor: 'blue' }), true);
+  const selected = getSoloTutorialTargets(wave, retargeted, living.filter(enemy => enemy.id !== 6));
+  assert.equal(selected.length, 2);
+  assert.ok(selected.every(enemy => enemy.factionColor === 'blue'));
 });
 
 test('older saves slow regular enemy movement once and remove baked wave speed boosts', () => {
